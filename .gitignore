@@ -1,0 +1,32 @@
+fieldnote-api/.env*
+fieldnote-frontend/.env.local
+.env
+.venv/
+venv/
+node_modules/
+.pnpm-store/
+.vite/
+**/__pycache__/
+*.pyc
+.DS_Store
+*.zip
+fieldnote-frontend/dist/
+fieldnote-frontend/build/
+*.log
+/tmp/
+output/runs/*/work/
+*.zip
+
+# Local market data, fetched snapshots, queues and generated product views.
+# Fixtures under fixtures/ are the only test data intended for the public repo.
+input/*
+!input/firecrawl_listings/
+!input/firecrawl_listings/.gitkeep
+output/*
+!output/.gitkeep
+data/catalog/*
+!data/catalog/.gitkeep
+fieldnote-api/runs/*
+!fieldnote-api/runs/.gitkeep
+fieldnote-frontend/src/data/generated/*
+!fieldnote-frontend/src/data/generated/.gitkeep

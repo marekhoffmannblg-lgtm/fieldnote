@@ -1,0 +1,10 @@
+[
+  {
+    "source_id": "fixture:product:1",
+    "marketplace": "fixture",
+    "source_type": "manufacturer_product_page",
+    "canonical_url": "https://fixture.local/product/demo",
+    "title": "Demo stroller",
+    "confidence": "high"
+  }
+]

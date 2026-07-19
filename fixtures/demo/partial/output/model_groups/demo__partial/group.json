@@ -1,0 +1,11 @@
+{
+  "group_key": "demo|partial",
+  "brand": "Demo",
+  "model": "PARTIAL",
+  "marketplaces": ["allegro"],
+  "sources_count": 2,
+  "sources": [
+    {"source_id": "demo:2001", "offer_id": "2001", "marketplace": "allegro", "source_url": "https://allegro.pl/oferta/demo-partial-2001", "quality_score": 80},
+    {"source_id": "demo:2002", "offer_id": "2002", "marketplace": "allegro", "source_url": "https://allegro.pl/oferta/demo-partial-2002", "quality_score": 60}
+  ]
+}

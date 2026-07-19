@@ -1,0 +1,3 @@
+[client]
+# Hides Streamlit's developer toolbar and Deploy affordance without touching navigation controls.
+toolbarMode = "minimal"

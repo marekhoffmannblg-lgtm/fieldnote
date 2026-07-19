@@ -1,0 +1,60 @@
+{
+  "run_id": "20260713T184329.720-18b86d4f",
+  "started_at": "2026-07-13T18:43:29.720Z",
+  "finished_at": "2026-07-13T18:43:29.720Z",
+  "duration_seconds": 0.0,
+  "marketplace": "allegro",
+  "brand": "Demo",
+  "model": "Sprint",
+  "group_key": "demo|sprint",
+  "mode": "apply",
+  "pipeline_status": "failed",
+  "stages": [
+    {
+      "number": 1,
+      "name": "targeted search",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:29.720Z",
+      "finished_at": "2026-07-13T18:43:29.720Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: failed"
+    },
+    {
+      "number": 2,
+      "name": "merge",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:29.720Z",
+      "finished_at": "2026-07-13T18:43:29.720Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: failed"
+    },
+    {
+      "number": 3,
+      "name": "fetch offer pages",
+      "status": "failed",
+      "started_at": "2026-07-13T18:43:29.720Z",
+      "finished_at": "2026-07-13T18:43:29.720Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: failed"
+    }
+  ],
+  "cards_found": 0,
+  "unique_offer_ids": 0,
+  "accepted_model_offers": 0,
+  "new_offers": 1,
+  "offers_requested": 1,
+  "offers_fetched": 0,
+  "offers_failed": 1,
+  "offers_skipped": 0,
+  "offers_in_run": 1,
+  "offers_cleaned": 0,
+  "registry_records_updated": 0,
+  "groups_updated": 0,
+  "sources_total": 0,
+  "coverage_before": 0.0,
+  "coverage_after": 0.0,
+  "coverage_change": 0.0,
+  "targeted_search_recommended": false,
+  "error_stage": "fetch offer pages",
+  "error_message": "Fixture symuluje błąd pobrania Firecrawl."
+}

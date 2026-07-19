@@ -1,0 +1,11 @@
+{
+  "group_key": "demo|sprint",
+  "brand": "Demo",
+  "model": "SPRINT",
+  "marketplaces": ["allegro"],
+  "sources_count": 2,
+  "sources": [
+    {"source_id": "demo:1001", "offer_id": "1001", "marketplace": "allegro", "source_url": "https://allegro.pl/oferta/demo-sprint-1001", "quality_score": 90},
+    {"source_id": "demo:1002", "offer_id": "1002", "marketplace": "allegro", "source_url": "https://allegro.pl/oferta/demo-sprint-1002", "quality_score": 88}
+  ]
+}

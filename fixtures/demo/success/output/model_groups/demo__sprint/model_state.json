@@ -1,0 +1,8 @@
+{
+  "group_key": "demo|sprint",
+  "fields": {
+    "Marka": {"value": "Demo", "status": "confirmed", "confidence": "high", "locked": true, "evidence": [{"source_id": "demo:1001", "source_url": "https://allegro.pl/oferta/demo-sprint-1001", "evidence": "Marka: Demo"}]},
+    "Model": {"value": "SPRINT", "status": "confirmed", "confidence": "high", "locked": true, "evidence": [{"source_id": "demo:1001", "source_url": "https://allegro.pl/oferta/demo-sprint-1001", "evidence": "Model: SPRINT"}]},
+    "Waga": {"value": "7 kg", "status": "confirmed", "confidence": "high", "locked": true, "evidence": [{"source_id": "demo:1002", "source_url": "https://allegro.pl/oferta/demo-sprint-1002", "evidence": "Waga produktu: 7 kg"}]}
+  }
+}

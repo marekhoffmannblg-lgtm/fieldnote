@@ -1,0 +1,42 @@
+{
+  "run_id": "20260713T184350.591-40d3f860",
+  "started_at": "2026-07-13T18:43:50.591Z",
+  "finished_at": "2026-07-13T18:43:50.591Z",
+  "duration_seconds": 0.0,
+  "marketplace": "allegro",
+  "brand": "Demo",
+  "model": "Sprint",
+  "group_key": "demo|sprint",
+  "mode": "preview",
+  "pipeline_status": "preview",
+  "stages": [
+    {
+      "number": 1,
+      "name": "targeted search",
+      "status": "skipped",
+      "started_at": "2026-07-13T18:43:50.591Z",
+      "finished_at": "2026-07-13T18:43:50.591Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: no matching offers"
+    }
+  ],
+  "cards_found": 0,
+  "unique_offer_ids": 0,
+  "accepted_model_offers": 0,
+  "new_offers": 0,
+  "offers_requested": 0,
+  "offers_fetched": 0,
+  "offers_failed": 0,
+  "offers_skipped": 0,
+  "offers_in_run": 0,
+  "offers_cleaned": 0,
+  "registry_records_updated": 0,
+  "groups_updated": 0,
+  "sources_total": 0,
+  "coverage_before": 0.0,
+  "coverage_after": 0.0,
+  "coverage_change": 0.0,
+  "targeted_search_recommended": false,
+  "error_stage": "",
+  "error_message": ""
+}

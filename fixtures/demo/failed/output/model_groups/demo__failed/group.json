@@ -1,0 +1,8 @@
+{
+  "group_key": "demo|failed",
+  "brand": "Demo",
+  "model": "FAILED",
+  "marketplaces": ["allegro"],
+  "sources_count": 1,
+  "sources": [{"source_id": "demo:3001", "offer_id": "3001", "marketplace": "allegro", "source_url": "https://allegro.pl/oferta/demo-failed-3001", "quality_score": 40}]
+}

@@ -1,0 +1,1 @@
+"""Public API model namespace."""

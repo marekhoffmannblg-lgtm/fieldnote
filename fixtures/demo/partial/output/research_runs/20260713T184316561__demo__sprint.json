@@ -1,0 +1,114 @@
+{
+  "run_id": "20260713T184316.561-9196424a",
+  "started_at": "2026-07-13T18:43:16.561Z",
+  "finished_at": "2026-07-13T18:43:16.562Z",
+  "duration_seconds": 0.0,
+  "marketplace": "allegro",
+  "brand": "Demo",
+  "model": "Sprint",
+  "group_key": "demo|sprint",
+  "mode": "apply",
+  "pipeline_status": "partial",
+  "stages": [
+    {
+      "number": 1,
+      "name": "targeted search",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    },
+    {
+      "number": 2,
+      "name": "merge",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    },
+    {
+      "number": 3,
+      "name": "fetch offer pages",
+      "status": "partial",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    },
+    {
+      "number": 4,
+      "name": "technical cleaner",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    },
+    {
+      "number": 5,
+      "name": "source registry",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    },
+    {
+      "number": 6,
+      "name": "model groups",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    },
+    {
+      "number": 7,
+      "name": "model facts cascade",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: skipped; no AI"
+    },
+    {
+      "number": 8,
+      "name": "model benchmark",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    },
+    {
+      "number": 9,
+      "name": "coverage report",
+      "status": "success",
+      "started_at": "2026-07-13T18:43:16.562Z",
+      "finished_at": "2026-07-13T18:43:16.562Z",
+      "duration_seconds": 0.0,
+      "summary": "fixture: partial"
+    }
+  ],
+  "cards_found": 0,
+  "unique_offer_ids": 0,
+  "accepted_model_offers": 0,
+  "new_offers": 2,
+  "offers_requested": 2,
+  "offers_fetched": 1,
+  "offers_failed": 1,
+  "offers_skipped": 0,
+  "offers_in_run": 2,
+  "offers_cleaned": 1,
+  "registry_records_updated": 1,
+  "groups_updated": 1,
+  "sources_total": 2,
+  "coverage_before": 0.0,
+  "coverage_after": 50.0,
+  "coverage_change": 50.0,
+  "targeted_search_recommended": true,
+  "error_stage": "",
+  "error_message": ""
+}
