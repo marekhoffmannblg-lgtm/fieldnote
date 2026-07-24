@@ -7,6 +7,10 @@ import { isRunFailure, isRunPartial, isRunSuccess, shouldAutoReloadAfterRun } fr
 import { groupsForCategory, isValidCategorySelection, type CategoryOption } from "./categorySelection";
 import { canSelectPreviewOffer } from "./offerSelection";
 import { canCompareSelection, toggleComparisonSelection } from "./comparisonSelection";
+import { useAuth } from "../auth/AuthProvider";
+import { AuthLoadingScreen, ChangeInitialPasswordScreen, LoginScreen } from "../auth/AuthScreens";
+import { authConfigurationError } from "../auth/supabase";
+import { canAccessAdminUsers } from "../auth/guards";
 import {
   Package,
   Search,
@@ -631,10 +635,12 @@ function Sidebar({
   current,
   onNav,
   collapsed,
+  canManageUsers,
 }: {
   current: Page;
   onNav: (p: Page) => void;
   collapsed: boolean;
+  canManageUsers: boolean;
 }) {
   const active = (id: Page) =>
     current === id
@@ -656,7 +662,7 @@ function Sidebar({
 
       {/* Nav */}
       <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5">
-        {NAV_ITEMS.map((item) => (
+        {(canManageUsers ? [...NAV_ITEMS, { id: "users" as Page, label: "Użytkownicy", icon: <Package size={15} /> }] : NAV_ITEMS).map((item) => (
           <button
             key={item.id}
             onClick={() => onNav(item.id)}
@@ -2393,8 +2399,45 @@ function PagePomoc() {
   );
 }
 
+interface ManagedUser {
+  id: string;
+  email?: string;
+  role: "viewer" | "analyst" | "admin";
+  must_change_password: boolean;
+  created_at?: string;
+}
+
+function PageUsers() {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [role, setRole] = useState<ManagedUser["role"]>("viewer");
+  const [creating, setCreating] = useState(false);
+  const load = async () => {
+    setLoading(true); setError("");
+    try {
+      const response = await apiRequest<{ items: ManagedUser[] }>("/admin/users");
+      setUsers(Array.isArray(response.items) ? response.items : []);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Nie udało się pobrać użytkowników."); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void load(); }, []);
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault(); setCreating(true); setError("");
+    try {
+      await apiRequest("/admin/users", { method: "POST", body: JSON.stringify({ email, role, temporary_password: temporaryPassword }) });
+      setEmail(""); setTemporaryPassword(""); setRole("viewer"); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Nie udało się utworzyć użytkownika."); }
+    finally { setCreating(false); }
+  };
+  return <div className="h-full overflow-auto bg-background"><header className="border-b border-border bg-card px-6 py-4"><h1 className="text-base font-semibold text-foreground">Użytkownicy</h1><p className="mt-0.5 text-xs text-muted-foreground">Konta tworzy administrator; nowe konta muszą zmienić hasło przy pierwszym logowaniu.</p></header><main className="mx-auto max-w-4xl space-y-6 px-6 py-6"><section className="rounded-lg border border-border bg-card p-4"><h2 className="text-sm font-semibold text-foreground">Dodaj użytkownika</h2><form className="mt-4 flex flex-wrap items-end gap-3" onSubmit={(event) => void create(event)}><label className="min-w-56 flex-1 text-xs font-medium text-foreground">E-mail<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 block w-full rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30" /></label><label className="min-w-56 flex-1 text-xs font-medium text-foreground">Hasło tymczasowe<input required minLength={12} autoComplete="new-password" type="password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} className="mt-1 block w-full rounded border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30" /></label><label className="text-xs font-medium text-foreground">Rola<select value={role} onChange={(event) => setRole(event.target.value as ManagedUser["role"])} className="mt-1 block rounded border border-border bg-background px-3 py-2 text-sm"><option value="viewer">Viewer — odczyt</option><option value="analyst">Analyst — edycja danych</option><option value="admin">Admin — zarządzanie</option></select></label><button disabled={creating} className="rounded bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60">{creating ? "Tworzenie…" : "Utwórz konto"}</button></form></section>{error && <p role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}<section className="overflow-hidden rounded-lg border border-border bg-card"><div className="border-b border-border px-4 py-3"><h2 className="text-sm font-semibold text-foreground">Konta</h2></div>{loading ? <p className="p-4 text-sm text-muted-foreground">Wczytywanie użytkowników…</p> : users.length === 0 ? <p className="p-4 text-sm text-muted-foreground">Brak utworzonych kont.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="px-4 py-2 font-medium">E-mail / identyfikator</th><th className="px-4 py-2 font-medium">Rola</th><th className="px-4 py-2 font-medium">Status</th></tr></thead><tbody>{users.map((user) => <tr key={user.id} className="border-t border-border"><td className="px-4 py-3 text-foreground">{user.email || user.id}</td><td className="px-4 py-3 capitalize text-muted-foreground">{user.role}</td><td className="px-4 py-3 text-muted-foreground">{user.must_change_password ? "Wymaga zmiany hasła" : "Aktywne"}</td></tr>)}</tbody></table></div>}</section></main></div>;
+}
+
 // ─── Root App ─────────────────────────────────────────────────────────────────
-export default function App() {
+function FieldnoteApp() {
+  const { identity, email, signOut } = useAuth();
   const [page, setPage] = useState<Page>("benchmarki");
   const [products, setProducts] = useState<Product[]>(FALLBACK_PRODUCTS);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
@@ -2508,6 +2551,7 @@ export default function App() {
           current={navigationPage}
           onNav={(p) => { nav(p); if (isNarrow) setSidebarOpen(false); }}
           collapsed={false}
+          canManageUsers={canAccessAdminUsers(identity)}
         />
       </div>
 
@@ -2533,10 +2577,11 @@ export default function App() {
                page === "produkt-szczegoly" ? `${isLioneloProduct(selectedProduct || { brand: "" }) ? "Benchmarki" : "Produkty konkurencji"} / ${selectedProduct?.name || ""}` :
                page === "produkt-zrodla" ? `Źródła / ${selectedProduct?.name || ""} / Aukcje i źródła` :
                page === "research" ? "Research" :
+               page === "users" ? "Użytkownicy" :
                page === "uruchomienia" ? "Uruchomienia" : "Pomoc"}
             </span>
           </div>
-          <div className="ml-auto text-[11px] text-muted-foreground hidden sm:block">Dane lokalne</div>
+          <div className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground"><span className="hidden sm:block">{email || "Zalogowano"}</span><button onClick={() => void signOut()} className="underline hover:text-foreground">Wyloguj</button></div>
         </div>
 
         {/* Page content */}
@@ -2558,10 +2603,20 @@ export default function App() {
           {page === "produkt-zrodla" && <PageProduktZrodla productId={selectedProductId} onBack={() => openDetail(selectedProductId)} />}
           {page === "research" && <PageResearch key={researchSession} previousProductSlug={previousResearchProductSlug} />}
           {page === "uruchomienia" && <PageUruchomienia />}
+          {page === "users" && canAccessAdminUsers(identity) && <PageUsers />}
           {page === "pomoc" && <PagePomoc />}
         </div>
       </div>
     </div>
     </CatalogContext.Provider>
   );
+}
+
+export default function App() {
+  const { screen } = useAuth();
+  if (screen === "loading") return <AuthLoadingScreen />;
+  if (screen === "configuration-error") return <AuthLoadingScreen error={authConfigurationError} />;
+  if (screen === "login") return <LoginScreen />;
+  if (screen === "change-password") return <ChangeInitialPasswordScreen />;
+  return <FieldnoteApp />;
 }

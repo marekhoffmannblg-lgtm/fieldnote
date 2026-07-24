@@ -102,13 +102,15 @@
 - Runtime Supabase działa; Unit 2 ma PASS i brak otwartych P1/P2.
 - Istniejące lokalne dane, outputy i środowiska nie mogą trafić do repo.
 - Live provider calls i koszty są poza automatyczną weryfikacją.
+- Unit 4: rozpoznano istniejące API/UI i kontrakty RLS. `npm install` nie działał (`Cannot read properties of null (reading 'matches')`), ale zależność została następnie poprawnie dodana przez `pnpm add @supabase/supabase-js` (v2.110.8). Implementacja auth API/UI i testów pozostaje do wykonania w tym samym Unicie; nie wprowadzono obejścia sesji.
+- Unit 4: dodano introspekcję Bearer przez Supabase Auth, profile role/must-change, admin users, frontendowy provider/guard i ekrany auth/users. Focused backend 25 PASS, frontend 11 PASS/typecheck/build PASS, pełny `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS. Unit 5 nie został rozpoczęty.
 
 ## Przekazanie
 
 - **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
-- **Bieżący unit:** Unit 3 — Repozytoria Supabase i selektywna migracja.
-- **Status:** completed — Unit 3 ma review PASS i brak otwartych P1/P2. Unit 4 nie został rozpoczęty.
-- **Pliki w toku:** `fieldnote-api/repositories/`, repozytoria usług katalogu/źródeł/runów, skrypty selektywnej migracji/audytu oraz testy Unit 3.
-- **Ostatnie testy:** focused Unit 3/API 31 PASS; `py_compile` migratora/audytu PASS; pełny offline gate PASS; `git diff --check` PASS.
-- **Bloker:** brak dla Unit 3; nie rozpoczynać Unit 4 w ramach tego review.
-- **Następny krok:** `$dev-docs-execute docs/active/fieldnote-stroller-mvp 4` — wyłącznie po osobnej decyzji użytkownika.
+- **Bieżący unit:** Unit 4 — Logowanie, role i administracja kontami.
+- **Status:** partial — oficjalny klient Supabase jest zainstalowany, ale implementacja auth API/UI i testów Unit 4 nie została jeszcze rozpoczęta. Nie rozpoczęto Unit 5.
+- **Pliki w toku:** planowane `fieldnote-api/auth/`, `fieldnote-api/routers/auth.py`, `fieldnote-api/routers/admin_users.py`, `fieldnote-api/services/user_service.py` oraz frontendowe `src/auth/` i ekrany auth/admin.
+- **Ostatnie testy:** brak nowych testów Unit 4; poprzednia pełna offline bramka Unit 3 pozostaje PASS.
+- **Bloker:** brak zewnętrznego blokera; zachować `@supabase/supabase-js` w niezacommitowanym stanie do implementacji Unit 4.
+- **Następny krok:** `$dev-docs-execute docs/active/fieldnote-stroller-mvp 4` — implementacja auth API/UI oraz testów, bez Unit 5.

@@ -1,4 +1,4 @@
-export type FieldnotePage = "benchmarki" | "produkty-konkurencji" | "zrodla" | "produkty" | "produkt-szczegoly" | "produkt-zrodla" | "research" | "uruchomienia" | "pomoc";
+export type FieldnotePage = "benchmarki" | "produkty-konkurencji" | "zrodla" | "produkty" | "produkt-szczegoly" | "produkt-zrodla" | "research" | "uruchomienia" | "pomoc" | "users";
 
 export function routeForPage(page: FieldnotePage): string {
   return {
@@ -9,6 +9,7 @@ export function routeForPage(page: FieldnotePage): string {
     research: "/research",
     uruchomienia: "/runs",
     pomoc: "/help",
+    users: "/users",
   }[page] || "/products";
 }
 
@@ -25,6 +26,7 @@ export function parseFieldnoteRoute(pathname: string, knownProductSlugs: Set<str
   if (pathname === "/market-products") return { page: "produkty-konkurencji" };
   if (pathname === "/sources") return { page: "zrodla" };
   if (pathname === "/runs") return { page: "uruchomienia" };
+  if (pathname === "/users") return { page: "users" };
   if (pathname === "/help") return { page: "pomoc" };
   return { page: "benchmarki" };
 }

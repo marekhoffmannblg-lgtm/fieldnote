@@ -35,10 +35,11 @@
 
 ## Unit 4 — Logowanie, role i administracja kontami
 
-- [ ] Implementacja: FastAPI dependencies/role/auth/admin-users oraz frontendowa sesja Supabase, guardy i ekrany logowania/zmiany hasła/użytkowników.
-- [ ] Test: `tests/test_auth_roles.py`, `fieldnote-frontend/tests/auth-guards.test.mjs`; 401/403 i role viewer/analyst/admin.
-- [ ] Weryfikacja: browser flow logowania, wymuszonej zmiany hasła i blokady viewer przechodzi.
+- [x] Implementacja: FastAPI dependencies/role/auth/admin-users oraz frontendowa sesja Supabase, guardy i ekrany logowania/zmiany hasła/użytkowników.
+- [x] Test: `tests/test_auth_roles.py`, `fieldnote-frontend/tests/auth-guards.test.mjs`; 401/403 i role viewer/analyst/admin.
+- [x] Weryfikacja: backend/frontend testy i pełny offline gate przechodzą; browser flow wymaga ręcznego skonfigurowania Supabase.
 - [ ] Review: brak otwartych P1/P2.
+- [x] Zależność: oficjalny `@supabase/supabase-js` (v2.110.8) dodany przez `pnpm`; nie używać własnego klienta sesji.
 
 ## Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami
 

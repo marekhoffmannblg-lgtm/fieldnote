@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
@@ -107,6 +107,10 @@ from repositories.snapshot_repository import SnapshotRepository  # noqa: E402
 from repositories.catalog_repository import CatalogRepository  # noqa: E402
 from repositories.supabase_client import SupabaseClient  # noqa: E402
 from routers.health import health_payload  # noqa: E402
+from routers.auth import router as auth_router  # noqa: E402
+from routers.admin_users import router as admin_users_router  # noqa: E402
+from auth.dependencies import require_data_write  # noqa: E402
+from auth.roles import Principal  # noqa: E402
 from services.product_service import ProductService  # noqa: E402
 from services.run_service import index_runs  # noqa: E402
 from services.source_service import paginate  # noqa: E402
@@ -150,8 +154,10 @@ app.add_middleware(
     allow_origins=list(LOCAL_ORIGINS),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+app.include_router(auth_router)
+app.include_router(admin_users_router)
 
 
 @app.get("/api/categories")
@@ -2916,11 +2922,8 @@ def list_products(limit: int = 100, offset: int = 0) -> dict[str, Any]:
 
 
 @app.post("/api/products")
-def create_product(request: ProductCreateRequest) -> dict[str, Any]:
+def create_product(request: ProductCreateRequest, principal: Principal = Depends(require_data_write)) -> dict[str, Any]:
     """Idempotently register a product before any source preview starts."""
-    if DATA_MODE == "supabase":
-        # Unit 4 owns authenticated mutations. Unit 3 is read-only by design.
-        raise HTTPException(status_code=503, detail="Zapisy Supabase będą dostępne po wdrożeniu autoryzacji.")
     try:
         assignment = validate_category_assignment(request.category_key, request.benchmark_group)
     except CategoryValidationError as exc:

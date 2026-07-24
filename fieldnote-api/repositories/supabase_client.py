@@ -42,3 +42,11 @@ class SupabaseClient:
 
     def upsert(self, table: str, payload: dict[str, Any], conflict: str) -> list[dict[str, Any]]:
         return self.request("POST", table, query={"on_conflict": conflict}, payload=payload)
+
+    def auth_admin(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = json.dumps(payload).encode() if payload is not None else None
+        request = Request(f"{self.url}/auth/v1/admin/{path.lstrip('/')}", data=body, method=method, headers={"apikey": self.service_key, "Authorization": f"Bearer {self.service_key}", "Content-Type": "application/json"})
+        try:
+            with urlopen(request, timeout=10) as response: value = json.loads(response.read().decode() or "{}")
+        except HTTPError as error: raise RuntimeError(f"Supabase Auth admin request failed: {error.code}") from error
+        return value if isinstance(value, dict) else {}

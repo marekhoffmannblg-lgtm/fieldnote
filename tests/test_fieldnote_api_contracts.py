@@ -52,12 +52,8 @@ class ApiContractTests(unittest.TestCase):
             with self.assertRaises(SupabaseConfigurationError):
                 SupabaseClient.from_env()
 
-    def test_supabase_product_write_is_disabled_before_auth(self):
-        request = api.ProductCreateRequest(brand="Lionelo", model="Agia", category_key="strollers", benchmark_group="strollers")
-        with patch.object(api, "DATA_MODE", "supabase"), patch.object(api, "load_products", side_effect=AssertionError("legacy read")):
-            with self.assertRaises(api.HTTPException) as raised:
-                api.create_product(request)
-        self.assertEqual(raised.exception.status_code, 503)
+    def test_supabase_product_write_declares_auth_guard(self):
+        self.assertIn("principal", inspect.signature(api.create_product).parameters)
 
     def preview_request(self, mode: str = "live") -> api.PreviewRequest:
         return api.PreviewRequest(brand="Fixture", model="Light", category_key="stroller", benchmark_group="light_stroller", search_mode=mode)
