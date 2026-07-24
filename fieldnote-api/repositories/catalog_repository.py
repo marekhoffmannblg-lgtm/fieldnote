@@ -3,6 +3,10 @@ from typing import Any
 from repositories.supabase_client import SupabaseClient
 
 
+def brand_key(value: str) -> str:
+    return "-".join(str(value).strip().casefold().split())
+
+
 class CatalogRepository:
     def __init__(self, client: SupabaseClient) -> None: self.client = client
     def list_products(self) -> list[dict[str, Any]]:
@@ -17,8 +21,8 @@ class CatalogRepository:
         return str(rows[0].get("id", "")) if rows else ""
     def upsert_product(self, product: dict[str, Any]) -> None:
         value = dict(product)
-        brand_key = str(value.pop("brand_key", "") or value.get("brand", "")).lower()
-        brands = self.client.select("brands", select="id", brand_key=f"eq.{brand_key}")
+        key = brand_key(str(value.pop("brand_key", "") or value.get("brand", "")))
+        brands = self.client.select("brands", select="id", brand_key=f"eq.{key}")
         if not brands or not brands[0].get("id"):
             raise ValueError("Product brand must exist before product upsert.")
         value["brand_id"] = brands[0]["id"]

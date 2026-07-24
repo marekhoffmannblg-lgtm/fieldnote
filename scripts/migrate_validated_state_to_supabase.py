@@ -61,7 +61,8 @@ def load_fixture(path: Path) -> dict[str, Any]:
 def run_migration(payload: dict[str, Any], catalog: Any, sources: Any) -> dict[str, Any]:
     from audit_supabase_migration import audit
     report = migrate(payload, catalog, sources)
-    return {**audit(report), "products": report.products, "sources": report.sources, "links": report.links, "evidence": report.evidence}
+    expected = {str(value) for value in payload.get("expected_lionelo_product_ids", [])}
+    return {**audit(report, expected or None), "products": report.products, "sources": report.sources, "links": report.links, "evidence": report.evidence}
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()

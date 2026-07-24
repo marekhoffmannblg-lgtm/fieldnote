@@ -33,21 +33,22 @@ class SelectiveMigrationTests(unittest.TestCase):
         first = migrate(fixture, catalog, sources)
         second = migrate(fixture, catalog, sources)
         self.assertEqual(len(first.lionelo_ids), 34)
-        self.assertEqual(audit(first)["status"], "pass")
+        self.assertEqual(audit(first, set(fixture["expected_lionelo_product_ids"]))["status"], "pass")
         self.assertEqual(len(catalog.products), 35)
         self.assertEqual(len(sources.links), 1)
         self.assertEqual(len(sources.evidence), 1)
         self.assertEqual(first.lionelo_ids, second.lionelo_ids)
-        first_product = catalog.products["product:lionelo:00:"]
+        first_product = catalog.products[fixture["expected_lionelo_product_ids"][0]]
         self.assertEqual(first_product["status"], "active")
         self.assertIs(first_product["is_lionelo"], True)
 
     def test_audit_rejects_missing_or_extra_lionelo_even_with_competitors(self):
-        catalog, sources = FakeCatalog(), FakeSources()
-        missing = payload(); missing["products"] = missing["products"][1:]
-        self.assertEqual(audit(migrate(missing, catalog, sources))["status"], "review")
-        extra = payload(); extra["products"].append({"product_id":"product:lionelo:extra:", "brand":"Lionelo", "model":"Extra", "product_slug":"lionelo__extra", "group_key":"lionelo|extra", "category_classification_status":"classified"})
-        self.assertEqual(audit(migrate(extra, FakeCatalog(), FakeSources()))["status"], "review")
+        fixture = load_fixture(ROOT / "fixtures" / "unit3" / "validated_state_v1.json")
+        expected = set(fixture["expected_lionelo_product_ids"])
+        synthetic = payload()
+        self.assertEqual(audit(migrate(synthetic, FakeCatalog(), FakeSources()), expected)["status"], "review")
+        missing = dict(fixture); missing["products"] = [item for item in fixture["products"] if item.get("product_id") != fixture["expected_lionelo_product_ids"][0]]
+        self.assertEqual(audit(migrate(missing, FakeCatalog(), FakeSources()), expected)["status"], "review")
 
     def test_run_migration_reports_counts_without_network(self):
         result = run_migration(load_fixture(ROOT / "fixtures" / "unit3" / "validated_state_v1.json"), FakeCatalog(), FakeSources())

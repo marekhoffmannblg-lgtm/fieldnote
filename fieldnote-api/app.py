@@ -2918,6 +2918,9 @@ def list_products(limit: int = 100, offset: int = 0) -> dict[str, Any]:
 @app.post("/api/products")
 def create_product(request: ProductCreateRequest) -> dict[str, Any]:
     """Idempotently register a product before any source preview starts."""
+    if DATA_MODE == "supabase":
+        # Unit 4 owns authenticated mutations. Unit 3 is read-only by design.
+        raise HTTPException(status_code=503, detail="Zapisy Supabase będą dostępne po wdrożeniu autoryzacji.")
     try:
         assignment = validate_category_assignment(request.category_key, request.benchmark_group)
     except CategoryValidationError as exc:

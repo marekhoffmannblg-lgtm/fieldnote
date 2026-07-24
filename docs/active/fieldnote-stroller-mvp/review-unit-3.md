@@ -111,3 +111,50 @@ Poprawki P1/P2 są zapisane do ograniczonego re-review: kanoniczne rekordy Lione
 ## Rekomendowany następny krok
 
 `$dev-docs-execute docs/active/fieldnote-stroller-mvp 3` — napraw wyłącznie zaakceptowany P1 i cztery P2, a następnie wykonaj ograniczony re-review Unit 3.
+
+## Ograniczony re-review napraw — `c8ca42c^..c8ca42c`
+
+- **Data:** 2026-07-24
+- **Tryb:** ograniczony re-review
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `BLOKUJE`
+
+### P1 — Fixture migruje syntetyczny katalog zamiast zatwierdzonych 34 Lionelo
+
+- File: `fixtures/unit3/validated_state_v1.json:2-35`
+- Evidence: fixture zawiera `product:lionelo:00:` … `product:lionelo:33:` oraz modele `00` … `33`, zamiast wersjonowanych stabilnych ID realnego katalogu, takich jak Amber/Mika/Layla. Audit sprawdza jedynie liczność.
+- Impact: domyślna migracja może zakończyć się PASS i wypełnić Supabase fikcyjnym katalogiem — fałszywy sukces głównego flow.
+- Scenario: operator uruchamia CLI bez `--input`; API Supabase pokazuje `Lionelo 00`, a nie katalog MVP.
+- Recommendation: fixture/manifest oraz audit muszą używać dokładnego zatwierdzonego zbioru 34 realnych `product_id`.
+- Missing test: zamiana realnych ID na `00..33` kończy audit wynikiem review/fail.
+
+### P1 — Niezautoryzowany endpoint zapisuje dane przez service-role
+
+- File: `fieldnote-api/app.py:2918-2936`
+- Evidence: `POST /api/products` nie ma zależności sesji ani roli, a w trybie Supabase używa klienta z `SUPABASE_SERVICE_ROLE_KEY`, który omija RLS.
+- Impact: dowolny klient mający dostęp do API może tworzyć marki i produkty mimo granicy analyst/admin.
+- Scenario: niezalogowany klient wysyła poprawny POST przy `FIELDNOTE_DATA_MODE=supabase`.
+- Recommendation: wymagać zweryfikowanego JWT i roli analyst/admin albo wyłączyć zapis Supabase do Unit 4.
+- Missing test: brak sesji/viewer otrzymują 401/403, a zapis jest możliwy wyłącznie dla uprawnionej roli.
+
+### P2 — Marka wielowyrazowa ma rozbieżny `brand_key`
+
+- File: `fieldnote-api/app.py:2933-2935`, `fieldnote-api/repositories/catalog_repository.py:19-24`
+- Evidence: API zapisuje `Cybex Gold` jako `cybex-gold`, lecz repozytorium wyszukuje `cybex gold`, bo payload nie przekazuje `brand_key`.
+- Impact: utworzenie poprawnego produktu konkurencji kończy się błędem braku marki.
+- Scenario: POST dla `brand="Cybex Gold"` w Supabase.
+- Recommendation: stosować jeden canonical helper `brand_key` w API i repozytorium.
+- Missing test: idempotentne utworzenie i odczyt marki wielowyrazowej.
+
+| Reviewer | Wynik | Findings przyjęte |
+|---|---|---:|
+| correctness_reviewer | P1 ×1, P2 ×1 | 2 |
+| security_reviewer | P1 ×1 | 1 |
+| test_reviewer | PASS | 0 |
+| data_reviewer | P1 ×1, P2 ×1 | 2 |
+
+Ponowiono focused suite (27 PASS), `git diff --check c8ca42c^..c8ca42c` (PASS) i pełną offline bramkę (PASS). Finding fixture oraz brand-key zostały scalone. **Gate: BLOKUJE — 2 P1, 1 P2, 0 P3.**
+
+## Stan po naprawie ograniczonego re-review
+
+Naprawiono wyłącznie findings z powyższej sekcji: fixture ma realny expected set 34 Lionelo ze śledzonych specyfikacji; audit porównuje set, a nie samą liczność; zapis Supabase przez publiczny endpoint jest wyłączony do Unit 4; `brand_key` jest wspólny dla repozytorium. Focused suite: 29 PASS; JSON fixture, `git diff --check` i pełna offline bramka: PASS. Gate pozostaje do niezależnego ograniczonego re-review.

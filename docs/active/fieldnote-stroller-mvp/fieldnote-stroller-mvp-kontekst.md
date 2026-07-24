@@ -73,6 +73,9 @@
 - Naprawiono wyłącznie findings Unit 3: migrator mapuje własność Lionelo po marce lub boolu, kanoniczne statusy na enum `products` oraz projekcje source/link/evidence na kolumny DB. Fixture `fixtures/unit3/validated_state_v1.json` zawiera 34 Lionelo w kanonicznym kształcie `scope=production`/`refresh_recommended`, konkurenta, placeholder oraz kontrolowane błędne referencje.
 - `POST /api/products` w Supabase używa repozytorium, a detail Supabase omija legacy walidator i provenance. `run_migration` łączy fixture, migrację i audit; CLI wymaga serwerowej konfiguracji tylko przy rzeczywistym zapisie. Audit wymaga dokładnie 34 unikalnych Lionelo.
 - Po poprawkach: focused testy Unit 3/API PASS (27), JSON fixture PASS, `git diff --check` PASS oraz pełny `bash scripts/check_fieldnote.sh` PASS. Oczekuje ograniczony re-review wyłącznie P1/P2 Unit 3.
+- Ograniczony re-review Unit 3 (`c8ca42c^..c8ca42c`) przez correctness, security, tests i data: focused suite 27 PASS, pełna offline bramka PASS oraz `git diff --check` PASS, ale gate **BLOKUJE** — 2 P1, 1 P2, 0 P3. P1: domyślny fixture zawiera syntetyczne `00..33`; niezautoryzowany POST zapisuje przez service-role i omija RLS. P2: wielowyrazowa marka ma rozbieżny `brand_key`. Raport: `review-unit-3.md`.
+- Naprawiono wyłącznie te 2 P1/1 P2: fixture `fixtures/unit3/validated_state_v1.json` zawiera realne `product_id`, model, konfigurację i slug 34 śledzonych `data/internal_specs/lionelo__*.json`; audit porównuje dokładny expected set z fixturem. `POST /api/products` w trybie Supabase zwraca 503 przed odczytem legacy, zapisem DB lub użyciem service-role do czasu Unit 4. `CatalogRepository.brand_key()` normalizuje marki wielowyrazowe jednym formatem.
+- Po poprawkach focused Unit 3/API PASS (29), JSON fixture PASS, `git diff --check` PASS oraz pełna offline bramka `bash scripts/check_fieldnote.sh` PASS. Oczekuje ograniczony re-review wyłącznie tych trzech poprawek; Unit 4 nie został rozpoczęty.
 - Końcowy ograniczony re-review `aa9ca91^..aa9ca91` przez correctness, security i tests: wszyscy PASS. Potwierdzono dwa identyczne UPSERT-y admina, pojedynczy rekord przez adminowy GET PostgREST oraz odmowę dla analyst. Data/UI review nie były wymagane, bo diff dotyczył wyłącznie testu runtime.
 - Weryfikacja końcowego re-review: runtime Supabase 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka PASS i `git diff --check aa9ca91^ aa9ca91` PASS. Gate Unit 2: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3.
 - Unit 3 dodał repozytoria katalogu, źródeł, benchmarków, jobów i audytu na wstrzykiwalnym kliencie stdlib PostgREST. `FIELDNOTE_DATA_MODE=legacy_readonly` pozostaje domyślny; `supabase` wymaga `SUPABASE_URL` i `SUPABASE_SERVICE_ROLE_KEY`, a brak konfiguracji kończy się fail-closed bez wycieku sekretu.
@@ -94,8 +97,8 @@
 
 - **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
 - **Bieżący unit:** Unit 3 — Repozytoria Supabase i selektywna migracja.
-- **Status:** completed — poprawki P1/P2 Unit 3 i weryfikacja przeszły; oczekuje ograniczony re-review. Nie rozpoczynać Unit 4.
+- **Status:** completed — poprawki 2 P1/1 P2 Unit 3 i weryfikacja przeszły; oczekuje ograniczony re-review. Nie rozpoczynać Unit 4.
 - **Pliki w toku:** `fieldnote-api/repositories/`, repozytoria usług katalogu/źródeł/runów, skrypty selektywnej migracji/audytu oraz testy Unit 3.
 - **Ostatnie testy:** 23 testy Unit 3 PASS; pełny offline gate PASS; `git diff --check` PASS.
 - **Bloker:** ograniczony re-review `review-unit-3.md`; nie rozpoczynać Unit 4.
-- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 3` — wyłącznie naprawione P1/P2.
+- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 3` — wyłącznie naprawione 2 P1/1 P2.

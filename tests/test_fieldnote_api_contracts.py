@@ -32,7 +32,7 @@ class ApiContractTests(unittest.TestCase):
             payload = api.list_products(limit=10, offset=0)
         self.assertEqual(payload["items"], [{"slug": "lionelo__amber", "product_slug": "lionelo__amber", "brand": "Lionelo", "model": "Amber"}])
 
-    def test_supabase_product_create_and_detail_never_touch_legacy_data(self):
+    def test_supabase_product_detail_never_touch_legacy_data(self):
         class FakeReader:
             def __init__(self): self.rows = {}
             def catalog(self): return list(self.rows.values())
@@ -40,15 +40,10 @@ class ApiContractTests(unittest.TestCase):
             def upsert_brand(self, _key, _name): return "brand-1"
             def upsert_product(self, item): self.rows[item["product_slug"]] = {**item, "slug": item["product_slug"]}
 
-        reader = FakeReader(); service = api.ProductService(reader)
+        reader = FakeReader(); reader.rows["lionelo__fresh"] = {"product_slug": "lionelo__fresh", "slug": "lionelo__fresh", "brand": "Lionelo", "model": "Fresh"}; service = api.ProductService(reader)
         forbidden = {"load_products": patch.object(api, "load_products", side_effect=AssertionError("legacy catalog read")), "ensure_catalog_product": patch.object(api, "ensure_catalog_product", side_effect=AssertionError("legacy catalog write")), "load_product_provenance": patch.object(api, "load_product_provenance", side_effect=AssertionError("legacy provenance read"))}
         with patch.object(api, "DATA_MODE", "supabase"), patch.object(api, "PRODUCT_SERVICE", service), forbidden["load_products"], forbidden["ensure_catalog_product"], forbidden["load_product_provenance"]:
-            request = api.ProductCreateRequest(brand="Lionelo", model="Fresh", category_key="stroller", benchmark_group="light_stroller")
-            created = api.create_product(request)
             detail = api.get_product("lionelo__fresh")
-            repeated = api.create_product(request)
-        self.assertTrue(created["created"])
-        self.assertFalse(repeated["created"])
         self.assertEqual(detail["product_slug"], "lionelo__fresh")
         self.assertEqual(detail["fields"], [])
 
@@ -56,6 +51,13 @@ class ApiContractTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(SupabaseConfigurationError):
                 SupabaseClient.from_env()
+
+    def test_supabase_product_write_is_disabled_before_auth(self):
+        request = api.ProductCreateRequest(brand="Lionelo", model="Agia", category_key="strollers", benchmark_group="strollers")
+        with patch.object(api, "DATA_MODE", "supabase"), patch.object(api, "load_products", side_effect=AssertionError("legacy read")):
+            with self.assertRaises(api.HTTPException) as raised:
+                api.create_product(request)
+        self.assertEqual(raised.exception.status_code, 503)
 
     def preview_request(self, mode: str = "live") -> api.PreviewRequest:
         return api.PreviewRequest(brand="Fixture", model="Light", category_key="stroller", benchmark_group="light_stroller", search_mode=mode)

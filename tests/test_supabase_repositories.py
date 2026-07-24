@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
-from repositories.catalog_repository import CatalogRepository
+from repositories.catalog_repository import CatalogRepository, brand_key
 from repositories.source_repository import SourceRepository
 
 class FakeClient:
@@ -24,5 +24,7 @@ class SupabaseRepositoryTests(unittest.TestCase):
         client = FakeClient(); repo = SourceRepository(client)
         repo.upsert_source({"source_id": "manufacturer:amber"}); repo.upsert_link({"link_id": "lionelo__amber|manufacturer:amber"}); repo.upsert_evidence({"evidence_id": "e-1"})
         self.assertEqual([call[-1] for call in client.calls], ["source_id", "link_id", "evidence_id"])
+    def test_multiword_brand_key_is_shared_with_catalog_lookup(self):
+        self.assertEqual(brand_key("  Lionelo  Polska "), "lionelo-polska")
 
 if __name__ == "__main__": unittest.main()
