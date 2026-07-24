@@ -177,7 +177,7 @@ def field_directness(field_name: str, value: str, evidence: str, expected_brand:
         concrete = ("torba", "folia", "moskitiera", "adapter", "pokrowiec", "pasek", "uchwyt", "tacka", "pałąk", "palak")
         return ("valid", "") if contains_any(text, ("w zestawie", "zestaw zawiera", "w komplecie", "akcesoria")) and contains_any(text, concrete) else ("rejected", "brak_konkretnej_listy_akcesoriow")
     if field_name == "Waga":
-        return ("valid", "") if "kg" in text and contains_any(text, ("waga", "wazy")) else ("rejected", "brak_wagi_w_kg")
+        return ("valid", "") if "kg" in text and contains_any(text, ("waga", "wazy", "weight")) else ("rejected", "brak_wagi_w_kg")
     if field_name == "Udźwig":
         return ("valid", "") if "kg" in text and contains_any(text, ("obciazenie", "udzwig", "do 22", "do 25", "maksymalne")) else ("rejected", "brak_udzwigu")
     if field_name == "Wymiary po złożeniu":

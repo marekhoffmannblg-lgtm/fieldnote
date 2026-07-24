@@ -1,0 +1,169 @@
+"""Offline contract tests for competitive benchmark manifests."""
+from __future__ import annotations
+
+import hashlib
+import sys
+import unittest
+import uuid
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from fastapi import HTTPException
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "fieldnote-api"))
+
+import app as api  # noqa: E402
+
+
+ANCHOR = "product:lionelo:agia:unknown"
+COMPETITOR = "product:bugaboo:butterfly-2:none"
+LIONELO_PARTICIPANT = "product:lionelo:bess:none"
+OTHER_GROUP = "product:cybex:balios-s:none"
+UNCLASSIFIED = "product:other:unclassified:none"
+ANCHOR_NO_GROUP = "product:lionelo:unclassified:none"
+
+
+def fixture_products() -> list[dict[str, str]]:
+    return [
+        {"product_id": ANCHOR, "brand": " Lionelo ", "model": "Agia", "configuration": "", "benchmark_group": "light_stroller", "created_at": "2026-01-01T00:00:00Z"},
+        {"product_id": COMPETITOR, "brand": "Bugaboo", "model": "Butterfly 2", "configuration": "", "benchmark_group": "light_stroller"},
+        {"product_id": LIONELO_PARTICIPANT, "brand": "Lionelo", "model": "Bess", "configuration": "", "benchmark_group": "light_stroller", "created_at": "2026-01-02T00:00:00Z"},
+        {"product_id": OTHER_GROUP, "brand": "CYBEX", "model": "Balios S", "configuration": "", "benchmark_group": "standard_stroller"},
+        {"product_id": UNCLASSIFIED, "brand": "Other", "model": "Unknown", "configuration": "", "benchmark_group": ""},
+        {"product_id": ANCHOR_NO_GROUP, "brand": "Lionelo", "model": "Unclassified", "configuration": "", "benchmark_group": ""},
+    ]
+
+
+def payload(**overrides: object) -> dict[str, object]:
+    value: dict[str, object] = {
+        "benchmark_group_key": "light_stroller",
+        "anchor_product_id": ANCHOR,
+        "participant_product_ids": [COMPETITOR],
+        "title": "Lionelo Agia vs rynek",
+        "status": "draft",
+    }
+    value.update(overrides)
+    return value
+
+
+def file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+class CompetitiveBenchmarkTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = TemporaryDirectory()
+        self.root = Path(self.temp.name) / "benchmarks"
+        self.products = fixture_products()
+        self.patch_root = patch.object(api, "BENCHMARKS_ROOT", self.root)
+        self.patch_products = patch.object(api, "load_products", return_value=self.products)
+        self.patch_states = patch.object(api, "load_product_states", return_value={})
+        self.patch_links = patch.object(api, "read_product_source_links", return_value=[])
+        self.patch_root.start(); self.patch_products.start(); self.patch_states.start(); self.patch_links.start()
+
+    def tearDown(self) -> None:
+        self.patch_links.stop(); self.patch_states.stop(); self.patch_products.stop(); self.patch_root.stop(); self.temp.cleanup()
+
+    def create(self, body: dict[str, object] | None = None):
+        return api.create_competitive_benchmark(api.CompetitiveBenchmarkCreateRequest(**(body or payload())))
+
+    def test_create_read_and_list_manifest(self) -> None:
+        manifest = self.create()
+        self.assertTrue(manifest["benchmark_id"].startswith("benchmark_"))
+        self.assertEqual(manifest["benchmark_type"], "competitive")
+        self.assertNotIn("anchor_product_id", manifest)
+        self.assertNotIn("participant_product_ids", manifest)
+        self.assertEqual(manifest["anchor"]["product_id"], ANCHOR)
+        self.assertEqual(manifest["participants"][0]["product_id"], COMPETITOR)
+        self.assertEqual(manifest["participant_count"], 1)
+        forbidden = {"evidence", "snapshot", "profile", "coverage", "fields", "parameters"}
+        self.assertTrue(forbidden.isdisjoint(manifest))
+
+        stored = self.root / manifest["benchmark_id"] / "manifest.json"
+        self.assertTrue(stored.is_file())
+        self.assertFalse(any(path.suffix == ".tmp" for path in self.root.rglob("*")))
+
+        listed = api.list_competitive_benchmarks()
+        self.assertEqual(len(listed), 1)
+        api.CompetitiveBenchmarkSummary(**listed[0])
+        self.assertEqual(set(listed[0]), {"benchmark_id", "title", "status", "benchmark_group_key", "anchor_product_id", "participant_count", "created_at", "updated_at"})
+
+        detail = api.get_competitive_benchmark(manifest["benchmark_id"])
+        api.CompetitiveBenchmarkDetail(**detail)
+        self.assertEqual(detail["participants"][0]["product_id"], COMPETITOR)
+        self.assertEqual(detail["participants"][0]["source_count"], 0)
+        with self.assertRaises(HTTPException) as missing:
+            api.get_competitive_benchmark("benchmark_not-a-uuid")
+        self.assertEqual(missing.exception.status_code, 404)
+
+    def test_missing_catalog_product_in_manifest_is_controlled_error(self) -> None:
+        manifest = self.create()
+        stored = self.root / manifest["benchmark_id"] / "manifest.json"
+        value = __import__("json").loads(stored.read_text(encoding="utf-8"))
+        value["participant_product_ids"] = ["product:missing:none"]
+        stored.write_text(__import__("json").dumps(value), encoding="utf-8")
+        with self.assertRaises(HTTPException) as rejected:
+            api.get_competitive_benchmark(manifest["benchmark_id"])
+        self.assertEqual(rejected.exception.status_code, 422)
+        self.assertIn("product:missing:none", str(rejected.exception.detail))
+
+    def test_internal_groups_are_dynamic_and_not_written(self) -> None:
+        self.assertFalse(self.root.exists())
+        listed = api.list_internal_benchmarks()
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["benchmark_group_key"], "light_stroller")
+        self.assertEqual(listed[0]["participant_count"], 2)
+        api.InternalBenchmarkSummary(**listed[0])
+        detail = api.get_internal_benchmark("light_stroller")
+        api.InternalBenchmarkDetail(**detail)
+        self.assertEqual(detail["benchmark_type"], "internal")
+        self.assertIsNone(detail["anchor"])
+        self.assertIsNotNone(detail["updated_at"])
+        self.assertEqual({item["product_id"] for item in detail["participants"]}, {ANCHOR, LIONELO_PARTICIPANT})
+        self.assertFalse(self.root.exists())
+        with self.assertRaises(HTTPException) as missing:
+            api.get_internal_benchmark("standard_stroller")
+        self.assertEqual(missing.exception.status_code, 404)
+
+    def test_rejects_invalid_relationships(self) -> None:
+        cases = [
+            ("anchor_innej_marki", payload(anchor_product_id=COMPETITOR), "musi być produktem marki Lionelo"),
+            ("anchor_nieistniejacy", payload(anchor_product_id="product:missing:none"), "Nie istnieje produkt anchor"),
+            ("anchor_bez_grupy", payload(anchor_product_id=ANCHOR_NO_GROUP), "nie ma przypisanej grupy"),
+            ("uczestnik_lionelo", payload(participant_product_ids=[LIONELO_PARTICIPANT]), "nie może być produktem marki Lionelo"),
+            ("inna_grupa", payload(participant_product_ids=[OTHER_GROUP]), "należy do grupy"),
+            ("brak_grupy", payload(participant_product_ids=[UNCLASSIFIED]), "nie ma przypisanej grupy"),
+            ("nieistniejacy", payload(participant_product_ids=["product:missing:none"]), "Nie istnieje uczestnik"),
+            ("duplikat", payload(participant_product_ids=[COMPETITOR, COMPETITOR]), "zduplikowany"),
+            ("anchor_jako_uczestnik", payload(participant_product_ids=[ANCHOR]), "Anchor nie może"),
+            ("pusta_lista", payload(participant_product_ids=[]), "co najmniej jednego"),
+            ("inna_klasa", payload(benchmark_group_key="standard_stroller"), "musi być równy"),
+        ]
+        for name, body, message in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(HTTPException) as rejected:
+                    self.create(body)
+                self.assertEqual(rejected.exception.status_code, 422)
+                self.assertIn(message, str(rejected.exception.detail))
+
+    def test_generated_identifier_conflict_returns_409(self) -> None:
+        first = self.create()
+        generated_uuid = uuid.UUID(first["benchmark_id"].removeprefix("benchmark_"))
+        with patch("benchmark_storage.uuid.uuid4", return_value=generated_uuid), self.assertRaises(HTTPException) as conflict:
+            self.create()
+        self.assertEqual(conflict.exception.status_code, 409)
+
+    def test_catalog_and_research_files_are_not_changed(self) -> None:
+        catalog = ROOT / "data" / "catalog" / "products.json"
+        states = sorted((ROOT / "output" / "model_groups").glob("*/model_state.json"))
+        profiles = sorted((ROOT / "output" / "product_profiles").glob("**/*"))
+        catalog_before = file_hash(catalog)
+        states_before = {path: file_hash(path) for path in states}
+        profiles_before = {path: file_hash(path) for path in profiles if path.is_file()}
+        self.create()
+        self.assertEqual(file_hash(catalog), catalog_before)
+        self.assertEqual({path: file_hash(path) for path in states}, states_before)
+        self.assertEqual({path: file_hash(path) for path in profiles if path.is_file()}, profiles_before)

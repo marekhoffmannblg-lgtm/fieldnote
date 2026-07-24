@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark_taxonomy import CATEGORY, TAXONOMY_VERSION
+from category_registry import assignment_from_legacy, category_status, validate_category_assignment
 from p0_runtime import atomic_write_json
 
 
@@ -41,12 +42,14 @@ def slug(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", "-", normalized(value)).strip("-") or "unknown"
 
 
-def group_key_for(brand: object, model: object) -> str:
-    return f"{normalized(brand)}|{normalized(model)}"
+def group_key_for(brand: object, model: object, configuration: object = "") -> str:
+    base = f"{normalized(brand)}|{normalized(model)}"
+    return f"{base}|{normalized(configuration)}" if normalized(configuration) else base
 
 
-def product_slug_for(brand: object, model: object) -> str:
-    return f"{slug(brand)}__{slug(model)}"
+def product_slug_for(brand: object, model: object, configuration: object = "") -> str:
+    base = f"{slug(brand)}__{slug(model)}"
+    return f"{base}-{slug(configuration)}" if normalized(configuration) else base
 
 
 def read_list(path: Path) -> list[dict[str, Any]]:
@@ -62,7 +65,38 @@ def atomic_write(path: Path, value: object) -> None:
 
 
 def load_products() -> list[dict[str, Any]]:
-    return read_list(PRODUCTS_PATH)
+    products, _changed = migrate_product_category_fields(read_list(PRODUCTS_PATH))
+    return products
+
+
+def migrate_product_category_fields(products: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+    """Add canonical keys without rewriting legacy labels or guessing 2w1/3w1."""
+    changed = False
+    migrated: list[dict[str, Any]] = []
+    for original in products:
+        product = dict(original)
+        if not str(product.get("category_key", "")).strip():
+            assignment = assignment_from_legacy(product.get("category"), product.get("benchmark_category"))
+            product["category_key"] = assignment["category_key"]
+            product["benchmark_group"] = assignment["benchmark_group"]
+            product["category_classification_status"] = category_status(product)
+            changed = True
+        elif "benchmark_group" not in product:
+            product["benchmark_group"] = ""
+            product["category_classification_status"] = category_status(product)
+            changed = True
+        elif "category_classification_status" not in product:
+            product["category_classification_status"] = category_status(product)
+            changed = True
+        migrated.append(product)
+    return migrated, changed
+
+
+def migrate_catalog_categories() -> int:
+    products, changed = migrate_product_category_fields(read_list(PRODUCTS_PATH))
+    if changed:
+        atomic_write(PRODUCTS_PATH, products)
+    return sum(1 for product in products if product.get("category_key"))
 
 
 def product_for_group_key(group_key: str) -> dict[str, Any]:
@@ -79,36 +113,55 @@ def ensure_catalog_product(
     *,
     category: str = DEFAULT_CATEGORY,
     subcategory: str = "",
+    subcategory_key: str = "",
     benchmark_category: str = DEFAULT_BENCHMARK_CATEGORY,
     taxonomy_status: str = "review_required",
     status: str = "waiting_for_analysis",
+    category_key: str = "",
+    benchmark_group: str = "",
+    configuration: str = "",
+    scope: str = "test",
 ) -> dict[str, Any]:
     """Create or return a product identity without deriving it from page text."""
     brand = " ".join(str(brand or "").split()).strip()
     model = " ".join(str(model or "").split()).strip()
+    configuration = " ".join(str(configuration or "").split()).strip()
     if not brand or not model:
         raise ValueError("Katalog produktu wymaga marki i modelu.")
 
-    group_key = group_key_for(brand, model)
+    group_key = group_key_for(brand, model, configuration)
     products = load_products()
     existing = next((item for item in products if item.get("group_key") == group_key), None)
     if existing:
         return existing
 
+    assignment = (
+        validate_category_assignment(category_key, benchmark_group)
+        if category_key or benchmark_group
+        else assignment_from_legacy(category, benchmark_category)
+    )
+
     product = {
-        "product_id": f"product:{slug(brand)}:{slug(model)}",
+        "product_id": f"product:{slug(brand)}:{slug(model)}:{slug(configuration)}",
         "brand": brand,
         "brand_slug": slug(brand),
         "category": category,
         "category_slug": slug(category),
         "subcategory": subcategory,
+        "subcategory_key": subcategory_key,
         "benchmark_category": benchmark_category,
         "taxonomy_version": TAXONOMY_VERSION,
         "taxonomy_status": taxonomy_status,
+        "category_key": assignment["category_key"],
+        "benchmark_group": assignment["benchmark_group"],
+        "benchmark_group_key": assignment["benchmark_group"],
+        "category_classification_status": "classified" if assignment["benchmark_group"] else "requires_classification",
         "model": model,
         "model_slug": slug(model),
+        "configuration": configuration,
         "group_key": group_key,
         "status": status,
+        "scope": scope,
         "created_at": utc_now(),
     }
     products.append(product)

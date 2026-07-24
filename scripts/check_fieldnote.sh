@@ -12,12 +12,16 @@ stage "Repository hygiene: tracked files contain no secrets or local artifacts"
 
 stage "Python syntax and imports"
 "${PYTHON_BIN}" -m py_compile "${ROOT}/fieldnote-api/app.py" "${ROOT}/fieldnote-api/contracts.py" "${ROOT}/fieldnote-api/repositories/snapshot_repository.py" "${ROOT}/fieldnote-api/services/product_service.py" "${ROOT}/fieldnote-api/routers/health.py" "${ROOT}/scripts/run_manifest.py" "${ROOT}/scripts/source_lifecycle.py" "${ROOT}/scripts/provenance_v1.py" "${ROOT}/scripts/migrate_provenance_v1.py" "${ROOT}/scripts/source_adapters.py" "${ROOT}/scripts/manufacturer_pipeline.py"
+"${PYTHON_BIN}" -m py_compile "${ROOT}/scripts/visual_snapshots.py" "${ROOT}/scripts/backfill_visual_context.py" "${ROOT}/scripts/fetch_firecrawl_offer_pages.py" "${ROOT}/scripts/product_profile_prompt.py" "${ROOT}/scripts/product_profile.py" "${ROOT}/scripts/build_product_profile_preflight.py" "${ROOT}/scripts/generate_product_profile.py" "${ROOT}/scripts/package_product_profile_review.py"
 
 stage "Backend unit tests: lifecycle, quality and provenance"
 "${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_fieldnote_p*.py'
 
 stage "Backend integration tests: versioned local API"
 "${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_fieldnote_api_contracts.py'
+
+stage "Category foundation: registry, migration and benchmark partition"
+"${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_category_foundation.py'
 
 stage "Existing P0 and P1 checkers"
 "${PYTHON_BIN}" "${ROOT}/scripts/check_p0_foundation.py"
@@ -31,6 +35,18 @@ stage "Fixture E2E: offline lifecycle and adapters"
 
 stage "Manufacturer pipeline fixtures: shared cleaner and normalized document"
 "${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_manufacturer_pipeline.py'
+
+stage "Manufacturer post-fetch lifecycle: source, product link and provenance"
+"${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_manufacturer_post_fetch.py'
+
+stage "Manufacturer production hardening: terminal stages, cache and API artifacts"
+"${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_manufacturer_production_hardening.py'
+
+stage "Visual source snapshots: shared HTML backfill, contracts and safety"
+"${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_visual_snapshots.py'
+
+stage "AI Product Profile: source-backed offline contract"
+"${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_product_profile.py'
 
 stage "Controlled manufacturer live runner: offline preflight"
 "${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_manufacturer_live_runner.py'

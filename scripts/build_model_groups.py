@@ -279,6 +279,9 @@ def main() -> int:
                 "product_id": row.get("product_id", ""),
                 "category": row.get("category", ""),
                 "benchmark_category": row.get("benchmark_category", ""),
+                "category_key": row.get("category_key", ""),
+                "benchmark_group": row.get("benchmark_group", ""),
+                "category_classification_status": row.get("category_classification_status", "requires_classification"),
                 "subcategory": row.get("subcategory", ""),
                 "taxonomy_version": row.get("taxonomy_version", ""),
                 "taxonomy_status": row.get("taxonomy_status", "review_required"),
@@ -317,7 +320,7 @@ def main() -> int:
     for group in groups.values():
         catalog_product = product_for_group_key(str(group.get("group_key", "")))
         if catalog_product:
-            for key in ("category", "subcategory", "benchmark_category", "taxonomy_version", "taxonomy_status", "taxonomy_reason"):
+            for key in ("category", "subcategory", "benchmark_category", "taxonomy_version", "taxonomy_status", "taxonomy_reason", "category_key", "benchmark_group", "category_classification_status"):
                 if key in catalog_product:
                     group[key] = catalog_product[key]
         assign_content_families(group["offers"])

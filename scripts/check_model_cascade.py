@@ -5,10 +5,12 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import extract_model_facts_cascade as cascade
+import run_model_research_pipeline as pipeline
 
 
 def main() -> int:
@@ -64,6 +66,30 @@ def main() -> int:
                 failures.append("prompt_names_not_deterministic")
             if state["fields"]["Rama"]["value"] != "stal" or state["fields"]["Waga"]["value"] != "6 kg":
                 failures.append("locked_values_changed")
+
+            timeout_state = cascade.new_state(group)
+            timeout_state["processed_source_ids"] = [source_rows[0]["source_id"]]
+            timeout_path = fixture / "timeout_model_state.json"
+            with patch.object(cascade.urllib.request, "urlopen", side_effect=TimeoutError):
+                try:
+                    cascade.call_api("test", "key", "model", source_rows[1]["source_id"])
+                    failures.append("timeout_not_raised")
+                except cascade.SourceAnalysisProviderError as error:
+                    if error.code != "source_analysis_timeout":
+                        failures.append("timeout_error_code")
+                    cascade.record_source_analysis_error(timeout_state, error, timeout_path)
+            persisted = json.loads(timeout_path.read_text(encoding="utf-8"))
+            if source_rows[1]["source_id"] in persisted.get("processed_source_ids", []):
+                failures.append("timed_out_source_marked_processed")
+            if source_rows[1]["source_id"] not in persisted.get("remaining_source_ids", []):
+                failures.append("timed_out_source_missing_remaining")
+            if persisted.get("last_analysis_error_code") != "source_analysis_timeout":
+                failures.append("timeout_state_error_code_missing")
+            output = "source_analysis_status=failed\nsource_analysis_error_code=source_analysis_timeout\n"
+            if not pipeline.is_controlled_source_analysis_failure(20, output):
+                failures.append("pipeline_did_not_recognize_controlled_timeout")
+            if "przekroczyła limit czasu" not in pipeline.controlled_source_analysis_message(output):
+                failures.append("pipeline_timeout_message_not_safe")
         finally:
             cascade.ROOT = original_root
     if failures:

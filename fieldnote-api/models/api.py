@@ -5,6 +5,7 @@ from contracts import (  # noqa: F401
     EvidenceItemV1,
     PageV1,
     ProductMetricsV1,
+    ProductProfileV1,
     ProductSourceLinkV1,
     ProductV1,
     RunManifestV1,

@@ -8,7 +8,6 @@ in small JSON manifests for the Vite frontend to poll.
 from __future__ import annotations
 
 import csv
-import copy
 import hashlib
 import json
 import os
@@ -29,6 +28,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
@@ -43,6 +43,7 @@ RUNS_ROOT = API_ROOT / "runs"
 RUNS_ROOT.mkdir(parents=True, exist_ok=True)
 PRODUCT_ANALYSIS_STATUS_PATH = PROJECT_ROOT / "output" / "product_analysis_status.json"
 PRODUCT_STATE_PATH = PROJECT_ROOT / "output" / "product_state.json"
+BENCHMARKS_ROOT = PROJECT_ROOT / "output" / "benchmarks"
 FRONTEND_SNAPSHOT_ROOT = PROJECT_ROOT / "fieldnote-frontend" / "src" / "data" / "generated"
 SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
@@ -72,8 +73,36 @@ from source_lifecycle import (  # noqa: E402
     read_product_source_links,
     read_source_records,
 )
+from benchmark_storage import (  # noqa: E402
+    BenchmarkConflictError,
+    BenchmarkNotFoundError,
+    BenchmarkValidationError,
+    create_manifest as create_competitive_benchmark_manifest,
+    list_manifests as list_competitive_benchmark_manifests,
+    normalized_brand as normalized_benchmark_brand,
+    read_manifest as read_competitive_benchmark_manifest,
+)
+from visual_snapshots import artifact_id, artifact_relative, read_jsonl as read_visual_jsonl, source_visual_paths  # noqa: E402
 from provenance_v1 import load_product_provenance  # noqa: E402
-from contracts import ProductMetricsV1, ProductV1  # noqa: E402
+from product_profile import get_profile, generate_or_load_profile  # noqa: E402
+from catalog_registry import (  # noqa: E402
+    ensure_catalog_product,
+    group_key_for,
+    load_products,
+    product_for_group_key,
+    product_slug_for,
+)
+from category_registry import CategoryValidationError, categories_for_api, same_benchmark_group, supports_product_type, validate_category_assignment  # noqa: E402
+from contracts import (  # noqa: E402
+    CompetitiveBenchmarkCreateRequest,
+    CompetitiveBenchmarkDetail,
+    CompetitiveBenchmarkSummary,
+    InternalBenchmarkDetail,
+    InternalBenchmarkSummary,
+    ProductMetricsV1,
+    ProductProfileV1,
+    ProductV1,
+)
 from repositories.snapshot_repository import SnapshotRepository  # noqa: E402
 from routers.health import health_payload  # noqa: E402
 from services.product_service import ProductService  # noqa: E402
@@ -85,7 +114,9 @@ LOCAL_ORIGINS = ("http://127.0.0.1:5173", "http://localhost:5173")
 MAX_LOG_LINES = 240
 MAX_LOG_CHARS = 18_000
 RUN_TIMEOUT_SECONDS = DEFAULT_STAGE_TIMEOUTS["pipeline"]
-LABEL_PATTERN = re.compile(r"^[0-9A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż .,'&()/-]{1,80}$")
+CONTROLLED_SOURCE_ANALYSIS_EXIT = 20
+SOURCE_ANALYSIS_TIMEOUT_MESSAGE = "Analiza źródła przekroczyła limit czasu. Zachowano dotychczasowe dane."
+LABEL_PATTERN = re.compile(r"^[0-9A-Za-z²³ĄĆĘŁŃÓŚŹŻąćęłńóśźż .,'&()/-]{1,80}$")
 OFFER_ID_PATTERN = re.compile(r"^\d{6,20}$")
 PRODUCT_SLUG_PATTERN = re.compile(r"^[a-z0-9]+__[a-z0-9-]+$")
 ACCESSORY_TERMS = (
@@ -96,7 +127,6 @@ ACCESSORY_TERMS = (
 STROLLER_TERMS = ("wozek", "spacerowka", "stroller", "buggy")
 SECRET_PATTERN = re.compile(r"(?i)(firecrawl_api_key|openai_api_key|authorization)\s*[:=]\s*\S+")
 PIPELINE_SECRET_KEYS = ("OPENAI_API_KEY", "FIRECRAWL_API_KEY")
-PREVIEW_CACHE: dict[str, dict[str, Any]] = {}
 INVALID_SELLER_LABELS = {
     "gwarancji", "gwarancja", "dostawa", "kup teraz", "stan", "zwrot", "zwroty",
     "platnosc", "platnosci", "opis", "parametry", "sprzedawca", "oferta",
@@ -117,11 +147,20 @@ app.add_middleware(
 )
 
 
+@app.get("/api/categories")
+def category_options() -> dict[str, Any]:
+    """Expose the one canonical category registry to the local frontend."""
+    return {"categories": categories_for_api()}
+
+
 class PreviewRequest(BaseModel):
     brand: str
     model: str
     marketplace: Literal["allegro"] = "allegro"
     previous_product_slug: str | None = None
+    category_key: str = ""
+    benchmark_group: str = ""
+    search_mode: Literal["live", "cache"] = "live"
 
     @field_validator("brand", "model")
     @classmethod
@@ -129,11 +168,33 @@ class PreviewRequest(BaseModel):
         return validated_label(value)
 
 
+class ProductCreateRequest(BaseModel):
+    """Register product identity before any preview or source collection."""
+
+    brand: str
+    model: str
+    category_key: str
+    benchmark_group: str
+
+    @field_validator("brand", "model")
+    @classmethod
+    def validate_label(cls, value: str) -> str:
+        return validated_label(value)
+
+    @field_validator("category_key", "benchmark_group")
+    @classmethod
+    def validate_category_tokens(cls, value: str) -> str:
+        return str(value or "").strip()
+
+
 class ResearchRequest(BaseModel):
     brand: str
     model: str
     selected_offer_ids: list[str] = Field(default_factory=list, max_length=100)
+    selected_manufacturer_source_ids: list[str] = Field(default_factory=list, max_length=10)
     include_manufacturer_sources: bool = True
+    category_key: str = ""
+    benchmark_group: str = ""
 
     @field_validator("brand", "model")
     @classmethod
@@ -151,6 +212,11 @@ class ResearchRequest(BaseModel):
             if offer_id not in normalized:
                 normalized.append(offer_id)
         return normalized
+
+    @field_validator("category_key", "benchmark_group")
+    @classmethod
+    def validate_category_tokens(cls, value: str) -> str:
+        return str(value or "").strip()
 
 
 class RefreshRequest(BaseModel):
@@ -179,9 +245,9 @@ def path_slug(value: str) -> str:
     return slug or "model"
 
 
-def preview_cache_key(marketplace: str, brand: str, model: str) -> str:
+def preview_cache_key(marketplace: str, brand: str, model: str, category_key: str) -> str:
     """Keep previews isolated by marketplace and the complete requested model."""
-    return f"{normalized(marketplace)}|{path_slug(brand)}|{path_slug(model)}"
+    return f"{normalized(marketplace)}|{path_slug(brand)}|{path_slug(model)}|{str(category_key or '').strip()}"
 
 
 def validated_label(value: str) -> str:
@@ -220,17 +286,18 @@ def read_run(run_id: str) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Nie znaleziono zapisu uruchomienia.") from exc
     if value is not None:
-        return value
+        return normalize_terminal_run_status(value)
     # Read-only compatibility for legacy API manifests. Migration preserves the
     # source file but all new writes immediately use output/runs/<id>/.
     legacy_path = RUNS_ROOT / f"{run_id}.json"
     value = read_json(legacy_path, {})
     if isinstance(value, dict) and value:
-        return value
+        return normalize_terminal_run_status(value)
     raise HTTPException(status_code=404, detail="Nie znaleziono zapisu uruchomienia.")
 
 
 def save_run(payload: dict[str, Any]) -> None:
+    normalize_terminal_run_status(payload)
     payload["updated_at"] = utc_now()
     payload["created_at"] = payload.get("created_at") or payload.get("started_at") or utc_now()
     # P0 fixture compatibility: isolated tests replace RUNS_ROOT with a
@@ -240,6 +307,15 @@ def save_run(payload: dict[str, Any]) -> None:
         atomic_write_json(RUNS_ROOT / f"{payload['run_id']}.json", payload)
         return
     save_manifest(payload)
+
+
+def normalize_terminal_run_status(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep the public status aligned with pipeline_status for terminal partial runs."""
+    if payload.get("pipeline_status") == "partial":
+        payload["status"] = "partial"
+    elif payload.get("pipeline_status") == "failed" and payload.get("status") == "succeeded":
+        payload["status"] = "failed"
+    return payload
 
 
 def run_response(payload: dict[str, Any]) -> dict[str, Any]:
@@ -274,6 +350,9 @@ def run_response(payload: dict[str, Any]) -> dict[str, Any]:
         "coverage_before": payload.get("coverage_before"),
         "coverage_after": payload.get("coverage_after"),
         "changed_fields": payload.get("changed_fields", []),
+        "product_profile_stage": payload.get("product_profile_stage", ""),
+        "product_profile_status": payload.get("product_profile_status", ""),
+        "product_profile_warning": payload.get("product_profile_warning", ""),
     }
 
 
@@ -438,7 +517,66 @@ def known_offer_data() -> dict[str, dict[str, str]]:
 
 
 def targeted_dir(brand: str, model: str, marketplace: str = "allegro") -> Path:
+    root = PROJECT_ROOT / "input" / "targeted_search"
+    canonical = root / f"{path_slug(brand)}__{path_slug(model)}" / marketplace
+    # Earlier local listings used a lossy ASCII slug. Read them once as cache
+    # input; the fetcher now writes the canonical NFKD path on the next run.
+    legacy_slug = lambda value: re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-") or "model"
+    legacy = root / f"{legacy_slug(brand)}__{legacy_slug(model)}" / marketplace
+    if not canonical.exists() and legacy.exists():
+        return legacy
+    return canonical
+
+
+def canonical_targeted_dir(brand: str, model: str, marketplace: str = "allegro") -> Path:
+    """Write path for new searches; it never falls back to legacy cache."""
     return PROJECT_ROOT / "input" / "targeted_search" / f"{path_slug(brand)}__{path_slug(model)}" / marketplace
+
+
+def listing_cache_dir(brand: str, model: str, marketplace: str, category_key: str) -> Path:
+    return canonical_targeted_dir(brand, model, marketplace) / "search_cache" / path_slug(category_key)
+
+
+def cache_metadata_path(directory: Path) -> Path:
+    return directory / "search_cache_metadata.json"
+
+
+def iso_from_mtime(path: Path) -> str:
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+
+
+def cached_listing_info(brand: str, model: str, marketplace: str, category_key: str) -> dict[str, Any] | None:
+    """Find a category-scoped cache first, then legacy cache only for cache mode."""
+    primary = listing_cache_dir(brand, model, marketplace, category_key)
+    candidates = [(primary, False), (targeted_dir(brand, model, marketplace), True)]
+    for directory, legacy in candidates:
+        listing = directory / "listing.html"
+        if not listing.is_file():
+            continue
+        metadata = read_json(cache_metadata_path(directory), {})
+        fetched_at = str(metadata.get("fetched_at", "") or iso_from_mtime(listing)) if isinstance(metadata, dict) else iso_from_mtime(listing)
+        return {"directory": directory, "legacy": legacy, "cached_at": fetched_at}
+    return None
+
+
+def cache_listing_artifacts(source: Path, destination: Path, *, marketplace: str, brand: str, model: str, category_key: str, fetched_at: str | None = None) -> str:
+    """Persist only listing-search artifacts under the category-aware cache key."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in ("listing.html", "listing.md", "raw_response.json", "metadata.json", "extracted_offers.json", "rejected_offers.json", "research_summary.json"):
+        path = source / name
+        if path.is_file():
+            shutil.copy2(path, destination / name)
+    fetched_at = fetched_at or utc_now()
+    atomic_write_json(cache_metadata_path(destination), {
+        "marketplace": marketplace,
+        "brand": brand,
+        "model": model,
+        "category_key": category_key,
+        "fetched_at": fetched_at,
+        "cache_key": preview_cache_key(marketplace, brand, model, category_key),
+        "schema_version": "1",
+    })
+    return fetched_at
 
 
 def nullable_text(value: Any) -> str | None:
@@ -553,8 +691,8 @@ def has_typical_price(value: str | None, median_price: float | None) -> bool:
     return not median_price or abs(price - median_price) / median_price <= 0.45
 
 
-def read_preview_offers(brand: str, model: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    directory = targeted_dir(brand, model)
+def read_preview_offers(brand: str, model: str, category_key: str, *, directory: Path | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    directory = directory or targeted_dir(brand, model)
     accepted_records = read_json(directory / "extracted_offers.json", [])
     rejected_records = read_json(directory / "rejected_offers.json", [])
     summary = read_json(directory / "research_summary.json", {})
@@ -575,16 +713,17 @@ def read_preview_offers(brand: str, model: str) -> tuple[list[dict[str, Any]], d
         brand_match = bool(raw.get("brand_match", False))
         model_match = bool(raw.get("model_match", False))
         is_accessory = product_type == "accessory"
+        category_compatible = supports_product_type(category_key, product_type)
         raw_status = str(raw.get("match_status", "")).strip()
-        is_accepted = bool(brand_match and model_match and product_type == "stroller")
+        is_accepted = bool(brand_match and model_match and category_compatible and not is_accessory)
         if product_type == "accessory":
             match_status = "rejected"
         elif is_accepted:
             match_status = "exact_match"
-        elif raw_status == "uncertain":
-            match_status = "uncertain"
+        elif raw_status == "probable_match" and brand_match and category_compatible and not is_accessory:
+            match_status = "probable_match"
         elif brand_match and model_match and product_type != "accessory":
-            match_status = "uncertain"
+            match_status = "probable_match"
         else:
             match_status = "rejected"
         offers.append(
@@ -606,7 +745,14 @@ def read_preview_offers(brand: str, model: str) -> tuple[list[dict[str, Any]], d
                 "already_known": bool(raw.get("already_known", False)),
                 "is_accessory": is_accessory,
                 "product_type": product_type,
+                "product_type_label": (
+                    "Produkt zgodny z kategorią" if category_compatible
+                    else "Akcesorium" if is_accessory
+                    else "Typ niezgodny lub nieustalony"
+                ),
+                "category_compatible": category_compatible,
                 "match_status": match_status,
+                "selectable": match_status in {"exact_match", "probable_match"},
                 "rejection_reason": str(raw.get("rejection_reason", "")).strip() or None,
                 "duplicate_count": int(raw.get("duplicate_count") or 0),
             }
@@ -640,17 +786,29 @@ def manufacturer_sources_for(brand: str, model: str) -> list[dict[str, Any]]:
     group_dir = PROJECT_ROOT / "output" / "model_groups" / f"{path_slug(brand)}__{path_slug(model)}"
     group = read_json(group_dir / "group.json", {})
     registry = {str(item.get("source_id", "")): item for item in read_jsonl(PROJECT_ROOT / "output" / "source_registry.jsonl")}
+    lifecycle_records = {str(item.get("source_id", "")): item for item in read_source_records()}
+    candidates: dict[str, dict[str, Any]] = {}
+    for group_source in group.get("sources", []) if isinstance(group.get("sources"), list) else []:
+        if isinstance(group_source, dict):
+            source_id = str(group_source.get("source_id", ""))
+            candidates[source_id] = {**group_source, **registry.get(source_id, {}), **lifecycle_records.get(source_id, {})}
+    for source_id, source in lifecycle_records.items():
+        if (
+            str(source.get("marketplace", "")) == "manufacturer"
+            and normalized(str(source.get("brand", ""))) == normalized(brand)
+            and normalized(str(source.get("model", ""))) == normalized(model)
+        ):
+            candidates[source_id] = {**registry.get(source_id, {}), **source}
     sources: list[dict[str, Any]] = []
-    for group_source in group.get("sources", []):
-        if not isinstance(group_source, dict):
-            continue
-        source_id = str(group_source.get("source_id", ""))
-        source = {**group_source, **registry.get(source_id, {})}
+    for source_id, source in candidates.items():
         if source.get("marketplace") != "manufacturer":
             continue
-        metadata = read_json(PROJECT_ROOT / str(source.get("manufacturer_source_path", "")) / "metadata.json", {})
+        content = source.get("content", {}) if isinstance(source.get("content"), dict) else {}
+        snapshot = str(content.get("clean_snapshot_path") or content.get("raw_snapshot_path") or source.get("manufacturer_source_path", ""))
+        metadata_path = PROJECT_ROOT / snapshot
+        metadata = read_json((metadata_path.parent if metadata_path.suffix else metadata_path) / "metadata.json", {})
         model_match = metadata.get("model_match") is True
-        raw, clean = local_source_files(source)
+        raw, clean = local_source_files({**source, "manufacturer_source_path": str(metadata_path.parent)})
         available = bool(raw or clean)
         if available and model_match:
             match_status = "matched"
@@ -659,6 +817,8 @@ def manufacturer_sources_for(brand: str, model: str) -> list[dict[str, Any]]:
         else:
             match_status = "unavailable"
         source_type = str(source.get("source_type", "manufacturer_product_page"))
+        if source_type == "manufacturer":
+            source_type = str(metadata.get("source_type", "manufacturer_product_page"))
         type_label = {
             "manufacturer_product_page": "Strona produktu",
             "manufacturer_manual_pdf": "Instrukcja PDF",
@@ -674,6 +834,11 @@ def manufacturer_sources_for(brand: str, model: str) -> list[dict[str, Any]]:
             "url": url,
             "model_match": model_match,
             "match_status": match_status,
+            "fetch_status": str((source.get("fetch", {}) if isinstance(source.get("fetch"), dict) else {}).get("status", "unchecked")),
+            "clean_status": str((source.get("cleaning", {}) if isinstance(source.get("cleaning"), dict) else {}).get("status", "not_started")),
+            "cached": available,
+            "last_fetched_at": str((source.get("fetch", {}) if isinstance(source.get("fetch"), dict) else {}).get("fetched_at", metadata.get("fetched_at", ""))),
+            "refresh_recommended": False,
         })
     return sources
 
@@ -706,11 +871,15 @@ def run_command(
     )
 
 
-def validated_product_slug(product_slug: str) -> str:
+def validated_product_slug(product_slug: str, *, require_group: bool = True) -> str:
     if not PRODUCT_SLUG_PATTERN.fullmatch(product_slug):
         raise HTTPException(status_code=404, detail="Nie znaleziono produktu.")
     group_dir = PROJECT_ROOT / "output" / "model_groups" / product_slug
-    if not (group_dir / "group.json").is_file():
+    if require_group:
+        registered = any(product_slug_for(item.get("brand", ""), item.get("model", "")) == product_slug for item in load_products())
+        if registered:
+            return product_slug
+    if require_group and not (group_dir / "group.json").is_file():
         raise HTTPException(status_code=404, detail="Nie znaleziono grupy produktu.")
     return product_slug
 
@@ -1449,9 +1618,17 @@ def benchmark_payload(product_slug: str) -> dict[str, Any]:
     """Return a category-level matrix, never a copy of a single product card."""
     group_dir = group_dir_for_slug(product_slug)
     current_group = read_json(group_dir / "group.json", {})
-    category = str(current_group.get("benchmark_category", "")).strip()
+    catalog_product = product_for_group_key(str(current_group.get("group_key", "")))
+    category_record = {**current_group, **catalog_product}
+    category_key = str(category_record.get("category_key", "")).strip()
+    benchmark_group = str(category_record.get("benchmark_group", "")).strip()
+    category = str(category_record.get("benchmark_category", "")).strip()
     taxonomy_version = str(current_group.get("taxonomy_version", "")).strip()
-    taxonomy_ready = str(current_group.get("taxonomy_status", "")) == "classified" and bool(category) and bool(taxonomy_version)
+    try:
+        validate_category_assignment(category_key, benchmark_group)
+        taxonomy_ready = True
+    except CategoryValidationError:
+        taxonomy_ready = False
     current_group_key = str(current_group.get("group_key", ""))
     models: list[dict[str, Any]] = []
     fields_order: list[str] = []
@@ -1463,9 +1640,7 @@ def benchmark_payload(product_slug: str) -> dict[str, Any]:
             not taxonomy_ready
             or not group_key
             or group_key in seen_groups
-            or str(group.get("taxonomy_status", "")) != "classified"
-            or str(group.get("benchmark_category", "")).strip() != category
-            or str(group.get("taxonomy_version", "")).strip() != taxonomy_version
+            or not same_benchmark_group(category_record, {**group, **product_for_group_key(group_key)})
         ):
             continue
         seen_groups.add(group_key)
@@ -1497,6 +1672,8 @@ def benchmark_payload(product_slug: str) -> dict[str, Any]:
     return {
         "product_slug": product_slug,
         "benchmark_category": category,
+        "category_key": category_key,
+        "benchmark_group": benchmark_group,
         "taxonomy_version": taxonomy_version,
         "taxonomy_status": "classified" if taxonomy_ready else "review_required",
         "current_group_key": current_group_key,
@@ -1528,6 +1705,7 @@ def analysis_worker(run_id: str, product_slug: str, refresh_sources: bool) -> No
         set_product_analysis_status(product_slug, "analysis_running", run_id=run_id)
         payload["analysis"] = {"refresh_sources": refresh_sources, "used_sources": [], "coverage_before": coverage_before}
         save_run(payload)
+        source_pipeline_status = "success"
 
         if refresh_sources:
             # This is explicitly opt-in. It reuses the existing production runner
@@ -1535,11 +1713,15 @@ def analysis_worker(run_id: str, product_slug: str, refresh_sources: bool) -> No
             command = [
                 sys.executable, str(SCRIPTS_ROOT / "run_model_research_pipeline.py"),
                 "--marketplace", "allegro", "--brand", str(group.get("brand", "")),
-                "--model", str(group.get("model", "")), "--apply", "--resume",
+                "--model", str(group.get("model", "")), "--apply", "--resume", "--skip-product-profile",
             ]
             result = logged_command(payload, "Odświeżanie źródeł i analiza", 45, command)
-            if result.returncode != 0:
+            source_pipeline_status = pipeline_status_from_result(result)
+            if source_pipeline_status == "failed":
                 raise RuntimeError("Odświeżanie źródeł i analiza zakończyły się błędem.")
+            if source_pipeline_status == "partial":
+                payload["analysis_warning"] = SOURCE_ANALYSIS_TIMEOUT_MESSAGE if controlled_analysis_timeout(result) else "Analiza źródeł zakończyła się częściowo. Zachowano dotychczasowe dane."
+                update_run_log(payload, payload["analysis_warning"])
         else:
             status = analysis_status_payload(product_slug)
             if not status["can_analyze_saved_data"]:
@@ -1580,18 +1762,21 @@ def analysis_worker(run_id: str, product_slug: str, refresh_sources: bool) -> No
             cascade = logged_command(payload, "Analiza AI zapisanych źródeł", 72, [
                 sys.executable, str(SCRIPTS_ROOT / "extract_model_facts_cascade.py"), "--group-key", group_key, "--resume",
             ])
-            if cascade.returncode != 0:
+            if controlled_analysis_timeout(cascade):
+                source_pipeline_status = "partial"
+                payload["analysis_warning"] = SOURCE_ANALYSIS_TIMEOUT_MESSAGE
+                update_run_log(payload, payload["analysis_warning"])
+            elif cascade.returncode != 0:
                 raise RuntimeError("Analiza AI zapisanych źródeł zakończyła się błędem.")
 
-        benchmark = logged_command(payload, "Aktualizacja benchmarku", 84, [sys.executable, str(SCRIPTS_ROOT / "build_model_benchmark.py")])
-        if benchmark.returncode != 0:
-            raise RuntimeError("Nie udało się zaktualizować benchmarku.")
-        coverage = logged_command(payload, "Aktualizacja coverage", 91, [sys.executable, str(SCRIPTS_ROOT / "report_model_coverage.py")])
-        if coverage.returncode != 0:
-            raise RuntimeError("Nie udało się przeliczyć coverage.")
-        snapshot = logged_command(payload, "Eksport danych do FIELDNOTE", 97, [sys.executable, str(SCRIPTS_ROOT / "export_frontend_snapshot.py")])
-        if snapshot.returncode != 0:
-            raise RuntimeError("Nie udało się odświeżyć danych frontendu.")
+        if not refresh_sources:
+            benchmark = logged_command(payload, "Aktualizacja benchmarku", 84, [sys.executable, str(SCRIPTS_ROOT / "build_model_benchmark.py")])
+            if benchmark.returncode != 0:
+                raise RuntimeError("Nie udało się zaktualizować benchmarku.")
+            coverage = logged_command(payload, "Aktualizacja coverage", 91, [sys.executable, str(SCRIPTS_ROOT / "report_model_coverage.py")])
+            if coverage.returncode != 0:
+                raise RuntimeError("Nie udało się przeliczyć coverage.")
+        terminal_status = finalize_source_run(payload, run_id, source_pipeline_status)
 
         after_fields = state_fields(group_dir / "model_state.json")
         changed = changed_fields(before_fields, after_fields)
@@ -1602,8 +1787,8 @@ def analysis_worker(run_id: str, product_slug: str, refresh_sources: bool) -> No
         manifest.update({"finished_at": utc_now(), "sources_after": len(group.get("sources", [])), "fields_changed": changed, "coverage_after": coverage_after})
         atomic_write(history_dir / "refresh_manifest.json", manifest)
         payload["analysis"].update({"fields_changed": len(changed), "coverage_after": coverage_after})
-        payload.update({"status": "succeeded", "pipeline_status": "success", "current_step": "Analiza zakończona", "progress": 100, "snapshot_updated": True, "finished_at": utc_now()})
-        set_product_analysis_status(product_slug, "ready", run_id=run_id)
+        payload.update({"status": "succeeded" if terminal_status == "success" else "partial", "pipeline_status": terminal_status, "current_step": "Analiza zakończona" if terminal_status == "success" else "Analiza zakończona częściowo", "progress": 100, "finished_at": utc_now()})
+        set_product_analysis_status(product_slug, "ready" if terminal_status == "success" else "refresh_recommended", run_id=run_id)
         save_run(payload)
     except RunCancelledError as exc:
         manifest["finished_at"] = utc_now()
@@ -1616,7 +1801,7 @@ def analysis_worker(run_id: str, product_slug: str, refresh_sources: bool) -> No
         })
         set_product_analysis_status(product_slug, "cancelled", error=str(exc), run_id=run_id)
         save_run(payload)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except Exception as exc:
         manifest["finished_at"] = utc_now()
         atomic_write(history_dir / "refresh_manifest.json", manifest)
         payload.update({"status": "failed", "current_step": "Analiza zatrzymała się", "error": str(exc), "finished_at": utc_now()})
@@ -1632,35 +1817,135 @@ def logged_command(payload: dict[str, Any], step: str, progress: int, command: l
     payload["current_step"] = step
     payload["progress"] = progress
     heartbeat_run(payload)
-    process = subprocess.Popen(
-        command,
-        cwd=PROJECT_ROOT,
-        env=pipeline_environment(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        start_new_session=True,
-    )
-    payload["child_pid"] = process.pid
-    heartbeat_run(payload)
+    run_id = str(payload.get("run_id", ""))
+    work_directory = RUN_COORDINATOR.work_directory(run_id)
+    work_directory.mkdir(parents=True, exist_ok=True)
+    stdout_path = work_directory / "child_stdout.log"
+    stderr_path = work_directory / "child_stderr.log"
+    stdout_handle = stdout_path.open("w", encoding="utf-8")
+    stderr_handle = stderr_path.open("w", encoding="utf-8")
+    process: subprocess.Popen[str] | None = None
     try:
-        stdout, stderr = process.communicate(timeout=RUN_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired as exc:
-        terminate_process_group(process)
-        stdout, stderr = process.communicate()
-        raise RuntimeError(f"Etap '{step}' przekroczył limit {RUN_TIMEOUT_SECONDS}s.") from exc
+        process = subprocess.Popen(
+            command,
+            cwd=PROJECT_ROOT,
+            env=pipeline_environment(),
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
+        )
+        payload["child_pid"] = process.pid
+        heartbeat_run(payload)
+        deadline = time.monotonic() + RUN_TIMEOUT_SECONDS
+        while process.poll() is None:
+            if time.monotonic() >= deadline:
+                terminate_process_group(process)
+                process.wait(timeout=10)
+                raise RuntimeError(f"Etap '{step}' przekroczył limit {RUN_TIMEOUT_SECONDS}s.")
+            latest = read_run(run_id)
+            if latest.get("cancel_requested_at"):
+                terminate_process_group(process)
+                process.wait(timeout=10)
+                raise RunCancelledError("Run został anulowany przez użytkownika.")
+            time.sleep(0.25)
+            heartbeat_run(payload)
+    except BaseException:
+        if process is not None and process.poll() is None:
+            terminate_process_group(process)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+        raise
     finally:
         payload["child_pid"] = None
-    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-    latest = read_run(str(payload.get("run_id", "")))
-    if latest.get("cancel_requested_at"):
-        raise RunCancelledError("Run został anulowany przez użytkownika.")
+        stdout_handle.close()
+        stderr_handle.close()
+    stdout = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
+    stderr = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+    result = subprocess.CompletedProcess(command, process.returncode if process is not None else 1, stdout, stderr)
     for line in (result.stdout + result.stderr).splitlines():
         update_run_log(payload, f"{step}: {line}")
     heartbeat_run(payload)
     return result
+
+
+def controlled_analysis_timeout(result: subprocess.CompletedProcess[str]) -> bool:
+    """Recognize the cascade's documented safe timeout outcome, not a traceback."""
+    output = f"{result.stdout}\n{result.stderr}"
+    return (
+        result.returncode == CONTROLLED_SOURCE_ANALYSIS_EXIT
+        and "source_analysis_status=failed" in output
+        and "source_analysis_error_code=source_analysis_timeout" in output
+    )
+
+
+def pipeline_status_from_result(result: subprocess.CompletedProcess[str]) -> str:
+    """Read the canonical runner status while preserving the controlled timeout."""
+    output = f"{result.stdout}\n{result.stderr}"
+    matches = re.findall(r"^pipeline_status=([a-z]+)$", output, flags=re.MULTILINE)
+    status = matches[-1] if matches else ""
+    if controlled_analysis_timeout(result):
+        return "partial"
+    if status in {"success", "partial", "failed"}:
+        return status
+    return "failed" if result.returncode else "success"
+
+
+def profile_status_allows_success(status: str) -> bool:
+    return status in {"generated", "cached"}
+
+
+def final_run_status(source_status: str, profile_status: str) -> str:
+    """A source success is not a full success when the profile is unavailable."""
+    if source_status not in {"success", "partial"}:
+        return "failed"
+    if source_status == "partial" or not profile_status_allows_success(profile_status):
+        return "partial"
+    return "success"
+
+
+def export_snapshot_for_owned_run(payload: dict[str, Any], run_id: str, progress: int = 97) -> bool:
+    """The API parent owns exactly one frontend export after the source pipeline."""
+    try:
+        with global_aggregation_lock(PROJECT_ROOT / "output" / "run_locks", run_id):
+            snapshot = logged_command(
+                payload,
+                "Eksport danych do FIELDNOTE",
+                progress,
+                [sys.executable, str(SCRIPTS_ROOT / "export_frontend_snapshot.py")],
+            )
+    except LockUnavailableError:
+        payload["snapshot_updated"] = False
+        payload["snapshot_warning"] = "Inny run aktualizuje katalog frontendowy."
+        return False
+    payload["snapshot_updated"] = snapshot.returncode == 0
+    if snapshot.returncode != 0:
+        payload["snapshot_warning"] = "Research zakończony, ale nie udało się odświeżyć katalogu frontendowego."
+    return bool(payload["snapshot_updated"])
+
+
+def finalize_source_run(payload: dict[str, Any], run_id: str, source_status: str) -> str:
+    """Run the parent-owned post-processing exactly once after source work."""
+    profile_status = generate_profile_for_owned_run(payload, run_id)
+    status = final_run_status(source_status, profile_status)
+    # The generated frontend snapshot reads product_state.json. Persist the
+    # terminal state before exporting so a completed partial run cannot leave
+    # the UI showing the earlier "analysis_running" state.
+    set_product_analysis_status(
+        str(payload.get("product_slug", "")),
+        "ready" if status == "success" else "refresh_recommended",
+        run_id=run_id,
+    )
+    snapshot_updated = export_snapshot_for_owned_run(payload, run_id, 97)
+    if not snapshot_updated and status == "success":
+        payload["snapshot_warning"] = payload.get("snapshot_warning") or "Nie udało się wyeksportować aktualnych danych do widoku produktu."
+        set_product_analysis_status(str(payload.get("product_slug", "")), "refresh_recommended", run_id=run_id)
+        return "partial"
+    return status
 
 
 def refresh_worker(run_id: str, product_slug: str, mode: str) -> None:
@@ -1694,90 +1979,41 @@ def refresh_worker(run_id: str, product_slug: str, mode: str) -> None:
         atomic_write(history_dir / "refresh_manifest.json", manifest)
         save_run(payload)
 
-        new_offer_ids: list[str] = []
+        source_pipeline_status = "success"
         if mode == "incremental":
-            payload["current_step"] = "Wyszukiwanie nowych ofert"
-            payload["progress"] = 18
-            save_run(payload)
-            directory = targeted_dir(str(group.get("brand", "")), str(group.get("model", "")))
-            cached_html = directory / "listing.html"
-            if cached_html.exists():
-                search = logged_command(payload, "Wyszukiwanie nowych ofert (lokalny listing)", 24, [
-                    sys.executable, str(SCRIPTS_ROOT / "fetch_targeted_model_offers.py"), "--marketplace", "allegro",
-                    "--brand", str(group.get("brand", "")), "--model", str(group.get("model", "")), "--input-html", str(cached_html),
-                ])
-                if search.returncode != 0:
-                    raise RuntimeError("Nie udało się sprawdzić zapisanego listingu ofert.")
-                new_offers_path = directory / "new_offers.csv"
-                if new_offers_path.exists():
-                    with new_offers_path.open(encoding="utf-8", newline="") as handle:
-                        new_offer_ids = [str(row.get("external_offer_id", "")).strip() for row in csv.DictReader(handle) if row.get("external_offer_id")]
-            elif os.getenv("FIRECRAWL_API_KEY"):
-                payload["current_step"] = "Wyszukiwanie nowych ofert przez Firecrawl"
-                save_run(payload)
-                search = logged_command(payload, "Wyszukiwanie nowych ofert", 24, [
-                    sys.executable, str(SCRIPTS_ROOT / "fetch_targeted_model_offers.py"), "--marketplace", "allegro",
-                    "--brand", str(group.get("brand", "")), "--model", str(group.get("model", "")),
-                ])
-                if search.returncode != 0:
-                    raise RuntimeError("Nie udało się wyszukać nowych ofert.")
-            else:
-                update_run_log(payload, "Wyszukiwanie nowych ofert pominięte: brak lokalnego listingu i FIRECRAWL_API_KEY.")
-
-            if new_offer_ids:
-                pipeline = [
-                    sys.executable, str(SCRIPTS_ROOT / "run_model_research_pipeline.py"), "--marketplace", "allegro",
-                    "--brand", str(group.get("brand", "")), "--model", str(group.get("model", "")), "--apply", "--resume",
-                ]
-                if not os.getenv("OPENAI_API_KEY"):
-                    pipeline.append("--skip-ai")
-                result = logged_command(payload, "Pobieranie i analiza nowych ofert", 52, pipeline)
-                if result.returncode != 0:
-                    raise RuntimeError("Pipeline nowych ofert zakończył się błędem.")
-            elif changed_sources:
-                if not os.getenv("OPENAI_API_KEY"):
-                    update_run_log(payload, "Zmodyfikowane źródła wykryto, ale analiza AI została pominięta: brak OPENAI_API_KEY.")
-                else:
-                    state_path = group_dir / "model_state.json"
-                    state = read_json(state_path, {})
-                    processed = [item for item in state.get("processed_source_ids", []) if item not in changed_sources]
-                    remaining = sorted(set(state.get("remaining_source_ids", [])) | set(changed_sources))
-                    state["processed_source_ids"] = processed
-                    state["remaining_source_ids"] = remaining
-                    atomic_write(state_path, state)
-                    result = logged_command(payload, "Analiza zmienionych źródeł", 58, [
-                        sys.executable, str(SCRIPTS_ROOT / "extract_model_facts_cascade.py"), "--group-key", group_key, "--resume",
-                    ])
-                    if result.returncode != 0:
-                        raise RuntimeError("Analiza zmienionych źródeł zakończyła się błędem.")
-            else:
-                # Refresh must complete with an analysis pass even when the local
-                # listing contains no new cards. `--resume` keeps this cheap.
-                if not os.getenv("OPENAI_API_KEY"):
-                    raise RuntimeError("Odświeżenie wymaga OPENAI_API_KEY do automatycznej analizy zapisanych źródeł.")
-                result = logged_command(payload, "Analiza zapisanych źródeł", 58, [
-                    sys.executable, str(SCRIPTS_ROOT / "extract_model_facts_cascade.py"), "--group-key", group_key, "--resume",
-                ])
-                if result.returncode != 0:
-                    raise RuntimeError("Analiza zapisanych źródeł zakończyła się błędem.")
+            # The canonical runner owns search, merge, fetch, clean, registry,
+            # grouping, analysis, benchmark and coverage exactly once.
+            result = logged_command(payload, "Odświeżanie źródeł i analiza", 72, [
+                sys.executable, str(SCRIPTS_ROOT / "run_model_research_pipeline.py"),
+                "--marketplace", "allegro", "--brand", str(group.get("brand", "")),
+                "--model", str(group.get("model", "")), "--apply", "--resume", "--skip-product-profile",
+            ])
+            source_pipeline_status = pipeline_status_from_result(result)
+            if source_pipeline_status == "failed":
+                raise RuntimeError("Odświeżanie źródeł i analiza zakończyły się błędem.")
+            if source_pipeline_status == "partial":
+                payload["analysis_warning"] = SOURCE_ANALYSIS_TIMEOUT_MESSAGE if controlled_analysis_timeout(result) else "Analiza źródeł zakończyła się częściowo. Zachowano dotychczasowe dane."
+                update_run_log(payload, payload["analysis_warning"])
         else:
             if not os.getenv("OPENAI_API_KEY"):
                 raise RuntimeError("Pełna ponowna analiza wymaga OPENAI_API_KEY; lokalne snapshoty nie zostały zmienione.")
             result = logged_command(payload, "Pełna ponowna analiza lokalnych snapshotów", 55, [
                 sys.executable, str(SCRIPTS_ROOT / "extract_model_facts_cascade.py"), "--group-key", group_key, "--reset-state",
             ])
-            if result.returncode != 0:
+            if controlled_analysis_timeout(result):
+                source_pipeline_status = "partial"
+                payload["analysis_warning"] = SOURCE_ANALYSIS_TIMEOUT_MESSAGE
+                update_run_log(payload, payload["analysis_warning"])
+            elif result.returncode != 0:
                 raise RuntimeError("Pełna ponowna analiza zakończyła się błędem.")
+            benchmark = logged_command(payload, "Aktualizacja benchmarku", 76, [sys.executable, str(SCRIPTS_ROOT / "build_model_benchmark.py")])
+            if benchmark.returncode != 0:
+                raise RuntimeError("Nie udało się zaktualizować benchmarku.")
+            coverage = logged_command(payload, "Aktualizacja coverage", 84, [sys.executable, str(SCRIPTS_ROOT / "report_model_coverage.py")])
+            if coverage.returncode != 0:
+                raise RuntimeError("Nie udało się przeliczyć coverage.")
 
-        benchmark = logged_command(payload, "Aktualizacja benchmarku", 76, [sys.executable, str(SCRIPTS_ROOT / "build_model_benchmark.py")])
-        if benchmark.returncode != 0:
-            raise RuntimeError("Nie udało się zaktualizować benchmarku.")
-        coverage = logged_command(payload, "Aktualizacja coverage", 84, [sys.executable, str(SCRIPTS_ROOT / "report_model_coverage.py")])
-        if coverage.returncode != 0:
-            raise RuntimeError("Nie udało się przeliczyć coverage.")
-        snapshot = logged_command(payload, "Eksport danych do FIELDNOTE", 94, [sys.executable, str(SCRIPTS_ROOT / "export_frontend_snapshot.py")])
-        if snapshot.returncode != 0:
-            raise RuntimeError("Nie udało się odświeżyć snapshotu frontendu.")
+        terminal_status = finalize_source_run(payload, run_id, source_pipeline_status)
 
         refreshed_group = read_json(group_dir / "group.json", {})
         after_fields = state_fields(group_dir / "model_state.json")
@@ -1794,8 +2030,8 @@ def refresh_worker(run_id: str, product_slug: str, mode: str) -> None:
         })
         atomic_write(history_dir / "refresh_manifest.json", manifest)
         payload["refresh"].update({"fields_changed": len(changed), "coverage_after": coverage_after})
-        payload.update({"status": "succeeded", "pipeline_status": "success", "current_step": "Odświeżono dane", "progress": 100, "snapshot_updated": True, "finished_at": utc_now()})
-        set_product_analysis_status(product_slug, "ready", run_id=run_id)
+        payload.update({"status": "succeeded" if terminal_status == "success" else "partial", "pipeline_status": terminal_status, "current_step": "Odświeżono dane" if terminal_status == "success" else "Odświeżono dane częściowo", "progress": 100, "finished_at": utc_now()})
+        set_product_analysis_status(product_slug, "ready" if terminal_status == "success" else "refresh_recommended", run_id=run_id)
         save_run(payload)
     except RunCancelledError as exc:
         manifest["finished_at"] = utc_now()
@@ -1808,7 +2044,7 @@ def refresh_worker(run_id: str, product_slug: str, mode: str) -> None:
         })
         set_product_analysis_status(product_slug, "cancelled", error=str(exc), run_id=run_id)
         save_run(payload)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except Exception as exc:
         manifest["finished_at"] = utc_now()
         atomic_write(history_dir / "refresh_manifest.json", manifest)
         payload.update({"status": "failed", "current_step": "Odświeżanie zatrzymało się", "error": str(exc), "finished_at": utc_now()})
@@ -1856,6 +2092,80 @@ def terminate_process_group(process: subprocess.Popen[str]) -> None:
         os.killpg(process.pid, signal.SIGTERM)
     except (AttributeError, ProcessLookupError, PermissionError):
         process.terminate()
+
+
+def commit_cached_manufacturer_source(payload: dict[str, Any]) -> bool:
+    """Run the shared manufacturer lifecycle from an already saved snapshot.
+
+    This deliberately never enables network or OpenAI. A missing official
+    source is an optional-source warning, not a reason to discard a successful
+    marketplace research run.
+    """
+    selected = payload.get("selected_manufacturer_source_ids", [])
+    if not payload.get("include_manufacturer_sources") or not isinstance(selected, list) or not selected:
+        return True
+    command = [
+        sys.executable, str(SCRIPTS_ROOT / "check_manufacturer_pipeline_live.py"),
+        "--brand", str(payload.get("brand", "")), "--model", str(payload.get("model", "")),
+        "--max-sources", "1", "--resume", "--no-fetch", "--no-openai",
+    ]
+    payload["current_step"] = "Zapisywanie źródła producenta"
+    payload["progress"] = max(int(payload.get("progress", 0)), 93)
+    heartbeat_run(payload)
+    result = run_command(command)
+    output = f"{result.stdout}\n{result.stderr}".strip()
+    for line in output.splitlines():
+        update_run_log(payload, f"manufacturer: {line}")
+    if result.returncode != 0 or "terminal_status=success" not in output:
+        payload["manufacturer_warning"] = "Nie udało się zapisać wybranego źródła producenta z lokalnego cache."
+        return False
+    source_id_match = re.findall(r"^source_id=(.+)$", output, flags=re.MULTILINE)
+    source_id = source_id_match[-1].strip() if source_id_match else ""
+    if source_id and source_id not in {str(item) for item in selected}:
+        payload["manufacturer_warning"] = "Kontrolowany runner zwrócił inne źródło producenta niż wybrane w Research."
+        return False
+    payload["manufacturer_lifecycle_committed"] = True
+    return True
+
+
+def generate_profile_for_owned_run(payload: dict[str, Any], run_id: str) -> str:
+    """Generate once after source commit and return an explicit terminal status."""
+    if os.getenv("PRODUCT_PROFILE_AI_ENABLED", "").lower() not in {"1", "true", "yes"}:
+        cached = get_profile(str(payload["product_slug"]))
+        if str(cached.get("profile_status", "")) == "generated":
+            payload.update({"product_profile_stage": "completed", "product_profile_status": "cached", "product_profile_warning": ""})
+            return "cached"
+        payload.update({
+            "product_profile_stage": "skipped",
+            "product_profile_status": "skipped",
+            "product_profile_warning": "Generowanie profilu AI jest wyłączone w lokalnej konfiguracji.",
+        })
+        return "skipped"
+    try:
+        payload.update({"current_step": "Generowanie profilu produktu", "progress": max(int(payload.get("progress", 0)), 96)})
+        heartbeat_run(payload)
+        profile, cached = generate_or_load_profile(str(payload["product_slug"]), allow_openai=True, owned_lock_run_id=run_id)
+        profile_status = str(profile.get("profile_status", "failed"))
+        generation = profile.get("generation", {}) if isinstance(profile.get("generation"), dict) else {}
+        if profile_status == "generated":
+            status = "cached" if cached else "generated"
+            payload.update({"product_profile_stage": "completed", "product_profile_status": status, "product_profile_warning": ""})
+            return status
+        if profile_status == "not_generated":
+            warning = str(generation.get("failure_reason", "Brak wystarczających danych źródłowych do wygenerowania profilu."))
+            status = "insufficient_profile_evidence" if str(generation.get("failure_code", "")) == "insufficient_profile_evidence" else "skipped"
+            payload.update({"product_profile_stage": "partial", "product_profile_status": status, "product_profile_warning": warning})
+            update_run_log(payload, f"profile: {status}: {warning}")
+            return status
+        warning = str(generation.get("failure_reason", "Profil nie został wygenerowany."))
+        payload.update({"product_profile_stage": "failed", "product_profile_status": "failed", "product_profile_warning": warning})
+        update_run_log(payload, f"profile: failed: {warning}")
+        return "failed"
+    except Exception as exc:
+        warning = "Nie udało się wygenerować profilu produktu. Zachowano dotychczasowe dane."
+        payload.update({"product_profile_stage": "failed", "product_profile_status": "failed", "product_profile_warning": warning})
+        update_run_log(payload, f"profile: failed: {warning}")
+        return "failed"
 
 
 def pipeline_worker(run_id: str, command: list[str]) -> None:
@@ -1930,8 +2240,12 @@ def pipeline_worker(run_id: str, command: list[str]) -> None:
             pipeline_status = "success"
         if pipeline_status not in {"success", "partial", "failed"}:
             pipeline_status = "failed"
+        if pipeline_status in {"success", "partial"}:
+            if not commit_cached_manufacturer_source(payload):
+                pipeline_status = "partial"
+            pipeline_status = finalize_source_run(payload, run_id, pipeline_status)
         payload["pipeline_status"] = pipeline_status
-        payload["status"] = "succeeded" if pipeline_status in {"success", "partial"} else "failed"
+        payload["status"] = "succeeded" if pipeline_status == "success" else "partial" if pipeline_status == "partial" else "failed"
         payload["progress"] = 100 if pipeline_status in {"success", "partial"} else payload.get("progress", 0)
         payload["current_step"] = "Zakończono" if pipeline_status != "failed" else "Proces zatrzymał się"
         if pipeline_status == "failed":
@@ -1941,16 +2255,8 @@ def pipeline_worker(run_id: str, command: list[str]) -> None:
         if pipeline_status in {"success", "partial"}:
             product_status = "ready" if pipeline_status == "success" else "refresh_recommended"
             set_product_analysis_status(str(payload.get("product_slug", "")), product_status, run_id=run_id)
-            try:
-                with global_aggregation_lock(PROJECT_ROOT / "output" / "run_locks", run_id):
-                    snapshot = run_command([sys.executable, str(SCRIPTS_ROOT / "export_frontend_snapshot.py")])
-            except LockUnavailableError:
-                snapshot = subprocess.CompletedProcess([], 1, "", "Inny run aktualizuje snapshot frontendowy.")
-            for line in (snapshot.stdout + snapshot.stderr).splitlines():
-                update_run_log(payload, f"snapshot: {line}")
-            payload["snapshot_updated"] = snapshot.returncode == 0
-            if snapshot.returncode != 0:
-                payload["error"] = "Research zakończony, ale nie udało się odświeżyć katalogu frontendowego."
+            if not payload.get("snapshot_updated"):
+                payload["error"] = str(payload.get("snapshot_warning", "Research zakończony, ale nie udało się odświeżyć katalogu frontendowego."))
     except subprocess.TimeoutExpired:
         payload.update({"status": "timed_out", "current_step": "Przekroczono limit czasu", "error": f"Pipeline przekroczył limit {RUN_TIMEOUT_SECONDS}s."})
     except (OSError, RuntimeError) as exc:
@@ -1984,10 +2290,19 @@ def start_pipeline_run(
     run_id = str(uuid.uuid4())
     product_slug = f"{path_slug(request.brand)}__{path_slug(request.model)}"
     group_key = f"{normalized(request.brand)}|{normalized(request.model)}"
+    existing_catalog_product = product_for_group_key(group_key)
     try:
         RUN_COORDINATOR.acquire_product(run_id=run_id, product_slug=product_slug, group_key=group_key)
     except LockUnavailableError as exc:
         raise HTTPException(status_code=409, detail="Dla tego produktu działa już inne uruchomienie. Poczekaj na jego zakończenie albo anuluj je.") from exc
+    try:
+        category_assignment = validate_category_assignment(
+            request.category_key or existing_catalog_product.get("category_key", ""),
+            request.benchmark_group or existing_catalog_product.get("benchmark_group", ""),
+        )
+    except CategoryValidationError as exc:
+        RUN_COORDINATOR.release_product(run_id)
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
     payload: dict[str, Any] = {
         "run_id": run_id,
         "status": "queued",
@@ -2002,7 +2317,10 @@ def start_pipeline_run(
         "brand": request.brand,
         "model": request.model,
         "marketplace": "allegro",
+        "category_key": category_assignment["category_key"],
+        "benchmark_group": category_assignment["benchmark_group"],
         "selected_offer_ids": request.selected_offer_ids,
+        "selected_manufacturer_source_ids": request.selected_manufacturer_source_ids,
         "include_manufacturer_sources": request.include_manufacturer_sources,
         "retry_of": retry_of,
         "snapshot_updated": False,
@@ -2032,8 +2350,8 @@ def start_pipeline_run(
     except Exception:
         RUN_COORDINATOR.release_product(run_id)
         raise
-    if request.include_manufacturer_sources:
-        update_run_log(payload, "Źródła producenta zapisane wcześniej dla tego modelu pozostają dostępne w grupie modelu.")
+    if request.include_manufacturer_sources and request.selected_manufacturer_source_ids:
+        update_run_log(payload, "Wybrane oficjalne źródła producenta zostaną zweryfikowane z lokalnego cache po pipeline Allegro.")
         save_run(payload)
 
     # Retry of a run explicitly marked local-only never restarts marketplace
@@ -2049,8 +2367,9 @@ def start_pipeline_run(
         command = [
             sys.executable, str(SCRIPTS_ROOT / "run_model_research_pipeline.py"),
             "--marketplace", "allegro", "--brand", request.brand, "--model", request.model,
-            "--apply", "--resume", "--skip-ai", "--retry-errors",
-            "--run-context", str(PROJECT_ROOT / payload["run_context_path"]),
+            "--category-key", category_assignment["category_key"], "--benchmark-group", category_assignment["benchmark_group"],
+            "--apply", "--resume", "--skip-ai", "--retry-errors", "--skip-product-profile",
+            "--run-context", str(PROJECT_ROOT / payload["run_context_path"]), "--skip-product-profile",
         ]
     elif safe_fixture:
         fixture_root = RUNS_ROOT / run_id / "fixture"
@@ -2058,6 +2377,7 @@ def start_pipeline_run(
         command = [
             sys.executable, str(SCRIPTS_ROOT / "run_model_research_pipeline.py"),
             "--marketplace", "allegro", "--brand", request.brand, "--model", request.model,
+            "--category-key", category_assignment["category_key"], "--benchmark-group", category_assignment["benchmark_group"],
             "--fixture-scenario", "success", "--fixture-root", str(fixture_root),
             "--run-context", str(PROJECT_ROOT / payload["run_context_path"]),
         ]
@@ -2068,7 +2388,8 @@ def start_pipeline_run(
         command = [
             sys.executable, str(SCRIPTS_ROOT / "run_model_research_pipeline.py"),
             "--marketplace", "allegro", "--brand", request.brand, "--model", request.model,
-            "--apply", "--resume", "--run-context", str(PROJECT_ROOT / payload["run_context_path"]),
+            "--category-key", category_assignment["category_key"], "--benchmark-group", category_assignment["benchmark_group"],
+            "--apply", "--resume", "--run-context", str(PROJECT_ROOT / payload["run_context_path"]), "--skip-product-profile",
         ]
         # A local run without an OpenAI key remains useful: the existing runner
         # updates fetched sources, the benchmark and coverage, while skipping AI.
@@ -2090,72 +2411,79 @@ def health() -> dict[str, bool]:
 
 @app.post("/api/research/preview")
 def research_preview(request: PreviewRequest) -> dict[str, Any]:
-    cache_key = preview_cache_key(request.marketplace, request.brand, request.model)
+    existing = product_for_group_key(f"{normalized(request.brand)}|{normalized(request.model)}")
+    category_key = request.category_key or str(existing.get("category_key", ""))
+    benchmark_group = request.benchmark_group or str(existing.get("benchmark_group", ""))
+    try:
+        validate_category_assignment(category_key, benchmark_group)
+    except CategoryValidationError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
+
+    cache_key = preview_cache_key(request.marketplace, request.brand, request.model, category_key)
     normalized_brand = normalized(request.brand)
     normalized_model = normalized(request.model)
     current_product_slug = f"{path_slug(request.brand)}__{path_slug(request.model)}"
-    cached = PREVIEW_CACHE.get(cache_key)
-    if cached is not None:
-        response = copy.deepcopy(cached)
-        response["preview_diagnostics"]["cache_hit"] = True
-        response["preview_diagnostics"]["previous_product_slug"] = request.previous_product_slug or ""
-        print(json.dumps({"event": "research_preview", **response["preview_diagnostics"]}, ensure_ascii=False), flush=True)
-        return response
+    cached_info = cached_listing_info(request.brand, request.model, request.marketplace, category_key)
+    diagnostics = {
+        "query": f"{request.brand} {request.model}", "cache_key": cache_key,
+        "cache_hit": request.search_mode == "cache", "previous_product_slug": request.previous_product_slug or "",
+        "current_product_slug": current_product_slug, "exact_count": 0, "supplementary_count": 0,
+        "accessory_count": 0, "probable_count": 0, "titles": [],
+    }
+    base = {
+        "brand": request.brand, "model": request.model, "requested_brand": request.brand,
+        "requested_model": request.model, "normalized_brand": normalized_brand,
+        "normalized_model": normalized_model, "search_query": f"{request.brand} {request.model}",
+        "preview_cache_key": cache_key, "manufacturer_sources": manufacturer_sources_for(request.brand, request.model),
+        "preview_diagnostics": diagnostics,
+    }
 
-    directory = targeted_dir(request.brand, request.model, request.marketplace)
-    cached_html = directory / "listing.html"
-    command = [
-        sys.executable, str(SCRIPTS_ROOT / "fetch_targeted_model_offers.py"),
-        "--marketplace", request.marketplace, "--brand", request.brand, "--model", request.model,
-    ]
-    if cached_html.exists():
-        command.extend(["--input-html", str(cached_html)])
-        mode = "local_cached_listing"
-    elif not os.getenv("FIRECRAWL_API_KEY"):
-        raise HTTPException(
-            status_code=409,
-            detail="Brak zapisanego listingu oraz FIRECRAWL_API_KEY. Dodaj klucz tylko w środowisku lokalnym lub wybierz model z lokalnymi danymi.",
-        )
+    if request.search_mode == "cache":
+        if cached_info is None:
+            return {**base, "status": "CACHE_NOT_AVAILABLE", "message": "Brak zapisanych wyników dla tego produktu i kategorii.", "requested_mode": "cache", "result_mode": "cache_not_available", "is_fresh": False, "cached_result_available": False, "offers": [], "summary": {}}
+        directory = Path(cached_info["directory"])
+        # Historical cache is parsed locally after a classifier upgrade; no
+        # network provider is called and its original fetch date is preserved.
+        cached_summary = read_json(directory / "research_summary.json", {})
+        needs_reparse = not (directory / "extracted_offers.json").is_file() or str(cached_summary.get("match_classification_version", "")) != "3"
+        if needs_reparse:
+            command = [sys.executable, str(SCRIPTS_ROOT / "fetch_targeted_model_offers.py"), "--marketplace", request.marketplace, "--brand", request.brand, "--model", request.model, "--category-key", category_key, "--input-html", str(directory / "listing.html")]
+            completed = run_command(command)
+            if completed.returncode != 0:
+                return {**base, "status": "CACHE_NOT_AVAILABLE", "message": "Nie udało się odczytać zapisanych wyników.", "requested_mode": "cache", "result_mode": "cache_not_available", "is_fresh": False, "cached_result_available": False, "offers": [], "summary": {}}
+            directory = canonical_targeted_dir(request.brand, request.model, request.marketplace)
+            cache_listing_artifacts(directory, listing_cache_dir(request.brand, request.model, request.marketplace, category_key), marketplace=request.marketplace, brand=request.brand, model=request.model, category_key=category_key, fetched_at=str(cached_info["cached_at"]))
+        offers, summary = read_preview_offers(request.brand, request.model, category_key, directory=directory)
+        result_mode, is_fresh, fetched_at = "local_cache", False, str(cached_info["cached_at"])
     else:
-        mode = "live_firecrawl"
-    completed = run_command(command)
-    if completed.returncode != 0:
-        detail = redact((completed.stderr or completed.stdout).strip())[-700:]
-        raise HTTPException(status_code=502, detail=detail or "Nie udało się przygotować podglądu ofert.")
-    offers, summary = read_preview_offers(request.brand, request.model)
+        # LIVE deliberately ignores all local listing cache and invokes Firecrawl.
+        if not os.getenv("FIRECRAWL_API_KEY"):
+            return {**base, "status": "LIVE_SEARCH_FAILED", "message": "Nie udało się pobrać aktualnych ofert.", "requested_mode": "live", "result_mode": "live_failed", "is_fresh": False, "cached_result_available": cached_info is not None, "cached_at": str(cached_info["cached_at"]) if cached_info else "", "offers": [], "summary": {}}
+        directory = canonical_targeted_dir(request.brand, request.model, request.marketplace)
+        command = [sys.executable, str(SCRIPTS_ROOT / "fetch_targeted_model_offers.py"), "--marketplace", request.marketplace, "--brand", request.brand, "--model", request.model, "--category-key", category_key]
+        completed = run_command(command)
+        if completed.returncode != 0:
+            return {**base, "status": "LIVE_SEARCH_FAILED", "message": "Nie udało się pobrać aktualnych ofert.", "requested_mode": "live", "result_mode": "live_failed", "is_fresh": False, "cached_result_available": cached_info is not None, "cached_at": str(cached_info["cached_at"]) if cached_info else "", "offers": [], "summary": {}}
+        fetched_at = cache_listing_artifacts(directory, listing_cache_dir(request.brand, request.model, request.marketplace, category_key), marketplace=request.marketplace, brand=request.brand, model=request.model, category_key=category_key)
+        offers, summary = read_preview_offers(request.brand, request.model, category_key, directory=directory)
+        result_mode, is_fresh = "live_firecrawl", True
+
     exact = [offer for offer in offers if offer.get("match_status") == "exact_match"]
     supplementary = [offer for offer in offers if offer.get("source_group") == "supplementary_source"]
     accessories = [offer for offer in offers if offer.get("product_type") == "accessory"]
-    uncertain = [offer for offer in offers if offer.get("match_status") == "uncertain"]
-    diagnostics = {
-        "query": f"{request.brand} {request.model}",
-        "cache_key": cache_key,
-        "cache_hit": False,
-        "previous_product_slug": request.previous_product_slug or "",
-        "current_product_slug": current_product_slug,
-        "exact_count": len(exact),
-        "supplementary_count": len(supplementary),
-        "accessory_count": len(accessories),
-        "uncertain_count": len(uncertain),
-        "titles": [str(offer.get("title", "")) for offer in offers[:10]],
-    }
+    probable = [offer for offer in offers if offer.get("match_status") == "probable_match"]
+    # A registered identity remains in the catalogue even when this listing has
+    # no exact model result. This is lifecycle information, not a deletion.
+    if existing and not exact:
+        update_product_state(current_product_slug, "refresh_recommended", refresh_reason="insufficient_profile_evidence")
+    diagnostics.update({"exact_count": len(exact), "supplementary_count": len(supplementary), "accessory_count": len(accessories), "probable_count": len(probable), "titles": [str(offer.get("title", "")) for offer in offers[:10]]})
     response = {
-        "status": "ok",
-        "mode": mode,
-        "brand": request.brand,
-        "model": request.model,
-        "requested_brand": request.brand,
-        "requested_model": request.model,
-        "normalized_brand": normalized_brand,
-        "normalized_model": normalized_model,
-        "search_query": f"{request.brand} {request.model}",
-        "preview_cache_key": cache_key,
+        **base, "status": "ok", "mode": result_mode, "requested_mode": request.search_mode,
+        "result_mode": result_mode, "is_fresh": is_fresh, "fetched_at": fetched_at if is_fresh else "",
+        "cached_at": fetched_at if not is_fresh else "", "cached_result_available": True,
         "offers": offers,
-        "manufacturer_sources": manufacturer_sources_for(request.brand, request.model),
         "summary": summary,
-        "preview_diagnostics": diagnostics,
     }
-    PREVIEW_CACHE[cache_key] = copy.deepcopy(response)
     print(json.dumps({"event": "research_preview", **diagnostics}, ensure_ascii=False), flush=True)
     return response
 
@@ -2286,24 +2614,344 @@ def product_benchmark(product_slug: str) -> dict[str, Any]:
     return {"schema_version": "1", **benchmark_payload(validated_product_slug(product_slug))}
 
 
+def competitive_benchmark_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "benchmark_id": str(manifest.get("benchmark_id", "")),
+        "title": str(manifest.get("title", "")),
+        "status": str(manifest.get("status", "draft")),
+        "benchmark_group_key": str(manifest.get("benchmark_group_key", "")),
+        "anchor_product_id": str(manifest.get("anchor_product_id", "")),
+        "participant_count": len(manifest.get("participant_product_ids", [])),
+        "created_at": str(manifest.get("created_at", "")),
+        "updated_at": str(manifest.get("updated_at", "")),
+    }
+
+
+def benchmark_product_ref(product: dict[str, Any], *, states: dict[str, dict[str, Any]], links_by_slug: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Resolve a catalog product into the shared, read-only benchmark DTO."""
+    brand = str(product.get("brand", "")).strip()
+    model = str(product.get("model", "")).strip()
+    configuration = str(product.get("configuration", "") or "").strip()
+    product_slug = product_slug_for(brand, model, configuration)
+    state = states.get(product_slug, {})
+    return {
+        "product_id": str(product.get("product_id", "")).strip(),
+        "brand": brand,
+        "model": model,
+        "configuration": configuration,
+        "benchmark_group": str(product.get("benchmark_group", "")).strip(),
+        "product_slug": product_slug,
+        "status": public_product_status(state) if state else "refresh_recommended",
+        "coverage": coverage_for_group(str(product.get("group_key", group_key_for(brand, model, configuration)))),
+        "source_count": len(links_by_slug.get(product_slug, [])),
+    }
+
+
+def benchmark_read_context() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """Load the existing catalog/lifecycle read models once for a benchmark response."""
+    products = {
+        str(product.get("product_id", "")).strip(): product
+        for product in load_products()
+        if str(product.get("product_id", "")).strip()
+    }
+    links_by_slug: dict[str, list[dict[str, Any]]] = {}
+    for link in read_product_source_links():
+        product_slug = str(link.get("product_slug", "")).strip()
+        if product_slug:
+            links_by_slug.setdefault(product_slug, []).append(link)
+    return products, load_product_states(), links_by_slug
+
+
+def resolve_benchmark_product(product_id: str, *, products: dict[str, dict[str, Any]], states: dict[str, dict[str, Any]], links_by_slug: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    product = products.get(product_id)
+    if product is None:
+        raise BenchmarkValidationError(f"Manifest benchmarku wskazuje nieistniejący produkt: {product_id}.")
+    return benchmark_product_ref(product, states=states, links_by_slug=links_by_slug)
+
+
+def competitive_benchmark_detail(manifest: dict[str, Any]) -> dict[str, Any]:
+    products, states, links_by_slug = benchmark_read_context()
+    anchor_id = str(manifest.get("anchor_product_id", "")).strip()
+    participant_ids = [str(value).strip() for value in manifest.get("participant_product_ids", [])]
+    anchor = resolve_benchmark_product(anchor_id, products=products, states=states, links_by_slug=links_by_slug)
+    participants = [
+        resolve_benchmark_product(product_id, products=products, states=states, links_by_slug=links_by_slug)
+        for product_id in participant_ids
+    ]
+    return {
+        "benchmark_id": str(manifest.get("benchmark_id", "")),
+        "benchmark_type": "competitive",
+        "benchmark_group_key": str(manifest.get("benchmark_group_key", "")),
+        "title": str(manifest.get("title", "")),
+        "status": str(manifest.get("status", "draft")),
+        "anchor": anchor,
+        "participants": participants,
+        "participant_count": len(participants),
+        "created_at": str(manifest.get("created_at", "")),
+        "updated_at": str(manifest.get("updated_at", "")),
+    }
+
+
+def internal_benchmark_groups() -> dict[str, list[dict[str, Any]]]:
+    """Internal comparisons are a dynamic Lionelo catalog view, never manifests."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for product in load_products():
+        if normalized_benchmark_brand(product.get("brand")) != "lionelo":
+            continue
+        group_key = str(product.get("benchmark_group", "")).strip()
+        if group_key:
+            groups.setdefault(group_key, []).append(product)
+    return {group_key: products for group_key, products in groups.items() if len(products) >= 2}
+
+
+def internal_benchmark_label(products: list[dict[str, Any]], group_key: str) -> str:
+    for product in products:
+        try:
+            assignment = validate_category_assignment(product.get("category_key"), group_key)
+            label = str(assignment.get("benchmark_group_label", "")).strip()
+            if label:
+                return label
+        except CategoryValidationError:
+            continue
+        fallback = str(product.get("benchmark_category", "")).strip()
+        if fallback:
+            return fallback
+    return group_key
+
+
+def internal_benchmark_updated_at(products: list[dict[str, Any]], states: dict[str, dict[str, Any]]) -> str | None:
+    timestamps: list[str] = []
+    for product in products:
+        brand = str(product.get("brand", "")).strip()
+        model = str(product.get("model", "")).strip()
+        configuration = str(product.get("configuration", "") or "").strip()
+        state = states.get(product_slug_for(brand, model, configuration), {})
+        timestamp = str(state.get("updated_at") or product.get("updated_at") or product.get("created_at") or "").strip()
+        if timestamp:
+            timestamps.append(timestamp)
+    return max(timestamps) if timestamps else None
+
+
+@app.post("/api/benchmarks", status_code=201, response_model=CompetitiveBenchmarkDetail)
+def create_competitive_benchmark(request: CompetitiveBenchmarkCreateRequest) -> dict[str, Any]:
+    try:
+        manifest = create_competitive_benchmark_manifest(
+            BENCHMARKS_ROOT,
+            {"benchmark_type": "competitive", **request.model_dump()},
+            load_products(),
+        )
+    except BenchmarkValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except BenchmarkConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        return competitive_benchmark_detail(manifest)
+    except BenchmarkValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/benchmarks", response_model=list[CompetitiveBenchmarkSummary])
+def list_competitive_benchmarks() -> list[dict[str, Any]]:
+    return [competitive_benchmark_summary(manifest) for manifest in list_competitive_benchmark_manifests(BENCHMARKS_ROOT)]
+
+
+@app.get("/api/benchmarks/{benchmark_id}", response_model=CompetitiveBenchmarkDetail)
+def get_competitive_benchmark(benchmark_id: str) -> dict[str, Any]:
+    try:
+        manifest = read_competitive_benchmark_manifest(BENCHMARKS_ROOT, benchmark_id)
+    except BenchmarkNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return competitive_benchmark_detail(manifest)
+    except BenchmarkValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/internal-benchmarks", response_model=list[InternalBenchmarkSummary])
+def list_internal_benchmarks() -> list[dict[str, Any]]:
+    groups = internal_benchmark_groups()
+    return [
+        {
+            "benchmark_id": None,
+            "benchmark_type": "internal",
+            "benchmark_group_key": group_key,
+            "benchmark_group_label": internal_benchmark_label(products, group_key),
+            "title": f"Lionelo: {internal_benchmark_label(products, group_key)}",
+            "status": "dynamic",
+            "participant_count": len(products),
+            "has_comparison": True,
+        }
+        for group_key, products in sorted(groups.items())
+    ]
+
+
+@app.get("/api/internal-benchmarks/{benchmark_group_key}", response_model=InternalBenchmarkDetail)
+def get_internal_benchmark(benchmark_group_key: str) -> dict[str, Any]:
+    groups = internal_benchmark_groups()
+    products = groups.get(benchmark_group_key)
+    if products is None:
+        raise HTTPException(status_code=404, detail="Nie znaleziono wewnętrznego benchmarku dla tej grupy.")
+    states = load_product_states()
+    links_by_slug: dict[str, list[dict[str, Any]]] = {}
+    for link in read_product_source_links():
+        product_slug = str(link.get("product_slug", "")).strip()
+        if product_slug:
+            links_by_slug.setdefault(product_slug, []).append(link)
+    participants = [benchmark_product_ref(product, states=states, links_by_slug=links_by_slug) for product in products]
+    return {
+        "benchmark_id": None,
+        "benchmark_type": "internal",
+        "benchmark_group_key": benchmark_group_key,
+        "title": f"Lionelo: {internal_benchmark_label(products, benchmark_group_key)}",
+        "status": "dynamic",
+        "anchor": None,
+        "participants": participants,
+        "participant_count": len(participants),
+        "created_at": None,
+        "updated_at": internal_benchmark_updated_at(products, states),
+    }
+
+
+def catalog_product_payload(product: dict[str, Any], states: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Expose a registered product even before its first research snapshot exists."""
+    brand = str(product.get("brand", "")).strip()
+    model = str(product.get("model", "")).strip()
+    configuration = str(product.get("configuration", "")).strip()
+    slug = product_slug_for(brand, model, configuration)
+    state = states.get(slug, {})
+    status = public_product_status(state) if state else "refresh_recommended"
+    try:
+        assignment = validate_category_assignment(product.get("category_key"), product.get("benchmark_group"))
+    except CategoryValidationError:
+        assignment = {"category_label": str(product.get("category", "Wózki dziecięce")), "benchmark_group_label": str(product.get("benchmark_category", ""))}
+    return {
+        "product_id": str(product.get("product_id", "")),
+        "brand": brand,
+        "model": model,
+        "slug": slug,
+        "group_key": str(product.get("group_key", group_key_for(brand, model, configuration))),
+        "configuration": configuration,
+        "scope": str(product.get("scope", "test")),
+        "status": status,
+        "status_reason": str(state.get("refresh_reason", "") or "no_research_completed"),
+        "status_updated_at": str(state.get("updated_at", "") or product.get("created_at", "")),
+        "coverage": None,
+        "fields_total": 0,
+        "fields_completed": 0,
+        "sources_count": 0,
+        "missing_fields_count": 0,
+        "conflicts_count": 0,
+        "updated_at": str(state.get("updated_at", "") or product.get("created_at", "")),
+        "marketplaces": [],
+        "category": str(assignment.get("category_label") or product.get("category", "Wózki dziecięce")),
+        "category_key": str(product.get("category_key", "")),
+        "subcategory": str(product.get("subcategory", "")),
+        "subcategory_key": str(product.get("subcategory_key", "")),
+        "subcategory_label": str(product.get("subcategory", "")),
+        "benchmark_group": str(product.get("benchmark_group", "")),
+        "benchmark_group_key": str(product.get("benchmark_group_key", product.get("benchmark_group", ""))),
+        "benchmark_category": str(assignment.get("benchmark_group_label") or product.get("benchmark_category", "")),
+    }
+
+
 def frontend_catalog() -> list[dict[str, Any]]:
-    """Read the generated read-only catalogue without changing pipeline data."""
-    return PRODUCT_SERVICE.snapshots.catalog()
+    """Merge immutable snapshots with registered, not-yet-researched products."""
+    states = load_product_states()
+    snapshots = PRODUCT_SERVICE.snapshots.catalog()
+    by_slug = {str(item.get("slug", "")): dict(item) for item in snapshots if isinstance(item, dict)}
+    merged: list[dict[str, Any]] = []
+    for registered in load_products():
+        fallback = catalog_product_payload(registered, states)
+        slug = fallback["slug"]
+        snapshot = by_slug.pop(slug, None)
+        if snapshot:
+            snapshot.update({key: value for key, value in fallback.items() if not snapshot.get(key) and value not in ("", None, [], {})})
+            # Product registry owns taxonomy. Generated snapshots may be older
+            # than a category migration and must not reintroduce stale labels.
+            for key in (
+                "category",
+                "category_key",
+                "subcategory",
+                "subcategory_key",
+                "subcategory_label",
+                "benchmark_group",
+                "benchmark_category",
+            ):
+                snapshot[key] = fallback[key]
+            state = states.get(slug)
+            if state:
+                snapshot["status"] = public_product_status(state)
+                snapshot["status_reason"] = str(state.get("refresh_reason", "") or snapshot.get("status_reason", ""))
+                snapshot["status_updated_at"] = str(state.get("updated_at", "") or snapshot.get("status_updated_at", ""))
+            merged.append(snapshot)
+        else:
+            merged.append(fallback)
+    merged.extend(by_slug.values())  # Preserve legacy snapshots not yet in the registry.
+    return sorted(merged, key=lambda item: (str(item.get("brand", "")).casefold(), str(item.get("model", "")).casefold()))
 
 
 @app.get("/api/products")
 def list_products(limit: int = 100, offset: int = 0) -> dict[str, Any]:
     safe_limit = min(max(int(limit), 1), 500)
     safe_offset = max(int(offset), 0)
-    return PRODUCT_SERVICE.list(safe_limit, safe_offset)
+    catalog = frontend_catalog()
+    return {
+        "schema_version": "1",
+        "total": len(catalog),
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "items": catalog[safe_offset:safe_offset + safe_limit],
+    }
+
+
+@app.post("/api/products")
+def create_product(request: ProductCreateRequest) -> dict[str, Any]:
+    """Idempotently register a product before any source preview starts."""
+    try:
+        assignment = validate_category_assignment(request.category_key, request.benchmark_group)
+    except CategoryValidationError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
+    slug = product_slug_for(request.brand, request.model)
+    existing = next((item for item in load_products() if product_slug_for(item.get("brand", ""), item.get("model", "")) == slug), None)
+    if existing and (
+        str(existing.get("category_key", "")) != request.category_key
+        or str(existing.get("benchmark_group", "")) != request.benchmark_group
+    ):
+        raise HTTPException(status_code=409, detail="Produkt istnieje już z inną kategorią lub grupą benchmarkową.")
+    product = ensure_catalog_product(
+        request.brand,
+        request.model,
+        category=assignment["category_label"],
+        benchmark_category=assignment["benchmark_group_label"],
+        category_key=request.category_key,
+        benchmark_group=request.benchmark_group,
+        status="refresh_recommended",
+    )
+    if not existing:
+        update_product_state(slug, "refresh_recommended", refresh_reason="no_research_completed")
+    record = next((item for item in frontend_catalog() if item.get("slug") == slug), None)
+    return {"created": not bool(existing), "product": record or catalog_product_payload(product, load_product_states())}
 
 
 @app.get("/api/products/{product_slug}")
 def get_product(product_slug: str) -> dict[str, Any]:
     product_slug = validated_product_slug(product_slug)
     payload = PRODUCT_SERVICE.detail(product_slug)
+    catalog_record = next((item for item in frontend_catalog() if item.get("slug") == product_slug), None)
+    if not payload and not catalog_record:
+        raise HTTPException(status_code=404, detail="Nie znaleziono produktu.")
     if not payload:
-        raise HTTPException(status_code=404, detail="Nie wygenerowano jeszcze snapshotu produktu.")
+        contract = ProductV1(
+            product_slug=product_slug,
+            group_key=str(catalog_record.get("group_key", "")),
+            brand=str(catalog_record.get("brand", "")),
+            model=str(catalog_record.get("model", "")),
+            status=str(catalog_record.get("status", "refresh_recommended")),
+            metrics=None,
+        )
+        return {**catalog_record, **contract.model_dump(), "fields": [], "sources": [], "research_snapshot_available": False}
+    if catalog_record:
+        payload = {**payload, **{key: value for key, value in catalog_record.items() if value not in ("", None, [], {})}}
     metrics = load_product_provenance(product_slug).get("metrics", {})
     contract = ProductV1(
         product_slug=product_slug, group_key=str(payload.get("group_key", "")),
@@ -2312,6 +2960,38 @@ def get_product(product_slug: str) -> dict[str, Any]:
         metrics=ProductMetricsV1(**metrics) if isinstance(metrics, dict) and metrics else None,
     )
     return {**payload, **contract.model_dump()}
+
+
+@app.get("/api/products/{product_slug}/profile", response_model=ProductProfileV1)
+def product_profile(product_slug: str) -> ProductProfileV1:
+    """Read a cached profile without changing product evidence or benchmark data."""
+    product_slug = validated_product_slug(product_slug)
+    return ProductProfileV1(**get_profile(product_slug))
+
+
+@app.get("/api/product-profile/capabilities")
+def product_profile_capabilities() -> dict[str, bool]:
+    """Expose only whether the opt-in profile action is available, never secrets."""
+    return {"ai_enabled": os.getenv("PRODUCT_PROFILE_AI_ENABLED", "").lower() in {"1", "true", "yes"}}
+
+
+@app.post("/api/products/{product_slug}/profile/generate", response_model=ProductProfileV1)
+def generate_profile(product_slug: str) -> ProductProfileV1:
+    """One explicit profile request; live generation remains opt-in by env flag."""
+    product_slug = validated_product_slug(product_slug)
+    if os.getenv("PRODUCT_PROFILE_AI_ENABLED", "").lower() not in {"1", "true", "yes"}:
+        raise HTTPException(status_code=409, detail="Generowanie profilu AI jest wyłączone. Ustaw PRODUCT_PROFILE_AI_ENABLED=1.")
+    try:
+        profile, _ = generate_or_load_profile(product_slug, allow_openai=True)
+        if profile.get("profile_status") == "failed":
+            code = str(profile.get("generation", {}).get("failure_code", ""))
+            status = 422 if code in {"semantic_validation_error", "schema_validation_error"} else 503
+            raise HTTPException(status_code=status, detail=str(profile.get("generation", {}).get("failure_reason", "Generowanie profilu nie powiodło się.")))
+    except LockUnavailableError as exc:
+        raise HTTPException(status_code=409, detail="Generowanie profilu dla tego produktu już trwa.") from exc
+    except (PermissionError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ProductProfileV1(**profile)
 
 
 @app.get("/api/products/{product_slug}/metrics", response_model=ProductMetricsV1)
@@ -2335,6 +3015,77 @@ def sources_catalog(limit: int = 100, offset: int = 0) -> dict[str, Any]:
     sources.sort(key=lambda item: str(item.get("source_id", "")))
     page = paginate(sources, limit, offset)
     return {**page, "sources": page["items"]}
+
+
+def visual_source_payload(source_id: str) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load visual data without exposing local paths to API consumers."""
+    if not source_id or "/" in source_id or "\\" in source_id or ".." in source_id:
+        raise HTTPException(status_code=400, detail="Nieprawidłowy identyfikator źródła.")
+    snapshot_path, blocks_path, media_path = source_visual_paths(source_id)
+    if snapshot_path is None or not snapshot_path.exists():
+        raise HTTPException(status_code=404, detail="Nie zapisano jeszcze kontekstu wizualnego dla tego źródła.")
+    snapshot = read_json(snapshot_path, {})
+    if not isinstance(snapshot, dict):
+        raise HTTPException(status_code=404, detail="Kontekst wizualny jest uszkodzony.")
+    blocks = read_visual_jsonl(blocks_path) if blocks_path else []
+    media = read_visual_jsonl(media_path) if media_path else []
+    def public_artifact(path: object) -> str | None:
+        raw = str(path or "").strip()
+        if not raw:
+            return None
+        candidate = (PROJECT_ROOT / raw).resolve()
+        allowed = (PROJECT_ROOT / "input").resolve()
+        try:
+            candidate.relative_to(allowed)
+        except ValueError:
+            return None
+        return artifact_id(raw)
+    public_snapshot = {key: value for key, value in snapshot.items() if not key.endswith("_path")}
+    public_snapshot["full_page_artifact_id"] = public_artifact(snapshot.get("full_page_screenshot_path"))
+    public_snapshot["rendered_html_available"] = bool(snapshot.get("rendered_html_path"))
+    for block in blocks:
+        section_path = block.pop("section_screenshot_path", None)
+        block["section_artifact_id"] = public_artifact(section_path)
+    for item in media:
+        local_path = item.pop("local_path", None)
+        item["local_artifact_id"] = public_artifact(local_path)
+    return public_snapshot, blocks, media
+
+
+@app.get("/api/sources/{source_id}/visuals")
+def source_visuals(source_id: str) -> dict[str, Any]:
+    snapshot, _blocks, _media = visual_source_payload(source_id)
+    return {"schema_version": "1", "snapshot": snapshot}
+
+
+@app.get("/api/sources/{source_id}/visual-blocks")
+def source_visual_blocks(source_id: str, region: str | None = None, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    snapshot, blocks, _media = visual_source_payload(source_id)
+    if region:
+        blocks = [item for item in blocks if item.get("region") == region]
+    return {"source_id": source_id, "visual_snapshot_id": snapshot.get("visual_snapshot_id"), **paginate(blocks, limit, offset)}
+
+
+@app.get("/api/sources/{source_id}/media")
+def source_visual_media(source_id: str, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    snapshot, _blocks, media = visual_source_payload(source_id)
+    return {"source_id": source_id, "visual_snapshot_id": snapshot.get("visual_snapshot_id"), **paginate(media, limit, offset)}
+
+
+@app.get("/api/visual-artifacts/{artifact}")
+def visual_artifact(artifact: str) -> FileResponse:
+    relative = artifact_relative(artifact)
+    if not relative:
+        raise HTTPException(status_code=400, detail="Nieprawidłowy identyfikator artefaktu.")
+    candidate = (PROJECT_ROOT / relative).resolve()
+    allowed = (PROJECT_ROOT / "input").resolve()
+    try:
+        candidate.relative_to(allowed)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Artefakt jest poza dozwolonym katalogiem.") from exc
+    if not candidate.is_file() or candidate.suffix.casefold() not in {".webp", ".png", ".jpg", ".jpeg"}:
+        raise HTTPException(status_code=404, detail="Artefakt wizualny nie jest dostępny.")
+    return FileResponse(candidate)
 
 
 @app.get("/api/products/{product_slug}/sources")
@@ -2539,6 +3290,8 @@ def retry_run(run_id: str) -> dict[str, Any]:
     request = ResearchRequest(
         brand=str(previous.get("brand", "")),
         model=str(previous.get("model", "")),
+        category_key=str(previous.get("category_key", "")),
+        benchmark_group=str(previous.get("benchmark_group", "")),
         selected_offer_ids=[str(item) for item in immutable_offers],
         include_manufacturer_sources=bool(previous.get("include_manufacturer_sources", True)),
     )

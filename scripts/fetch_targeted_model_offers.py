@@ -15,6 +15,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from category_registry import CategoryValidationError, supports_product_type, validate_category_assignment
+
 ROOT = Path(__file__).resolve().parent.parent
 TARGETED = ROOT / "input" / "targeted_search"
 QUEUE = ROOT / "output" / "firecrawl_offer_queue.csv"
@@ -30,7 +32,7 @@ STROLLER_TERMS = ("wozek", "spacerowka", "stroller", "buggy")
 
 
 def slug(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return re.sub(r"[^a-z0-9]+", "-", normalized_text(value)).strip("-")
 
 
 def normalized_text(value: str) -> str:
@@ -38,6 +40,55 @@ def normalized_text(value: str) -> str:
     text = "".join(char for char in text if not unicodedata.combining(char))
     text = text.translate(str.maketrans({"ł": "l", "Ł": "L"}))
     return re.sub(r"\s+", " ", text.lower()).strip()
+
+
+def model_tokens(value: str) -> list[str]:
+    """Normalize spelling variants such as Aer², Aer 2 and Aer2 to tokens."""
+    return re.findall(r"[a-z]+|\d+", normalized_text(value))
+
+
+def classify_model_match(
+    *,
+    title: str,
+    brand: str,
+    model: str,
+    category_key: str,
+    product_type: str | None = None,
+) -> tuple[str, str, bool, bool]:
+    """Return status, reason, brand match and exact model match for one card."""
+    title_tokens = model_tokens(title)
+    requested_brand = model_tokens(brand)
+    requested_model = model_tokens(model)
+    base_tokens = [token for token in requested_model if not token.isdigit()]
+    required_numbers = [token for token in requested_model if token.isdigit()]
+    actual_type = product_type or product_type_from_title(title)
+    brand_match = bool(requested_brand) and all(token in title_tokens for token in requested_brand)
+    base_match = bool(base_tokens) and all(token in title_tokens for token in base_tokens)
+    generation_numbers: list[str] = []
+    if base_tokens:
+        for index in range(0, len(title_tokens) - len(base_tokens)):
+            if title_tokens[index:index + len(base_tokens)] == base_tokens:
+                following = title_tokens[index + len(base_tokens)]
+                if following.isdigit():
+                    generation_numbers.append(following)
+    missing_numbers = [token for token in required_numbers if token not in generation_numbers]
+    conflicting_numbers = [token for token in generation_numbers if token not in required_numbers]
+    exact_model_match = bool(requested_model) and base_match and not missing_numbers
+
+    if actual_type == "accessory":
+        return "rejected", "accessory", brand_match, exact_model_match
+    if not brand_match:
+        return "rejected", "brand_mismatch", brand_match, exact_model_match
+    if not supports_product_type(category_key, actual_type):
+        return "rejected", "product_type_unknown", brand_match, exact_model_match
+    if not base_match:
+        return "rejected", "model_mismatch", brand_match, exact_model_match
+    if conflicting_numbers:
+        return "rejected", "conflicting_generation", brand_match, False
+    if missing_numbers:
+        reason = "missing_year_token" if any(len(token) == 4 for token in missing_numbers) else "missing_generation_token"
+        return "probable_match", reason, brand_match, False
+    return "exact_match", "", brand_match, exact_model_match
 
 
 def product_type_from_title(title: str) -> str:
@@ -238,61 +289,37 @@ def listing_offer_details(markup: str) -> dict[str, dict]:
     return details
 
 
-def extract_offers(markup: str, brand: str, model: str) -> tuple[list[dict], list[dict]]:
+def extract_offers(markup: str, brand: str, model: str, category_key: str) -> tuple[list[dict], list[dict]]:
     parser=LinkParser(); parser.feed(html.unescape(markup or ""))
     card_details = listing_offer_details(markup)
-    model_tokens=re.findall(r"[\wÀ-ž]+", normalized_text(model))
-    text_model_tokens=[token for token in model_tokens if not token.isdigit()]
-    numeric_model_tokens=[token for token in model_tokens if token.isdigit()]
-    accepted={}; rejected=[]; seen_links=set()
+    accepted={}; probable={}; rejected=[]; seen_links=set()
     for original,title in parser.links:
         if original in seen_links and not title: continue
-        seen_links.add(original); oid=offer_id_from_url(original); lower=normalized_text(title); tokens=re.findall(r"[\wÀ-ž]+", lower)
-        normalized_brand = normalized_text(brand)
-        brand_match=normalized_brand in tokens
-        text_model_match=bool(text_model_tokens) and all(token in tokens for token in text_model_tokens)
-        numeric_model_match=all(token in tokens for token in numeric_model_tokens)
-        model_match=bool(model_tokens) and text_model_match and numeric_model_match
-        previous_generation=bool(text_model_match and numeric_model_tokens and not numeric_model_match)
+        seen_links.add(original); oid=offer_id_from_url(original)
         product_type = product_type_from_title(title)
         decoded_url = redirect_target(original)
         is_offer=bool(oid) and ("/oferta/" in decoded_url or "/produkt/" in decoded_url or "/events/clicks" in original or "/dss-proxy/clicks" in original)
-        reason=""
         if not is_offer:
-            reason="not_an_offer_link"
-            match_status="rejected"
-        elif product_type == "accessory":
-            reason="accessory"
-            match_status="rejected"
-        elif brand_match and model_match and product_type == "stroller":
-            match_status="exact_match"
-        elif brand_match and model_match:
-            reason="product_type_unknown"
-            match_status="uncertain"
-        elif brand_match and previous_generation and product_type == "stroller":
-            # A model name without a required numeric variant is a plausible
-            # older generation, never an exact match for the requested model.
-            reason="previous_generation"
-            match_status="uncertain"
-        elif not brand_match:
-            reason="brand_mismatch"
-            match_status="rejected"
+            match_status, reason, brand_match, model_match = "rejected", "not_an_offer_link", False, False
         else:
-            reason="model_mismatch"
-            match_status="rejected"
+            match_status, reason, brand_match, model_match = classify_model_match(
+                title=title, brand=brand, model=model, category_key=category_key, product_type=product_type,
+            )
         is_accepted = match_status == "exact_match"
-        record={"offer_id":oid,"title":title,"canonical_url":canonical_url(original),"original_url":original,"brand_match":brand_match,"model_match":model_match,"previous_generation":previous_generation,"product_type":product_type,"match_status":match_status,"accepted":is_accepted,"rejection_reason":reason, **card_details.get(oid, {})}
+        record={"offer_id":oid,"title":title,"canonical_url":canonical_url(original),"original_url":original,"brand_match":brand_match,"model_match":model_match,"product_type":product_type,"match_status":match_status,"accepted":is_accepted,"rejection_reason":reason, **card_details.get(oid, {})}
         if is_accepted:
             accepted.setdefault(oid,record)
+        elif match_status == "probable_match" and oid and oid not in accepted:
+            probable.setdefault(oid, record)
         elif oid and oid not in accepted:
             rejected.append(record)
     rejected_by_id = {}
     for item in rejected:
-        if item["offer_id"] in accepted:
+        if item["offer_id"] in accepted or item["offer_id"] in probable:
             continue
         if item["offer_id"] not in rejected_by_id or (not rejected_by_id[item["offer_id"]]["title"] and item["title"]):
             rejected_by_id[item["offer_id"]] = item
-    return list(accepted.values()), list(rejected_by_id.values())
+    return [*accepted.values(), *(record for offer_id, record in probable.items() if offer_id not in accepted)], list(rejected_by_id.values())
 
 
 def known_offer_ids() -> set[str]:
@@ -311,8 +338,13 @@ def fetch_live(url: str) -> dict:
 
 
 def main() -> int:
-    parser=argparse.ArgumentParser(); parser.add_argument('--marketplace',required=True); parser.add_argument('--brand',required=True); parser.add_argument('--model',required=True); parser.add_argument('--apply',action='store_true'); parser.add_argument('--input-html'); args=parser.parse_args()
+    parser=argparse.ArgumentParser(); parser.add_argument('--marketplace',required=True); parser.add_argument('--brand',required=True); parser.add_argument('--model',required=True); parser.add_argument('--category-key', required=True); parser.add_argument('--apply',action='store_true'); parser.add_argument('--input-html'); args=parser.parse_args()
     if args.marketplace.lower()!='allegro': print(f"Marketplace '{args.marketplace}' nie ma jeszcze adaptera targeted research."); return 1
+    try:
+        validate_category_assignment(args.category_key, "", require_complete=False)
+    except CategoryValidationError as exc:
+        print(f"NOT_SUPPORTED={exc.code}\nerror={exc.message}")
+        return 2
     directory=TARGETED/f'{slug(args.brand)}__{slug(args.model)}'/'allegro'; directory.mkdir(parents=True,exist_ok=True)
     search_url=f'https://allegro.pl/listing?string={args.brand}+{args.model}'
     if args.input_html:
@@ -322,20 +354,24 @@ def main() -> int:
         if not os.getenv('FIRECRAWL_API_KEY','').strip(): print('Brak FIRECRAWL_API_KEY. Użyj --input-html albo ustaw zmienną środowiskową.'); return 1
         response=fetch_live(search_url); data=response.get('data',response); markup=str(data.get('html',''))
     (directory/'listing.html').write_text(markup,encoding='utf-8'); (directory/'listing.md').write_text(str(response.get('data',response).get('markdown','')),encoding='utf-8'); (directory/'raw_response.json').write_text(json.dumps(response,ensure_ascii=False,indent=2),encoding='utf-8'); (directory/'metadata.json').write_text(json.dumps(response.get('data',response).get('metadata',{}),ensure_ascii=False,indent=2),encoding='utf-8')
-    accepted,rejected=extract_offers(markup,args.brand,args.model); known=known_offer_ids(); extracted=[]; new=[]
-    for item in accepted:
+    matches,rejected=extract_offers(markup,args.brand,args.model,args.category_key); known=known_offer_ids(); extracted=[]; new=[]
+    for item in matches:
         item['accepted'] = item.get('match_status') == 'exact_match'
         item['already_known']=item['offer_id'] in known
-        if not item['already_known']: new.append(item)
+        if item['accepted'] and not item['already_known']: new.append(item)
         extracted.append(item)
     (directory/'extracted_offers.json').write_text(json.dumps(extracted,ensure_ascii=False,indent=2),encoding='utf-8'); (directory/'rejected_offers.json').write_text(json.dumps(rejected,ensure_ascii=False,indent=2),encoding='utf-8')
-    columns=('external_offer_id','source_url','canonical_url','title','brand_match','model_match','accepted','rejection_reason')
+    columns=('external_offer_id','source_url','canonical_url','title','brand_match','model_match','accepted','match_status','rejection_reason')
     with (directory/'new_offers.csv').open('w',encoding='utf-8',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=columns); writer.writeheader(); writer.writerows({'external_offer_id':item['offer_id'],'source_url':item['original_url'],'canonical_url':item['canonical_url'],'title':item['title'],'brand_match':item['brand_match'],'model_match':item['model_match'],'accepted':True,'rejection_reason':''} for item in new)
-    unique_records = accepted + rejected
+    with (directory/'candidate_offers.csv').open('w',encoding='utf-8',newline='') as handle:
+        writer=csv.DictWriter(handle,fieldnames=columns); writer.writeheader(); writer.writerows({'external_offer_id':item['offer_id'],'source_url':item['original_url'],'canonical_url':item['canonical_url'],'title':item['title'],'brand_match':item['brand_match'],'model_match':item['model_match'],'accepted':item['accepted'],'match_status':item['match_status'],'rejection_reason':item['rejection_reason']} for item in extracted if not item['already_known'])
+    exact_matches = [item for item in extracted if item.get('match_status') == 'exact_match']
+    probable_matches = [item for item in extracted if item.get('match_status') == 'probable_match']
+    unique_records = extracted + rejected
     unique_offer_ids = len({x['offer_id'] for x in unique_records if x['offer_id']})
-    all_records = accepted + rejected
-    summary={'marketplace':args.marketplace.lower(),'brand':args.brand,'model':args.model,'cards_found':unique_offer_ids,'unique_offer_ids':unique_offer_ids,'accepted_model_offers':len(accepted),'rejected_other_models':len(rejected),'strollers_found':sum(1 for item in all_records if item.get('product_type') == 'stroller'),'accessories_rejected':sum(1 for item in all_records if item.get('product_type') == 'accessory'),'unknown_offers':sum(1 for item in all_records if item.get('product_type') == 'unknown'),'already_known':sum(1 for x in extracted if x['already_known']),'new_offers':len(new),'applied':False,'created_at':datetime.now(timezone.utc).isoformat()}
+    all_records = extracted + rejected
+    summary={'marketplace':args.marketplace.lower(),'brand':args.brand,'model':args.model,'match_classification_version':'3','cards_found':unique_offer_ids,'unique_offer_ids':unique_offer_ids,'accepted_model_offers':len(exact_matches),'probable_model_offers':len(probable_matches),'rejected_other_models':len(rejected),'strollers_found':sum(1 for item in all_records if item.get('product_type') == 'stroller'),'accessories_rejected':sum(1 for item in all_records if item.get('product_type') == 'accessory'),'unknown_offers':sum(1 for item in all_records if item.get('product_type') == 'unknown'),'already_known':sum(1 for x in extracted if x['already_known']),'new_offers':len(new),'applied':False,'created_at':datetime.now(timezone.utc).isoformat()}
     if args.apply and new:
         result=subprocess.run([sys.executable,str(ROOT/'scripts/merge_targeted_model_offers.py'),'--marketplace','allegro','--brand',args.brand,'--model',args.model,'--input-csv',str(directory/'new_offers.csv')],cwd=ROOT,capture_output=True,text=True); summary['applied']=result.returncode==0
     (directory/'research_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')

@@ -13,7 +13,7 @@ def main():
    ''.join(f'<a href="https://allegro.pl/oferta/kinderkraft-nea-{i}">{"Kinderkraft NEA wózek"}</a>' for i in range(10000001,10000008)),
    '<h2>Filtry</h2><a href="/kategoria/wozki">Wózki</a>'
   ])
-  accepted,rejected=extract_offers(html,'Kinderkraft','NEBO'); ids={x['offer_id'] for x in accepted+rejected if x['offer_id']}; failures=[]
+  accepted,rejected=extract_offers(html,'Kinderkraft','NEBO','stroller'); ids={x['offer_id'] for x in accepted+rejected if x['offer_id']}; failures=[]
   if len(ids)!=9: failures.append(f'unique_ids:{len(ids)}')
   if len(accepted)!=2: failures.append(f'accepted:{len(accepted)}')
   if len(rejected)!=7: failures.append(f'rejected:{len(rejected)}')

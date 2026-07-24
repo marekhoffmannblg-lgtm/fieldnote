@@ -62,6 +62,7 @@ def normalize_legacy_evidence(raw: object, current_value: object) -> list[dict[s
                     "value": str(item.get("value", current_value) or current_value or "").strip(),
                     "excerpt": excerpt,
                     "validation_status": str(item.get("validation_status", "") or "").strip(),
+                    "extraction_method": str(item.get("extraction_method", "") or "").strip(),
                 })
     return normalized
 
@@ -70,7 +71,7 @@ def source_authority(source: dict[str, Any]) -> tuple[str, float]:
     source_type = str(source.get("source_type", "") or "")
     marketplace = str(source.get("marketplace", "") or "")
     if source_type == "manufacturer" or marketplace == "manufacturer":
-        return "primary", 1.0
+        return "manufacturer", 1.0
     if source_type == "marketplace_offer":
         return "marketplace", 0.7
     return "other", 0.4
@@ -158,12 +159,16 @@ def build_evidence_item(
         "confidence": confidence,
         "content_family_id": family,
         "is_independent_confirmation": False,
+        "visual_snapshot_id": raw.get("visual_snapshot_id") or None,
+        "visual_block_id": raw.get("visual_block_id") or None,
+        "media_ids": raw.get("media_ids") if isinstance(raw.get("media_ids"), list) else [],
         "source_authority": authority,
         "confirmation_weight": authority_weight if evidence_status in {"valid", "weak"} else 0.0,
         "source_quality": source_quality,
         "fetched_at": fetched_at,
         "created_at": utc_now(),
         "updated_at": utc_now(),
+        "extraction_method": str(raw.get("extraction_method", "") or ""),
     }
 
 

@@ -1,8 +1,12 @@
-import { Fragment, useState, useEffect, useRef, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useState, useEffect, useRef, type ReactNode } from "react";
 import catalogData from "../data/generated/catalog.json";
 import { apiRequest } from "../api/client";
 import type { EvidenceItemV1, ProductMetricsV1, SourceContributionV1 } from "../api/contracts";
 import { parseFieldnoteRoute, routeForPage, type FieldnotePage } from "../routes/navigation";
+import { isRunFailure, isRunPartial, isRunSuccess, shouldAutoReloadAfterRun } from "./runStatus";
+import { groupsForCategory, isValidCategorySelection, type CategoryOption } from "./categorySelection";
+import { canSelectPreviewOffer } from "./offerSelection";
+import { canCompareSelection, toggleComparisonSelection } from "./comparisonSelection";
 import {
   Package,
   Search,
@@ -39,10 +43,13 @@ type ProductStatus = "ready" | "analysis_running" | "analysis_failed" | "refresh
 
 interface Product {
   id: string;
+  productId?: string;
   slug: string;
   brand: string;
   name: string;
   model: string;
+  configuration?: string;
+  scope?: string;
   status: ProductStatus;
   coverage: number | null;
   zrodla: number | null;
@@ -54,6 +61,10 @@ interface Product {
   conflicts: number;
   metrics?: Partial<ProductMetricsV1>;
   category: string;
+  category_key?: string;
+  subcategory_key?: string;
+  subcategoryLabel?: string;
+  benchmark_group?: string;
   benchmarkCategory: string;
   statusReason?: string;
   statusUpdatedAt?: string | null;
@@ -62,6 +73,8 @@ interface Product {
 interface CatalogProduct {
   brand: string;
   model: string;
+  configuration?: string;
+  scope?: string;
   slug: string;
   status: ProductStatus;
   coverage: number | null;
@@ -84,11 +97,17 @@ interface CatalogProduct {
   marketplaces?: string[];
   product_id?: string;
   category?: string;
+  category_key?: string;
+  subcategory_key?: string;
+  subcategory_label?: string;
+  benchmark_group?: string;
+  benchmark_group_key?: string;
   category_slug?: string;
   benchmark_category?: string;
   status_reason?: string;
   status_updated_at?: string;
 }
+
 
 interface FieldEvidence extends Partial<EvidenceItemV1> {
   source_id: string;
@@ -207,6 +226,40 @@ interface SourceSnapshotResponse {
   content: string;
 }
 
+interface VisualSnapshot {
+  visual_snapshot_id: string;
+  source_id: string;
+  capture_status: "captured" | "partial" | "failed" | "skipped";
+  capture_provider: string;
+  full_page_artifact_id: string | null;
+  blocks_count: number;
+  media_count: number;
+}
+
+interface VisualBlock {
+  block_id: string;
+  region: "gallery" | "description" | "feature" | "dimensions" | "included" | "accessory" | "variant" | "recommendation" | "other";
+  heading: string | null;
+  body_text: string | null;
+  media_ids: string[];
+  classification: string;
+  classification_reason: string | null;
+  section_artifact_id: string | null;
+}
+
+interface VisualMedia {
+  media_id: string;
+  block_id: string | null;
+  media_type: "image" | "video" | "video_poster" | "background_image" | "document" | "other";
+  original_url: string | null;
+  alt_text: string | null;
+  caption_text: string | null;
+  role: string;
+}
+
+interface VisualEnvelope { snapshot: VisualSnapshot }
+interface VisualPage<T> { items: T[]; total: number }
+
 interface ContributionField {
   field_name: string;
   value: string;
@@ -265,6 +318,53 @@ interface BenchmarkResponse {
   has_comparison: boolean;
 }
 
+interface BenchmarkProductRef {
+  product_id: string;
+  brand: string;
+  model: string;
+  configuration: string;
+  benchmark_group: string;
+  product_slug: string;
+  status: string;
+  coverage: number | null;
+  source_count: number;
+}
+
+interface InternalBenchmarkSummary {
+  benchmark_id: null;
+  benchmark_type: "internal";
+  benchmark_group_key: string;
+  benchmark_group_label: string;
+  title: string;
+  status: "dynamic";
+  participant_count: number;
+  has_comparison: boolean;
+}
+
+interface InternalBenchmarkDetail {
+  benchmark_id: null;
+  benchmark_type: "internal";
+  benchmark_group_key: string;
+  title: string;
+  status: "dynamic";
+  anchor: null;
+  participants: BenchmarkProductRef[];
+  participant_count: number;
+  created_at: null;
+  updated_at: string | null;
+}
+
+interface CompetitiveBenchmarkSummary {
+  benchmark_id: string;
+  title: string;
+  status: "draft" | "active" | "archived";
+  benchmark_group_key: string;
+  anchor_product_id: string;
+  participant_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface PreviewOffer {
   offer_id: string;
   title: string;
@@ -283,7 +383,10 @@ interface PreviewOffer {
   already_known: boolean;
   is_accessory: boolean;
   product_type: "stroller" | "accessory" | "unknown";
-  match_status: "exact_match" | "uncertain" | "rejected";
+  product_type_label: string;
+  category_compatible: boolean;
+  selectable: boolean;
+  match_status: "exact_match" | "probable_match" | "rejected";
   rejection_reason: string | null;
   duplicate_count: number;
   source_group: "primary_source" | "supplementary_source" | null;
@@ -303,11 +406,23 @@ interface ManufacturerSource {
   url: string;
   model_match: boolean;
   match_status: "matched" | "uncertain" | "rejected" | "unavailable";
+  fetch_status?: string;
+  clean_status?: string;
+  cached?: boolean;
+  last_fetched_at?: string;
+  refresh_recommended?: boolean;
 }
 
 interface PreviewResponse {
-  status: "ok";
-  mode: "local_cached_listing" | "live_firecrawl";
+  status: "ok" | "LIVE_SEARCH_FAILED" | "CACHE_NOT_AVAILABLE";
+  mode?: "local_cache" | "live_firecrawl" | "live_failed" | "cache_not_available";
+  requested_mode: "live" | "cache";
+  result_mode: "local_cache" | "live_firecrawl" | "live_failed" | "cache_not_available";
+  is_fresh: boolean;
+  fetched_at?: string;
+  cached_at?: string;
+  cached_result_available: boolean;
+  message?: string;
   brand: string;
   model: string;
   requested_brand: string;
@@ -328,7 +443,7 @@ interface PreviewResponse {
     exact_count: number;
     supplementary_count: number;
     accessory_count: number;
-    uncertain_count: number;
+    probable_count: number;
     titles: string[];
   };
 }
@@ -359,6 +474,9 @@ interface ApiRun {
   coverage_before?: number | null;
   coverage_after?: number | null;
   changed_fields?: string[];
+  product_profile_stage?: string;
+  product_profile_status?: "generated" | "cached" | "insufficient_profile_evidence" | "failed" | "skipped" | string;
+  product_profile_warning?: string;
 }
 
 interface RefreshSummary {
@@ -409,12 +527,15 @@ const statusFromSnapshot = (status: CatalogProduct["status"]): ProductStatus => 
   return status;
 };
 
-const PRODUCTS: Product[] = (catalogData as CatalogProduct[]).map((product) => ({
+const productFromCatalog = (product: CatalogProduct): Product => ({
   id: product.slug,
+  productId: product.product_id,
   slug: product.slug,
   brand: product.brand,
   name: product.model,
   model: product.model,
+  configuration: product.configuration || "",
+  scope: product.scope || "test",
   status: statusFromSnapshot(product.status),
   coverage: product.coverage,
   zrodla: product.source_counts?.used_count ?? product.sources_count,
@@ -426,16 +547,38 @@ const PRODUCTS: Product[] = (catalogData as CatalogProduct[]).map((product) => (
   conflicts: product.conflicts_count,
   metrics: product.metrics,
   category: product.category || "Bez kategorii",
+  category_key: product.category_key || "",
+  subcategory_key: product.subcategory_key || "",
+  subcategoryLabel: product.subcategory_label || "",
+  benchmark_group: product.benchmark_group || "",
   benchmarkCategory: product.benchmark_category || "Bez podkategorii",
   statusReason: product.status_reason || "",
   statusUpdatedAt: product.status_updated_at || product.updated_at || null,
-}));
+});
+
+// The generated snapshot is useful before the local API starts. Once it is
+// reachable, runtime catalogue data is authoritative and includes products
+// registered before their first research snapshot.
+const FALLBACK_PRODUCTS: Product[] = (catalogData as CatalogProduct[]).map(productFromCatalog);
+const CatalogContext = createContext<{ products: Product[]; refreshCatalog: () => Promise<void> }>({
+  products: FALLBACK_PRODUCTS,
+  refreshCatalog: async () => undefined,
+});
+const useCatalog = () => useContext(CatalogContext);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function coverageColor(v: number) {
   if (v >= 65) return "text-emerald-700 bg-emerald-50";
   if (v >= 50) return "text-amber-700 bg-amber-50";
   return "text-red-700 bg-red-50";
+}
+
+function normalizedBrand(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").trim().toLocaleLowerCase("pl");
+}
+
+function isLioneloProduct(product: Pick<Product, "brand">) {
+  return normalizedBrand(product.brand) === "lionelo";
 }
 
 function statusBadge(s: ProductStatus) {
@@ -478,10 +621,10 @@ function CoverageBar({ value }: { value: number }) {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 const NAV_ITEMS: { id: Page; label: string; icon: ReactNode }[] = [
-  { id: "produkty", label: "Produkty", icon: <Package size={15} /> },
+  { id: "benchmarki", label: "Benchmarki", icon: <GitCompare size={15} /> },
+  { id: "produkty-konkurencji", label: "Produkty konkurencji", icon: <Package size={15} /> },
   { id: "research", label: "Research", icon: <Search size={15} /> },
-  { id: "uruchomienia", label: "Uruchomienia", icon: <Zap size={15} /> },
-  { id: "pomoc", label: "Pomoc", icon: <HelpCircle size={15} /> },
+  { id: "zrodla", label: "Źródła", icon: <Layers size={15} /> },
 ];
 
 function Sidebar({
@@ -494,7 +637,7 @@ function Sidebar({
   collapsed: boolean;
 }) {
   const active = (id: Page) =>
-    (current === id || ((current === "produkt-szczegoly" || current === "produkt-zrodla") && id === "produkty"))
+    current === id
       ? "bg-sidebar-accent text-sidebar-primary font-medium"
       : "text-muted-foreground hover:bg-muted/60 hover:text-foreground";
 
@@ -542,7 +685,116 @@ function Sidebar({
 }
 
 // ─── Page: Produkty ───────────────────────────────────────────────────────────
-function PageProdukty({ onDetail, onResearch }: { onDetail: (id: string) => void; onResearch: () => void }) {
+function PageProdukty({ onDetail, onResearch, onCompare }: { onDetail: (id: string) => void; onResearch: () => void; onCompare: (ids: string[]) => void }) {
+  const { products } = useCatalog();
+  const [query, setQuery] = useState("");
+  const [showUnassigned, setShowUnassigned] = useState(false);
+  const [familyKey, setFamilyKey] = useState("");
+  const [groupKey, setGroupKey] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const classified = products.filter((product) => showUnassigned || Boolean(product.benchmark_group));
+  const familyKeyFor = (product: Product) => product.subcategory_key || product.category_key || "unassigned";
+  const familyLabel = (product: Product) => familyKeyFor(product) === "unassigned" ? "Do klasyfikacji" : (product.subcategoryLabel || product.category || "Nieprzypisane").replace(/ dziecięce$/i, "");
+  const searchable = query.trim() ? classified.filter((product) => `${product.brand} ${product.name} ${product.configuration || ""}`.toLocaleLowerCase("pl").includes(query.trim().toLocaleLowerCase("pl"))) : [];
+  const families = [...new Map(classified.map((product) => [familyKeyFor(product), { key: familyKeyFor(product), label: familyLabel(product) }])).values()];
+  const familyProducts = familyKey ? classified.filter((product) => familyKeyFor(product) === familyKey) : classified;
+  const groups = [...new Map(familyProducts.filter((product) => product.benchmark_group).map((product) => [product.benchmark_group || "", { key: product.benchmark_group || "", label: product.benchmarkCategory }])).values()]
+    .sort((left, right) => ["light_stroller", "standard_stroller", "stroller_2in1", "stroller_3in1"].indexOf(left.key) - ["light_stroller", "standard_stroller", "stroller_2in1", "stroller_3in1"].indexOf(right.key));
+  const groupProducts = groupKey ? familyProducts.filter((product) => product.benchmark_group === groupKey) : familyProducts;
+  const toggleComparison = (product: Product) => setSelected((current) => toggleComparisonSelection(current, product, products));
+  const productCard = (product: Product) => {
+    const badge = statusBadge(product.status);
+    const checked = selected.has(product.id);
+    const selectable = Boolean(product.benchmark_group);
+    return <article key={product.id} className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/30">
+      <div className="flex items-start justify-between gap-3"><div><p className="text-xs text-muted-foreground">{product.brand}</p><p className="mt-0.5 text-sm font-semibold text-foreground">{product.name}</p>{product.configuration && <p className="mt-1 text-xs text-muted-foreground">Konfiguracja: {product.configuration}</p>}</div><div className="flex items-center gap-2"><label className={`inline-flex items-center gap-1 text-[11px] ${selectable ? "cursor-pointer text-muted-foreground" : "text-muted-foreground/50"}`}><input aria-label={`Wybierz ${product.brand} ${product.name} do porównania`} type="checkbox" disabled={!selectable} checked={checked} onChange={() => toggleComparison(product)} />Porównaj</label><span className={`shrink-0 rounded border px-2 py-0.5 text-[11px] font-medium ${badge.cls}`}>{badge.label}</span></div></div>
+      <p className="mt-3 text-xs text-muted-foreground">{product.benchmarkCategory || "Do klasyfikacji"}</p>{product.scope === "test" && <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">Dane testowe</span>}{(product.zrodla !== null || product.coverage !== null) && <p className="mt-2 text-[11px] text-muted-foreground">{product.zrodla !== null ? `${product.zrodla} źródeł` : ""}{product.zrodla !== null && product.coverage !== null ? " · " : ""}{product.coverage !== null ? `coverage ${product.coverage}%` : ""}</p>}
+      <button onClick={() => onDetail(product.id)} className="mt-3 text-xs font-medium text-primary hover:underline">Otwórz szczegóły</button>
+    </article>;
+  };
+  const selectedGroup = products.find((product) => selected.has(product.id))?.benchmark_group;
+  const showProductList = Boolean(groupKey) || familyKey === "unassigned";
+  return <div className="h-full overflow-auto bg-background"><header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-6 py-4"><div><h1 className="text-base font-semibold text-foreground">Produkty</h1><p className="mt-0.5 text-xs text-muted-foreground">Katalog według rodzin produktowych i grup benchmarkowych</p></div><div className="flex items-center gap-2">{canCompareSelection(selected) && <button onClick={() => onCompare([...selected])} className="rounded border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"><GitCompare size={13} className="mr-1 inline" />Porównaj wybrane ({selected.size})</button>}<button onClick={onResearch} className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"><Plus size={13} className="mr-1 inline" />Nowy research</button></div></header><main className="mx-auto max-w-6xl px-6 py-6"><div className="mb-5 flex flex-wrap items-center gap-3"><div className="relative min-w-64 flex-1"><Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Szukaj produktu..." className="w-full rounded border border-border bg-card py-2 pl-8 pr-3 text-xs outline-none focus:ring-1 focus:ring-primary/30" /></div><label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={showUnassigned} onChange={(event) => { setShowUnassigned(event.target.checked); setFamilyKey(""); setGroupKey(""); }} />Pokaż nieprzypisane rekordy</label></div>{selected.size > 0 && <p className="mb-4 text-xs text-muted-foreground">Zaznaczono {selected.size} / 5{selectedGroup ? ` · grupa: ${groups.find((group) => group.key === selectedGroup)?.label || selectedGroup}` : ""}. Produkty z innej grupy benchmarkowej nie mogą zostać dodane do tego porównania.</p>}<nav aria-label="Breadcrumb" className="mb-6 flex items-center gap-1 text-xs text-muted-foreground"><button onClick={() => { setFamilyKey(""); setGroupKey(""); }} className={!familyKey ? "font-medium text-foreground" : "hover:text-primary"}>Produkty</button>{familyKey && <><ChevronRight size={12} /><button onClick={() => setGroupKey("")} className={!groupKey ? "font-medium text-foreground" : "hover:text-primary"}>{families.find((family) => family.key === familyKey)?.label || familyKey}</button></>}{groupKey && <><ChevronRight size={12} /><span className="font-medium text-foreground">{groups.find((group) => group.key === groupKey)?.label || groupKey}</span></>}</nav>{query.trim() ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Wyniki wyszukiwania</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{searchable.map(productCard)}</div>{searchable.length === 0 && <p className="rounded border border-dashed border-border p-6 text-sm text-muted-foreground">Brak sklasyfikowanych produktów spełniających wyszukiwanie.</p>}</section> : !familyKey ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Rodziny produktów</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{families.map((family) => { const items = classified.filter((product) => familyKeyFor(product) === family.key && product.benchmark_group); const groupCount = new Set(items.map((product) => product.benchmark_group)).size; return <button key={family.key} onClick={() => setFamilyKey(family.key)} className="rounded-lg border border-border bg-card p-5 text-left hover:border-primary/40"><p className="text-sm font-semibold text-foreground">{family.label}</p><p className="mt-2 text-xs text-muted-foreground">{items.length} sklasyfikowanych produktów</p><p className="mt-1 text-xs text-muted-foreground">{groupCount} grupy benchmarkowe</p></button>; })}</div></section> : showProductList ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">{groupKey ? `${groups.find((group) => group.key === groupKey)?.label || groupKey} (${groupProducts.length})` : "Do klasyfikacji"}</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{groupProducts.map(productCard)}</div>{groupProducts.length === 0 && <p className="rounded border border-dashed border-border p-5 text-sm text-muted-foreground">Brak produktów w tej grupie.</p>}</section> : <section><h2 className="mb-3 text-sm font-semibold text-foreground">Grupy benchmarkowe</h2><div className="grid gap-3 sm:grid-cols-2">{groups.map((group) => { const items = familyProducts.filter((product) => product.benchmark_group === group.key); return <button key={group.key} onClick={() => setGroupKey(group.key)} className="rounded-lg border border-border bg-card p-5 text-left hover:border-primary/40"><p className="text-sm font-semibold text-foreground">{group.label}</p><p className="mt-2 text-xs text-muted-foreground">{items.length} produktów</p></button>; })}</div></section>}</main></div>;
+}
+
+function PageProduktyBrandSplitLegacy({ onDetail, onResearch }: { onDetail: (id: string) => void; onResearch: () => void }) {
+  const { products } = useCatalog();
+  const [query, setQuery] = useState("");
+  const [showUnassigned, setShowUnassigned] = useState(false);
+  const [familyKey, setFamilyKey] = useState("");
+  const [groupKey, setGroupKey] = useState("");
+  const normalizedBrand = (brand: string) => brand.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pl").trim();
+  const isOwn = (product: Product) => normalizedBrand(product.brand) === "lionelo";
+  const classified = products.filter((product) => showUnassigned || Boolean(product.benchmark_group));
+  const searchable = query.trim() ? classified.filter((product) => `${product.brand} ${product.name} ${product.configuration || ""}`.toLocaleLowerCase("pl").includes(query.trim().toLocaleLowerCase("pl"))) : [];
+  const familyLabel = (product: Product) => (product.subcategoryLabel || product.category || "Nieprzypisane").replace(/ dziecięce$/i, "");
+  const families = [...new Map(classified.map((product) => [product.subcategory_key || product.category_key || "unassigned", { key: product.subcategory_key || product.category_key || "unassigned", label: familyLabel(product) }])).values()];
+  const familyProducts = familyKey ? classified.filter((product) => (product.subcategory_key || product.category_key || "unassigned") === familyKey) : classified;
+  const groups = [...new Map(familyProducts.filter((product) => product.benchmark_group).map((product) => [product.benchmark_group || "", { key: product.benchmark_group || "", label: product.benchmarkCategory }])).values()]
+    .sort((left, right) => ["light_stroller", "standard_stroller", "stroller_2in1", "stroller_3in1"].indexOf(left.key) - ["light_stroller", "standard_stroller", "stroller_2in1", "stroller_3in1"].indexOf(right.key));
+  const groupProducts = groupKey ? familyProducts.filter((product) => product.benchmark_group === groupKey) : familyProducts;
+  const ownProducts = groupProducts.filter(isOwn);
+  const competitors = groupProducts.filter((product) => !isOwn(product));
+  const productCard = (product: Product) => {
+    const badge = statusBadge(product.status);
+    return <button key={product.id} onClick={() => onDetail(product.id)} className="w-full rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/30"><div className="flex items-start justify-between gap-3"><div><p className="text-xs text-muted-foreground">{product.brand}</p><p className="mt-0.5 text-sm font-semibold text-foreground">{product.name}</p>{product.configuration && <p className="mt-1 text-xs text-muted-foreground">Konfiguracja: {product.configuration}</p>}</div><span className={`shrink-0 rounded border px-2 py-0.5 text-[11px] font-medium ${badge.cls}`}>{badge.label}</span></div><p className="mt-3 text-xs text-muted-foreground">{product.benchmarkCategory}</p>{(product.zrodla !== null || product.coverage !== null) && <p className="mt-2 text-[11px] text-muted-foreground">{product.zrodla !== null ? `${product.zrodla} źródeł` : ""}{product.zrodla !== null && product.coverage !== null ? " · " : ""}{product.coverage !== null ? `coverage ${product.coverage}%` : ""}</p>}</button>;
+  };
+  return <div className="h-full overflow-auto bg-background"><header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-6 py-4"><div><h1 className="text-base font-semibold text-foreground">Produkty</h1><p className="mt-0.5 text-xs text-muted-foreground">Katalog według rodzin produktowych i grup benchmarkowych</p></div><button onClick={onResearch} className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"><Plus size={13} className="mr-1 inline" />Nowy research</button></header><main className="mx-auto max-w-6xl px-6 py-6"><div className="mb-5 flex flex-wrap items-center gap-3"><div className="relative min-w-64 flex-1"><Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Szukaj produktu..." className="w-full rounded border border-border bg-card py-2 pl-8 pr-3 text-xs outline-none focus:ring-1 focus:ring-primary/30" /></div><label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={showUnassigned} onChange={(event) => { setShowUnassigned(event.target.checked); setFamilyKey(""); setGroupKey(""); }} />Pokaż nieprzypisane rekordy</label></div><nav aria-label="Breadcrumb" className="mb-6 flex items-center gap-1 text-xs text-muted-foreground"><button onClick={() => { setFamilyKey(""); setGroupKey(""); }} className={!familyKey ? "font-medium text-foreground" : "hover:text-primary"}>Produkty</button>{familyKey && <><ChevronRight size={12} /><button onClick={() => setGroupKey("")} className={!groupKey ? "font-medium text-foreground" : "hover:text-primary"}>{families.find((family) => family.key === familyKey)?.label || familyKey}</button></>}{groupKey && <><ChevronRight size={12} /><span className="font-medium text-foreground">{groups.find((group) => group.key === groupKey)?.label || groupKey}</span></>}</nav>{query.trim() ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Wyniki wyszukiwania</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{searchable.map((product) => <div key={product.id}>{productCard(product)}<p className="px-1 pt-1 text-[11px] text-muted-foreground">{familyLabel(product)} / {product.benchmarkCategory} · {isOwn(product) ? "Lionelo" : "Konkurent"}</p></div>)}</div>{searchable.length === 0 && <p className="rounded border border-dashed border-border p-6 text-sm text-muted-foreground">Brak sklasyfikowanych produktów spełniających wyszukiwanie.</p>}</section> : !familyKey ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Rodziny produktów</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{families.map((family) => { const items = classified.filter((product) => (product.subcategory_key || product.category_key || "unassigned") === family.key && product.benchmark_group); const own = items.filter(isOwn).length; const competition = items.length - own; const groupCount = new Set(items.map((product) => product.benchmark_group)).size; return <button key={family.key} onClick={() => setFamilyKey(family.key)} className="rounded-lg border border-border bg-card p-5 text-left hover:border-primary/40"><p className="text-sm font-semibold text-foreground">{family.label}</p><p className="mt-2 text-xs text-muted-foreground">{own} produktów Lionelo · {competition} konkurentów</p><p className="mt-1 text-xs text-muted-foreground">{groupCount} grupy benchmarkowe</p></button>; })}</div></section> : !groupKey ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Grupy benchmarkowe</h2><div className="grid gap-3 sm:grid-cols-2">{groups.map((group) => { const items = familyProducts.filter((product) => product.benchmark_group === group.key); const own = items.filter(isOwn).length; const competition = items.length - own; return <button key={group.key} onClick={() => setGroupKey(group.key)} className="rounded-lg border border-border bg-card p-5 text-left hover:border-primary/40"><p className="text-sm font-semibold text-foreground">{group.label}</p><p className="mt-2 text-xs text-muted-foreground">{own} Lionelo · {competition} konkurentów</p></button>; })}</div></section> : <section><h2 className="mb-3 text-sm font-semibold text-foreground">Produkty Lionelo ({ownProducts.length})</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{ownProducts.map(productCard)}</div><h2 className="mb-3 mt-8 text-sm font-semibold text-foreground">Konkurenci ({competitors.length})</h2>{competitors.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{competitors.map(productCard)}</div> : <p className="rounded border border-dashed border-border p-5 text-sm text-muted-foreground">Nie dodano jeszcze konkurentów do tej grupy.</p>}</section>}</main></div>;
+}
+
+function PageProduktyPrevious({ onDetail, onResearch }: { onDetail: (id: string) => void; onResearch: () => void }) {
+  const { products } = useCatalog();
+  const [query, setQuery] = useState("");
+  const [showTests, setShowTests] = useState(false);
+  const [categoryKey, setCategoryKey] = useState("");
+  const [subcategoryKey, setSubcategoryKey] = useState("");
+  const [groupKey, setGroupKey] = useState("");
+  const visible = products.filter((product) => showTests || product.scope === "production");
+  const matching = query.trim()
+    ? visible.filter((product) => `${product.brand} ${product.name} ${product.configuration || ""}`.toLocaleLowerCase("pl").includes(query.trim().toLocaleLowerCase("pl")))
+    : [];
+  const categoryProducts = categoryKey ? visible.filter((product) => product.category_key === categoryKey) : visible;
+  const subcategoryProducts = subcategoryKey ? categoryProducts.filter((product) => product.subcategory_key === subcategoryKey) : categoryProducts;
+  const groupProducts = groupKey ? subcategoryProducts.filter((product) => product.benchmark_group === groupKey) : subcategoryProducts;
+  const categories = [...new Map(visible.map((product) => [product.category_key || product.category, { key: product.category_key || product.category, label: product.category }])).values()];
+  const subcategories = [...new Map(categoryProducts.map((product) => [product.subcategory_key || product.benchmarkCategory, { key: product.subcategory_key || product.benchmarkCategory, label: product.subcategoryLabel || product.benchmarkCategory }])).values()];
+  const groups = [...new Map(subcategoryProducts.map((product) => [product.benchmark_group || product.benchmarkCategory, { key: product.benchmark_group || product.benchmarkCategory, label: product.benchmarkCategory }])).values()]
+    .sort((left, right) => ["light_stroller", "standard_stroller", "stroller_2in1", "stroller_3in1"].indexOf(left.key) - ["light_stroller", "standard_stroller", "stroller_2in1", "stroller_3in1"].indexOf(right.key));
+  const resetFrom = (level: "category" | "subcategory" | "group") => {
+    if (level === "category") { setCategoryKey(""); setSubcategoryKey(""); setGroupKey(""); }
+    if (level === "subcategory") { setSubcategoryKey(""); setGroupKey(""); }
+    if (level === "group") setGroupKey("");
+  };
+  const path = [
+    ["Produkty", () => resetFrom("category")],
+    categoryKey && [categories.find((item) => item.key === categoryKey)?.label || categoryKey, () => resetFrom("subcategory")],
+    subcategoryKey && [subcategories.find((item) => item.key === subcategoryKey)?.label || subcategoryKey, () => resetFrom("group")],
+    groupKey && [groups.find((item) => item.key === groupKey)?.label || groupKey, () => undefined],
+  ].filter(Boolean) as Array<[string, () => void]>;
+  const productCard = (product: Product) => {
+    const badge = statusBadge(product.status);
+    return <button key={product.id} onClick={() => onDetail(product.id)} className="w-full rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/30">
+      <div className="flex items-start justify-between gap-3"><div><p className="text-xs text-muted-foreground">{product.brand}</p><p className="mt-0.5 text-sm font-semibold text-foreground">{product.name}</p>{product.configuration && <p className="mt-1 text-xs text-muted-foreground">Konfiguracja: {product.configuration}</p>}</div><span className={`shrink-0 rounded border px-2 py-0.5 text-[11px] font-medium ${badge.cls}`}>{badge.label}</span></div>
+      <p className="mt-3 text-xs text-muted-foreground">{product.benchmarkCategory}</p>
+      {(product.zrodla !== null || product.coverage !== null) && <p className="mt-2 text-[11px] text-muted-foreground">{product.zrodla !== null ? `${product.zrodla} źródeł` : ""}{product.zrodla !== null && product.coverage !== null ? " · " : ""}{product.coverage !== null ? `coverage ${product.coverage}%` : ""}</p>}
+    </button>;
+  };
+  return <div className="h-full overflow-auto bg-background">
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-6 py-4"><div><h1 className="text-base font-semibold text-foreground">Produkty</h1><p className="mt-0.5 text-xs text-muted-foreground">Katalog produktów według kategorii i grup benchmarkowych</p></div><button onClick={onResearch} className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"><Plus size={13} className="mr-1 inline" />Nowy research</button></header>
+    <main className="mx-auto max-w-6xl px-6 py-6">
+      <div className="mb-5 flex flex-wrap items-center gap-3"><div className="relative min-w-64 flex-1"><Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Szukaj produktu..." className="w-full rounded border border-border bg-card py-2 pl-8 pr-3 text-xs outline-none focus:ring-1 focus:ring-primary/30" /></div><label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={showTests} onChange={(event) => { setShowTests(event.target.checked); resetFrom("category"); }} />Pokaż produkty testowe</label></div>
+      <nav aria-label="Breadcrumb" className="mb-6 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">{path.map(([label, callback], index) => <Fragment key={`${label}-${index}`}><button onClick={callback} className={index === path.length - 1 ? "font-medium text-foreground" : "hover:text-primary"}>{label}</button>{index < path.length - 1 && <ChevronRight size={12} />}</Fragment>)}</nav>
+      {query.trim() ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Wyniki wyszukiwania</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{matching.map((product) => <div key={product.id}>{productCard(product)}<p className="px-1 pt-1 text-[11px] text-muted-foreground">{product.category} / {product.subcategoryLabel || "—"} / {product.benchmarkCategory}</p></div>)}</div>{matching.length === 0 && <p className="rounded border border-dashed border-border p-6 text-sm text-muted-foreground">Brak produktów spełniających wyszukiwanie.</p>}</section>
+      : !categoryKey ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Kategorie</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{categories.map((category) => { const items = visible.filter((product) => product.category_key === category.key); const count = new Set(items.map((product) => product.subcategory_key)).size; return <button key={category.key} onClick={() => setCategoryKey(category.key)} className="rounded-lg border border-border bg-card p-5 text-left hover:border-primary/40"><p className="text-sm font-semibold text-foreground">{category.label}</p><p className="mt-2 text-xs text-muted-foreground">{items.length} produktów · {count} {count === 1 ? "podkategoria" : "podkategorii"}</p></button>; })}</div></section>
+      : !subcategoryKey ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Podkategorie</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{subcategories.map((subcategory) => { const items = categoryProducts.filter((product) => product.subcategory_key === subcategory.key); return <button key={subcategory.key} onClick={() => setSubcategoryKey(subcategory.key)} className="rounded-lg border border-border bg-card p-5 text-left hover:border-primary/40"><p className="text-sm font-semibold text-foreground">{subcategory.label}</p><p className="mt-2 text-xs text-muted-foreground">{items.length} produktów</p></button>; })}</div></section>
+      : !groupKey ? <section><h2 className="mb-3 text-sm font-semibold text-foreground">Grupy benchmarkowe</h2><div className="grid gap-3 sm:grid-cols-2">{groups.map((group) => { const count = subcategoryProducts.filter((product) => product.benchmark_group === group.key).length; return <button key={group.key} onClick={() => setGroupKey(group.key)} className="rounded-lg border border-border bg-card p-5 text-left hover:border-primary/40"><p className="text-sm font-semibold text-foreground">{group.label}</p><p className="mt-2 text-xs text-muted-foreground">{count} produktów</p></button>; })}</div></section>
+      : <section><h2 className="mb-3 text-sm font-semibold text-foreground">Produkty</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{groupProducts.map(productCard)}</div></section>}
+    </main>
+  </div>;
+}
+
+function PageProduktyLegacy({ onDetail, onResearch }: { onDetail: (id: string) => void; onResearch: () => void }) {
+  const { products } = useCatalog();
   const [query, setQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("wszystkie");
   const [filterBrand, setFilterBrand] = useState<string>("wszystkie");
@@ -551,7 +803,7 @@ function PageProdukty({ onDetail, onResearch }: { onDetail: (id: string) => void
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showFilter, setShowFilter] = useState(false);
 
-  const filtered = PRODUCTS.filter((p) => {
+  const filtered = products.filter((p) => {
     const q = query.toLowerCase();
     const matchQ = p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q);
     const matchS = filterStatus === "wszystkie" || p.status === filterStatus;
@@ -560,9 +812,9 @@ function PageProdukty({ onDetail, onResearch }: { onDetail: (id: string) => void
     const matchBenchmarkCategory = filterBenchmarkCategory === "wszystkie" || p.benchmarkCategory === filterBenchmarkCategory;
     return matchQ && matchS && matchBrand && matchCategory && matchBenchmarkCategory;
   });
-  const brands = [...new Set(PRODUCTS.map((product) => product.brand))].sort((a, b) => a.localeCompare(b, "pl"));
-  const categories = [...new Set(PRODUCTS.map((product) => product.category))].sort((a, b) => a.localeCompare(b, "pl"));
-  const benchmarkCategories = [...new Set(PRODUCTS.map((product) => product.benchmarkCategory))].sort((a, b) => a.localeCompare(b, "pl"));
+  const brands = [...new Set(products.map((product) => product.brand))].sort((a, b) => a.localeCompare(b, "pl"));
+  const categories = [...new Set(products.map((product) => product.category))].sort((a, b) => a.localeCompare(b, "pl"));
+  const benchmarkCategories = [...new Set(products.map((product) => product.benchmarkCategory))].sort((a, b) => a.localeCompare(b, "pl"));
   const grouped = filtered.reduce<Record<string, Product[]>>((groups, product) => {
     const key = `${product.brand} / ${product.category} / ${product.benchmarkCategory}`;
     (groups[key] ||= []).push(product);
@@ -595,7 +847,7 @@ function PageProdukty({ onDetail, onResearch }: { onDetail: (id: string) => void
       <div className="px-6 py-4 border-b border-border bg-card flex items-center justify-between gap-4 flex-shrink-0">
         <div>
           <h1 className="text-base font-semibold text-foreground">Produkty</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">{PRODUCTS.length} produktów w katalogu</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{products.length} produktów w katalogu</p>
         </div>
         <div className="flex items-center gap-2">
           {selected.size >= 2 && (
@@ -777,8 +1029,56 @@ function PageProdukty({ onDetail, onResearch }: { onDetail: (id: string) => void
   );
 }
 
+// ─── Pages: Benchmarki i produkty rynkowe ─────────────────────────────────────
+function MarketProductCard({ product, onDetail, onSources }: { product: Product; onDetail?: (slug: string) => void; onSources?: (slug: string) => void }) {
+  const badge = statusBadge(product.status);
+  return <article className="rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/30">
+    <div className="flex items-start justify-between gap-3"><div><p className="text-xs text-muted-foreground">{product.brand}</p><h2 className="mt-0.5 text-sm font-semibold text-foreground">{product.name}</h2><p className="mt-1 text-[11px] text-muted-foreground">{product.benchmarkCategory || "Bez przypisanej grupy"}</p></div><span className={`shrink-0 rounded border px-2 py-0.5 text-[11px] font-medium ${badge.cls}`}>{badge.label}</span></div>
+    <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground"><span>{product.coverage === null ? "Coverage: —" : `Coverage: ${product.coverage}%`}</span><span>{product.zrodla ?? 0} źródeł</span></div>
+    <div className="mt-4 flex flex-wrap gap-3">{onDetail && <button onClick={() => onDetail(product.slug)} className="text-xs font-medium text-primary hover:underline">Otwórz szczegóły</button>}{onSources && <button onClick={() => onSources(product.slug)} className="text-xs font-medium text-muted-foreground hover:text-primary">Źródła</button>}</div>
+  </article>;
+}
+
+function PageProduktyKonkurencji({ onDetail }: { onDetail: (slug: string) => void }) {
+  const { products } = useCatalog();
+  const [query, setQuery] = useState("");
+  const marketProducts = products.filter((product) => !isLioneloProduct(product));
+  const filtered = marketProducts.filter((product) => `${product.brand} ${product.name} ${product.configuration || ""}`.toLocaleLowerCase("pl").includes(query.trim().toLocaleLowerCase("pl")));
+  return <div className="h-full overflow-auto bg-background"><header className="border-b border-border bg-card px-6 py-4"><h1 className="text-base font-semibold text-foreground">Produkty konkurencji</h1><p className="mt-0.5 text-xs text-muted-foreground">Produkty marek innych niż Lionelo, z zachowaniem statusu researchu i dowodów.</p></header><main className="mx-auto max-w-6xl px-6 py-6"><div className="relative mb-5"><Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Szukaj marki lub modelu..." className="w-full rounded border border-border bg-card py-2 pl-8 pr-3 text-xs outline-none focus:ring-1 focus:ring-primary/30" /></div>{filtered.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filtered.map((product) => <MarketProductCard key={product.slug} product={product} onDetail={onDetail} />)}</div> : <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">Brak produktów konkurencji spełniających kryteria.</div>}</main></div>;
+}
+
+function PageZrodlaIndex({ onSources }: { onSources: (slug: string) => void }) {
+  const { products } = useCatalog();
+  const productsWithSources = products.filter((product) => (product.zrodla || 0) > 0);
+  return <div className="h-full overflow-auto bg-background"><header className="border-b border-border bg-card px-6 py-4"><h1 className="text-base font-semibold text-foreground">Źródła</h1><p className="mt-0.5 text-xs text-muted-foreground">Przejdź do aukcji, snapshotów i dowodów przypisanych do produktu.</p></header><main className="mx-auto max-w-6xl px-6 py-6">{productsWithSources.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{productsWithSources.map((product) => <MarketProductCard key={product.slug} product={product} onSources={onSources} />)}</div> : <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">Brak produktów z zapisanymi źródłami.</div>}</main></div>;
+}
+
+function InternalBenchmarkComparison({ groupKey, onBack }: { groupKey: string; onBack: () => void }) {
+  const { products } = useCatalog();
+  const [detail, setDetail] = useState<InternalBenchmarkDetail | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => { let active = true; setDetail(null); setError(""); void apiRequest<InternalBenchmarkDetail>(`/internal-benchmarks/${encodeURIComponent(groupKey)}`).then((response) => { if (active) setDetail(response); }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Nie udało się wczytać benchmarku wewnętrznego."); }); return () => { active = false; }; }, [groupKey]);
+  if (error) return <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>;
+  if (!detail) return <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">Wczytywanie grupy benchmarkowej…</div>;
+  const slugs = detail.participants.map((participant) => participant.product_slug);
+  const anchor = products.find((product) => product.slug === slugs[0]);
+  return <div><button onClick={onBack} className="mb-4 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><ArrowLeft size={13} />Wróć do grup</button><div className="mb-5"><h2 className="text-base font-semibold text-foreground">{detail.title}</h2><p className="mt-1 text-xs text-muted-foreground">{detail.participant_count} produktów Lionelo w tej grupie.</p></div>{anchor ? <ProductBenchmarkPanel product={anchor} initialSelection={slugs} allowedProductSlugs={slugs} /> : <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">Brak produktu z tej grupy w lokalnym katalogu.</div>}</div>;
+}
+
+function PageBenchmarki({ onDetail }: { onDetail: (slug: string) => void }) {
+  const { products } = useCatalog();
+  const [tab, setTab] = useState<"internal" | "competitive">("internal");
+  const [internal, setInternal] = useState<InternalBenchmarkSummary[]>([]);
+  const [competitive, setCompetitive] = useState<CompetitiveBenchmarkSummary[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => { let active = true; setError(""); void Promise.all([apiRequest<InternalBenchmarkSummary[]>("/internal-benchmarks"), apiRequest<CompetitiveBenchmarkSummary[]>("/benchmarks")]).then(([internalGroups, competitiveBenchmarks]) => { if (!active) return; setInternal(internalGroups); setCompetitive(competitiveBenchmarks); }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Nie udało się wczytać benchmarków."); }); return () => { active = false; }; }, []);
+  const anchorFor = (benchmark: CompetitiveBenchmarkSummary) => products.find((product) => product.productId === benchmark.anchor_product_id);
+  return <div className="h-full overflow-auto bg-background"><header className="border-b border-border bg-card px-6 py-4"><h1 className="text-base font-semibold text-foreground">Benchmarki</h1><p className="mt-0.5 text-xs text-muted-foreground">Porównania produktów Lionelo oraz zapisane benchmarki konkurencyjne.</p><div className="mt-4 flex gap-1 border-b border-border -mb-4"><button onClick={() => { setTab("internal"); setSelectedGroup(""); }} className={`border-b-2 px-3 py-2 text-xs font-medium ${tab === "internal" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Wewnętrzne</button><button onClick={() => { setTab("competitive"); setSelectedGroup(""); }} className={`border-b-2 px-3 py-2 text-xs font-medium ${tab === "competitive" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Konkurencyjne</button></div></header><main className="mx-auto max-w-6xl px-6 py-6">{error ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div> : tab === "internal" && selectedGroup ? <InternalBenchmarkComparison groupKey={selectedGroup} onBack={() => setSelectedGroup("")} /> : tab === "internal" ? <div className="grid gap-3 sm:grid-cols-2">{internal.map((group) => <button key={group.benchmark_group_key} onClick={() => setSelectedGroup(group.benchmark_group_key)} className="rounded-lg border border-border bg-card p-5 text-left transition-colors hover:border-primary/40 hover:bg-muted/30"><p className="text-sm font-semibold text-foreground">{group.benchmark_group_label}</p><p className="mt-2 text-xs text-muted-foreground">{group.participant_count} produktów Lionelo</p></button>)}</div> : competitive.length ? <div className="space-y-3">{competitive.map((benchmark) => { const anchor = anchorFor(benchmark); return <article key={benchmark.benchmark_id} className="rounded-lg border border-border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">{benchmark.title}</h2><p className="mt-1 text-xs text-muted-foreground">{anchor ? `${anchor.brand} ${anchor.name}` : "Produkt Lionelo"} · {benchmark.benchmark_group_key} · {benchmark.participant_count} produktów rynkowych</p></div><span className="rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground">{benchmark.status}</span></div>{anchor && <button onClick={() => onDetail(anchor.slug)} className="mt-3 text-xs font-medium text-primary hover:underline">Otwórz produkt Lionelo</button>}</article>; })}</div> : <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">Brak zapisanych benchmarków konkurencyjnych.</div>}</main></div>;
+}
+
 // ─── Page: Produkt — Szczegóły ────────────────────────────────────────────────
-function ProductBenchmarkPanel({ product }: { product: Product }) {
+function ProductBenchmarkPanel({ product, initialSelection = [], allowedProductSlugs }: { product: Product; initialSelection?: string[]; allowedProductSlugs?: string[] }) {
   const [data, setData] = useState<BenchmarkResponse | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set([product.slug]));
   const [onlyDifferences, setOnlyDifferences] = useState(false);
@@ -790,12 +1090,14 @@ function ProductBenchmarkPanel({ product }: { product: Product }) {
       .then((response) => {
         if (!active) return;
         setData(response);
-        const initial = response.models.slice(0, 5).map((model) => model.slug);
+        const candidates = response.models.filter((model) => !allowedProductSlugs || allowedProductSlugs.includes(model.slug));
+        const requested = initialSelection.filter((slug) => candidates.some((model) => model.slug === slug));
+        const initial = requested.length >= 2 ? requested : candidates.slice(0, 5).map((model) => model.slug);
         if (initial.includes(product.slug)) setSelected(new Set(initial));
       })
       .catch((requestError) => active && setError(requestError instanceof Error ? requestError.message : "Nie udało się wczytać benchmarku kategorii."));
     return () => { active = false; };
-  }, [product.slug]);
+  }, [product.slug, initialSelection, allowedProductSlugs]);
 
   const toggle = (slug: string) => setSelected((current) => {
     const next = new Set(current);
@@ -803,7 +1105,8 @@ function ProductBenchmarkPanel({ product }: { product: Product }) {
     else if (next.size < 5) next.add(slug);
     return next.size ? next : new Set([product.slug]);
   });
-  const models = (data?.models || []).filter((model) => selected.has(model.slug));
+  const availableModels = (data?.models || []).filter((model) => !allowedProductSlugs || allowedProductSlugs.includes(model.slug));
+  const models = availableModels.filter((model) => selected.has(model.slug));
   const rows = (data?.fields || []).filter((field) => {
     if (!onlyDifferences) return true;
     const values = models.map((model) => model.values[field]?.value || "X");
@@ -814,11 +1117,62 @@ function ProductBenchmarkPanel({ product }: { product: Product }) {
   if (!data) return <div className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Wczytywanie benchmarku kategorii…</div>;
   if (!data.has_comparison) return <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center"><GitCompare size={24} className="mx-auto text-muted-foreground" /><p className="mt-3 text-sm font-medium text-foreground">Brak innych przeanalizowanych produktów w tej kategorii.</p><p className="mt-1 text-xs text-muted-foreground">Gdy kolejny produkt z kategorii „{data.benchmark_category || "tej"}” zostanie przeanalizowany, pojawi się tutaj porównanie.</p></div>;
 
-  return <section className="rounded-lg border border-border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Porównanie w kategorii: {data.benchmark_category}</h2><p className="mt-1 text-xs text-muted-foreground">Wybierz od 2 do 5 produktów. Ten widok porównuje modele, nie powiela karty pojedynczego produktu.</p></div><label className="inline-flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={onlyDifferences} onChange={(event) => setOnlyDifferences(event.target.checked)} />Tylko różnice</label></div><div className="mt-4 flex flex-wrap gap-2">{data.models.map((model) => <label key={model.slug} className={`inline-flex cursor-pointer items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs ${selected.has(model.slug) ? "border-primary bg-accent text-primary" : "border-border text-muted-foreground"}`}><input className="sr-only" type="checkbox" checked={selected.has(model.slug)} onChange={() => toggle(model.slug)} /><span>{model.brand} {model.model}</span><span className="text-[10px] opacity-70">{model.coverage ?? "—"}%</span></label>)}</div><div className="mt-4 overflow-x-auto"><table className="min-w-full text-xs"><thead><tr className="border-b border-border text-left text-muted-foreground"><th className="sticky left-0 z-10 bg-card px-2 py-2 font-medium">Parametr</th>{models.map((model) => <th key={model.slug} className="min-w-44 px-2 py-2 font-medium">{model.brand} {model.model}</th>)}</tr></thead><tbody>{rows.map((field) => <tr key={field} className="border-b border-border last:border-0 align-top"><td className="sticky left-0 z-10 bg-card px-2 py-2.5 font-medium text-foreground">{field}</td>{models.map((model) => { const value = model.values[field]?.value || "X"; const different = models.some((other) => (other.values[field]?.value || "X") !== value); return <td key={model.slug} className={`px-2 py-2.5 ${different ? "bg-amber-50/50" : ""} ${value === "X" ? "text-muted-foreground" : "text-foreground"}`}>{value === "X" ? "Brak danych" : value}</td>; })}</tr>)}</tbody></table></div></section>;
+  return <section className="rounded-lg border border-border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Porównanie w kategorii: {data.benchmark_category}</h2><p className="mt-1 text-xs text-muted-foreground">Wybierz od 2 do 5 produktów. Ten widok porównuje modele, nie powiela karty pojedynczego produktu.</p></div><label className="inline-flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={onlyDifferences} onChange={(event) => setOnlyDifferences(event.target.checked)} />Tylko różnice</label></div><div className="mt-4 flex flex-wrap gap-2">{availableModels.map((model) => <label key={model.slug} className={`inline-flex cursor-pointer items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs ${selected.has(model.slug) ? "border-primary bg-accent text-primary" : "border-border text-muted-foreground"}`}><input className="sr-only" type="checkbox" checked={selected.has(model.slug)} onChange={() => toggle(model.slug)} /><span>{model.brand} {model.model}</span><span className="text-[10px] opacity-70">{model.coverage ?? "—"}%</span></label>)}</div><div className="mt-4 overflow-x-auto"><table className="min-w-full text-xs"><thead><tr className="border-b border-border text-left text-muted-foreground"><th className="sticky left-0 z-10 bg-card px-2 py-2 font-medium">Parametr</th>{models.map((model) => <th key={model.slug} className="min-w-44 px-2 py-2 font-medium">{model.brand} {model.model}</th>)}</tr></thead><tbody>{rows.map((field) => <tr key={field} className="border-b border-border last:border-0 align-top"><td className="sticky left-0 z-10 bg-card px-2 py-2.5 font-medium text-foreground">{field}</td>{models.map((model) => { const value = model.values[field]?.value || "X"; const different = models.some((other) => (other.values[field]?.value || "X") !== value); return <td key={model.slug} className={`px-2 py-2.5 ${different ? "bg-amber-50/50" : ""} ${value === "X" ? "text-muted-foreground" : "text-foreground"}`}>{value === "X" ? "Brak danych" : value}</td>; })}</tr>)}</tbody></table></div></section>;
 }
 
-function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { productId: string; onBack: () => void; onResearch: () => void; onSources: () => void }) {
-  const p = PRODUCTS.find((x) => x.id === productId) || PRODUCTS[0];
+type ProductProfile = {
+  profile_status: string; one_sentence_summary: string; narrative_summary: string;
+  discovered_themes: Array<{ theme_id: string; title: string; summary: string; confidence: string; supporting_source_ids: string[]; supporting_evidence_ids: string[]; supporting_visual_block_ids: string[]; supporting_media_ids: string[] }>;
+  factual_highlights: Array<{ statement: string; supporting_evidence_ids: string[] }>;
+  marketplace_narrative: Array<{ observation: string; confidence: string; supporting_source_ids: string[] }>;
+  visual_positioning: Array<{ observation: string; confidence: string; supporting_source_ids: string[]; supporting_visual_block_ids: string[]; supporting_media_ids: string[]; visual_access: string }>;
+  important_conflicts: Array<{ summary: string; supporting_source_ids: string[]; supporting_evidence_ids: string[] }>;
+  important_unknowns: Array<{ summary: string; related_source_ids: string[] }>;
+  input_summary: { textual_coverage?: string; visual_coverage?: string; sources_used?: number; visual_blocks_used?: number };
+  generation: { generated_at?: string; model_name?: string; failure_reason?: string; latest_failure_reason?: string; latest_failure_code?: string; latest_attempt_at?: string };
+};
+
+function ProductProfilePanel({ product, refreshToken = 0 }: { product: Product; refreshToken?: number }) {
+  const [profile, setProfile] = useState<ProductProfile | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [profileEnabled, setProfileEnabled] = useState(false);
+  useEffect(() => { void apiRequest<{ ai_enabled?: boolean }>("/product-profile/capabilities").then((capabilities) => setProfileEnabled(Boolean(capabilities.ai_enabled))).catch(() => setProfileEnabled(false)); }, []);
+  useEffect(() => { let active = true; setLoading(true); setError(""); void apiRequest<ProductProfile>(`/products/${product.slug}/profile`).then((value) => { if (active) setProfile(value); }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Nie udało się wczytać profilu."); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [product.slug, refreshToken]);
+  if (loading) return <div className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Wczytywanie profilu produktu…</div>;
+  if (error) return <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>;
+  const regenerate = async () => { setGenerating(true); setError(""); try { setProfile(await apiRequest<ProductProfile>(`/products/${product.slug}/profile/generate`, { method: "POST" })); } catch (reason) { setError(reason instanceof Error ? reason.message : "Nie udało się uruchomić generowania profilu."); } finally { setGenerating(false); } };
+  const statusLabel: Record<string, string> = { not_generated: "Nie wygenerowano", generating: "Generowanie", generated: "Gotowy", partial: "Częściowy", stale: "Nieaktualny", failed: "Błąd" };
+  const references = (ids: string[] = []) => ids.length ? <div className="mt-2 flex flex-wrap gap-1">{ids.map((id) => <span key={id} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground" title="Odwołanie jest zapisane w profilu, ale ten typ nie ma jeszcze osobnego widoku.">{id}</span>)}</div> : null;
+  if (!profile || profile.profile_status === "not_generated") { const reason = profile?.generation?.failure_reason || profile?.generation?.latest_failure_reason || "Brak wystarczających danych źródłowych do wygenerowania profilu."; return <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center"><FileText size={24} className="mx-auto text-muted-foreground" /><p className="mt-3 text-sm font-medium text-foreground">Profil produktu nie został jeszcze wygenerowany.</p><p className="mt-1 text-xs text-muted-foreground">{reason}</p>{profileEnabled && <button onClick={() => void regenerate()} disabled={generating} className="mt-4 rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted">Wygeneruj profil</button>}</div>; }
+  if (profile.profile_status === "failed") return <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-red-800"><p className="font-medium">Generowanie profilu zakończyło się błędem.</p><p className="mt-1 text-xs">{profile.generation.latest_failure_reason || profile.generation.failure_reason || "Brak szczegółu błędu."}</p>{profileEnabled && <button onClick={() => void regenerate()} disabled={generating} className="mt-3 rounded border border-red-300 px-3 py-1.5 text-xs font-medium">Spróbuj ponownie</button>}</div>;
+  const section = (title: string, rows: Array<{ title?: string; body?: string; ids?: string[] }>) => rows.length ? <section className="rounded-lg border border-border bg-card p-4"><h2 className="text-sm font-semibold text-foreground">{title}</h2><div className="mt-3 space-y-2">{rows.map((row, index) => <div key={`${title}-${index}`} className="rounded border border-border bg-muted/20 p-3 text-xs"><p className="font-medium text-foreground">{row.title || row.body}</p>{row.title && row.body && <p className="mt-1 text-muted-foreground leading-relaxed">{row.body}</p>}{references(row.ids)}</div>)}</div></section> : null;
+  return <div className="flex-1 overflow-auto px-6 py-5 space-y-4">
+    <section className="rounded-lg border border-border bg-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-base font-semibold text-foreground">Profil produktu</h2>{profile.profile_status === "stale" ? <p className="mt-1 text-sm text-amber-700">Profil jest nieaktualny i nie jest prezentowany jako bieżący wynik.</p> : <p className="mt-1 text-sm text-muted-foreground">{profile.one_sentence_summary}</p>}</div>
+        <div className="flex items-center gap-2"><span className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs text-muted-foreground">{statusLabel[profile.profile_status] || profile.profile_status}</span>{profileEnabled && <button onClick={() => void regenerate()} disabled={generating} className="rounded border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50">{generating ? "Generowanie…" : "Wygeneruj ponownie"}</button>}</div>
+      </div>
+      {profile.profile_status !== "stale" && profile.narrative_summary && <p className="mt-4 max-w-3xl text-sm leading-relaxed text-foreground">{profile.narrative_summary}</p>}
+      <p className="mt-3 text-xs text-muted-foreground">Pokrycie tekstowe: {profile.input_summary.textual_coverage || "—"} · wizualne: {profile.input_summary.visual_coverage || "—"} · źródła: {profile.input_summary.sources_used ?? 0} · bloki wizualne: {profile.input_summary.visual_blocks_used ?? 0}</p>
+    </section>
+    {profile.profile_status !== "stale" && <>
+      {section("Najważniejsze fakty", profile.factual_highlights.map((x) => ({ body: x.statement, ids: x.supporting_evidence_ids })))}
+      {section("Odkryte tematy", profile.discovered_themes.map((x) => ({ title: x.title, body: x.summary, ids: [...x.supporting_source_ids, ...x.supporting_evidence_ids, ...x.supporting_visual_block_ids, ...x.supporting_media_ids] })))}
+      {section("Opis w ofertach", profile.marketplace_narrative.map((x) => ({ body: x.observation, ids: x.supporting_source_ids })))}
+      {section("Kontekst wizualny", profile.visual_positioning.map((x) => ({ body: x.observation, ids: [...x.supporting_source_ids, ...x.supporting_visual_block_ids, ...x.supporting_media_ids] })))}
+      {section("Istotne konflikty", profile.important_conflicts.map((x) => ({ body: x.summary, ids: [...x.supporting_source_ids, ...x.supporting_evidence_ids] })))}
+      {section("Otwarte kwestie", profile.important_unknowns.map((x) => ({ body: x.summary, ids: x.related_source_ids })))}
+    </>}
+    <p className="text-xs text-muted-foreground">Profil utworzony: {profile.generation.generated_at ? new Date(profile.generation.generated_at).toLocaleString("pl-PL") : "—"} · model: {profile.generation.model_name || "—"}</p>
+  </div>;
+}
+
+function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSources, comparisonSelection = [] }: { productId: string; onBack: () => void; backLabel: string; onResearch: () => void; onSources: () => void; comparisonSelection?: string[] }) {
+  const { products } = useCatalog();
+  const p = products.find((x) => x.id === productId) || null;
+  if (!p) return <div className="p-6 text-sm text-muted-foreground">Nie znaleziono produktu w katalogu.</div>;
   const badge = statusBadge(p.status);
   const details = PRODUCT_DETAILS[p.id];
   const [selectedEvidence, setSelectedEvidence] = useState<FieldEvidence | null>(null);
@@ -830,9 +1184,13 @@ function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { pr
   const [selectedHistory, setSelectedHistory] = useState<RefreshHistoryEntry | null>(null);
   const [analysisRuns, setAnalysisRuns] = useState<ApiRun[]>([]);
   const [historySnapshot, setHistorySnapshot] = useState<HistorySnapshot | null>(null);
-  const [activeTab, setActiveTab] = useState<"product" | "benchmark" | "history">("product");
+  const [activeTab, setActiveTab] = useState<"product" | "profile" | "benchmark" | "history">("product");
   const [fieldFilter, setFieldFilter] = useState<"all" | "valid" | "weak" | "conflicting" | "missing" | "legacy">("all");
   const [analysisMode, setAnalysisMode] = useState<"saved" | "refresh">("saved");
+  const [productRefreshToken, setProductRefreshToken] = useState(0);
+  useEffect(() => {
+    if (comparisonSelection.includes(p.slug)) setActiveTab("benchmark");
+  }, [comparisonSelection, p.slug]);
   const fields = details?.fields || [];
   const metrics = p.metrics;
   const visibleFields = fields.filter((field) => {
@@ -909,13 +1267,30 @@ function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { pr
       try {
         const latest = await apiRequest<ApiRun>(`/runs/${refreshRun.run_id}`);
         setRefreshRun(latest);
-        if (!["queued", "running"].includes(latest.status)) void loadHistory();
+        if (!["queued", "running"].includes(latest.status)) {
+          if (shouldAutoReloadAfterRun(latest)) {
+            window.setTimeout(() => window.location.reload(), 250);
+          } else if (isRunFailure(latest)) {
+            setRefreshError(latest.error || "Proces zakończył się błędem. Dane produktu nie zostały automatycznie odświeżone.");
+          }
+        }
       } catch (error) {
         setRefreshError(error instanceof Error ? error.message : "Utracono połączenie z lokalnym API.");
       }
     }, 2000);
     return () => window.clearInterval(timer);
   }, [refreshRun?.run_id, refreshRun?.status]);
+
+  useEffect(() => {
+    if (!refreshRun || ["queued", "running"].includes(refreshRun.status)) return;
+    if (shouldAutoReloadAfterRun(refreshRun)) {
+      const timer = window.setTimeout(() => window.location.reload(), 250);
+      return () => window.clearTimeout(timer);
+    }
+    if (isRunFailure(refreshRun)) {
+      setRefreshError(refreshRun.error || "Proces zakończył się błędem. Dane produktu nie zostały automatycznie odświeżone.");
+    }
+  }, [refreshRun]);
 
   const fieldStatus = (field: ProductField) => {
     if (field.status === "confirmed") return { label: "Potwierdzone", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
@@ -930,7 +1305,7 @@ function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { pr
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
           <button onClick={onBack} className="hover:text-foreground transition-colors flex items-center gap-1">
             <ArrowLeft size={11} />
-            Produkty
+            {backLabel}
           </button>
           <ChevronRight size={11} />
           <span className="text-foreground font-medium">{p.name}</span>
@@ -941,7 +1316,7 @@ function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { pr
             <p className="text-xs text-muted-foreground mt-0.5">Model wózka spacerowego</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center px-2 py-0.5 rounded border text-[11px] font-medium ${badge.cls}`}>{badge.label}</span>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded border text-[11px] font-medium ${statusBadge(p.status).cls}`}>{statusBadge(p.status).label}</span>
             <button onClick={() => setRefreshModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded hover:bg-muted transition-colors">
               <RefreshCw size={13} />
               Odśwież dane
@@ -955,13 +1330,14 @@ function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { pr
         </div>
         <div className="mt-4 flex gap-1 overflow-x-auto border-b border-border -mb-4" role="tablist" aria-label="Sekcje produktu">
           <button role="tab" aria-selected={activeTab === "product"} onClick={() => setActiveTab("product")} className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${activeTab === "product" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Dane produktu</button>
+          <button role="tab" aria-selected={activeTab === "profile"} onClick={() => setActiveTab("profile")} className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${activeTab === "profile" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Profil produktu</button>
           <button role="tab" aria-selected={activeTab === "benchmark"} onClick={() => setActiveTab("benchmark")} className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${activeTab === "benchmark" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Benchmark</button>
           <button role="tab" aria-selected={false} onClick={onSources} className="px-3 py-2 text-xs font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors">Aukcje i źródła</button>
           <button role="tab" aria-selected={activeTab === "history"} onClick={() => { setActiveTab("history"); void loadHistory(); }} className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${activeTab === "history" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Historia</button>
         </div>
       </div>
 
-      {activeTab === "history" ? <div className="flex-1 overflow-auto px-6 py-5 space-y-4"><section className="max-w-3xl bg-card border border-border rounded-lg p-4"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground" />Historia produktu</h2><button onClick={() => void loadHistory()} className="text-xs text-primary hover:underline">Odśwież listę</button></div>{analysisRuns.length > 0 && <div className="mt-4"><p className="text-xs font-medium text-foreground">Uruchomienia analizy</p><div className="mt-2 space-y-2">{analysisRuns.map((run) => <div key={run.run_id} className="rounded border border-border bg-muted/20 p-3 text-xs"><p className="font-medium text-foreground">{["success", "succeeded"].includes(run.status) ? "Analiza zakończona" : ["failed", "timed_out", "cancelled", "interrupted"].includes(run.status) ? "Analiza zatrzymana" : "Analiza w toku"}</p><p className="mt-1 text-muted-foreground">{run.started_at ? new Date(run.started_at).toLocaleString("pl-PL") : "—"} · użyte źródła: {run.analysis?.used_sources?.length ?? 0}</p><p className="mt-1 text-muted-foreground">Coverage: {run.analysis?.coverage_before ?? "—"}% → {run.analysis?.coverage_after ?? "—"}% · zmienione pola: {run.analysis?.fields_changed ?? 0}</p>{run.error && <p className="mt-2 text-red-700">{run.error}</p>}</div>)}</div></div>}{DEVELOPER_MODE && <details className="mt-4 rounded border border-border bg-muted/20 p-3 text-xs"><summary className="cursor-pointer font-medium text-foreground">Narzędzia developerskie</summary><p className="mt-2 text-muted-foreground">Ta akcja ponownie analizuje wyłącznie zapisane dane. Nie uruchamia wyszukiwania ofert.</p><button onClick={() => { setAnalysisMode("saved"); void startAnalysis(); }} className="mt-3 rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted">Przeanalizuj ponownie zapisane dane</button></details>}{history === null ? <p className="mt-3 text-xs text-muted-foreground">Wczytywanie wersji zapisanych przed odświeżeniami.</p> : history.length === 0 ? <p className="mt-3 text-xs text-muted-foreground">Brak zapisanych wersji dla tego produktu.</p> : <div className="mt-4 space-y-2">{history.map((entry) => <button key={entry.version} onClick={() => { setSelectedHistory(entry); setHistorySnapshot(null); }} className={`w-full rounded border p-3 text-left text-xs transition-colors ${selectedHistory?.version === entry.version ? "border-primary bg-accent" : "border-border hover:bg-muted/40"}`}><p className="font-medium text-foreground">{entry.mode === "incremental" ? "Odświeżenie przyrostowe" : entry.mode === "analysis" ? "Analiza zapisanych danych" : "Pełna ponowna analiza"}</p><p className="mt-1 text-muted-foreground">{entry.started_at ? new Date(entry.started_at).toLocaleString("pl-PL") : entry.version}</p><p className="mt-1 text-muted-foreground">Coverage: {entry.coverage_before ?? "—"}% → {entry.coverage_after ?? "—"}% · zmienione pola: {entry.fields_changed.length}</p></button>)}</div>}{selectedHistory && <div className="mt-4 rounded border border-border bg-muted/20 p-3 text-xs text-muted-foreground"><p className="font-medium text-foreground">Szczegóły wersji</p><p className="mt-1">Nowe źródła: {selectedHistory.new_sources.length}; niedostępne: {selectedHistory.unavailable_sources.length}</p><p>Zmodyfikowane pola: {selectedHistory.fields_changed.length ? selectedHistory.fields_changed.join(", ") : "brak"}</p><button onClick={() => void openHistorySnapshot(selectedHistory)} className="mt-3 text-primary hover:underline">Otwórz snapshot wyniku</button>{historySnapshot && <div className="mt-3 rounded border border-border bg-card p-2"><p className="font-medium text-foreground">Pola w zapisanej wersji: {historySnapshot.fields.length}</p><p className="mt-1">Potwierdzone: {historySnapshot.fields.filter((field) => field.value !== "X").length}; braki: {historySnapshot.fields.filter((field) => field.value === "X").length}</p></div>}</div>}</section></div> : activeTab === "benchmark" ? <div className="flex-1 overflow-auto px-6 py-5"><ProductBenchmarkPanel product={p} /></div> : (
+      {activeTab === "history" ? <div className="flex-1 overflow-auto px-6 py-5 space-y-4"><section className="max-w-3xl bg-card border border-border rounded-lg p-4"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground" />Historia produktu</h2><button onClick={() => void loadHistory()} className="text-xs text-primary hover:underline">Odśwież listę</button></div>{analysisRuns.length > 0 && <div className="mt-4"><p className="text-xs font-medium text-foreground">Uruchomienia analizy</p><div className="mt-2 space-y-2">{analysisRuns.map((run) => <div key={run.run_id} className="rounded border border-border bg-muted/20 p-3 text-xs"><p className="font-medium text-foreground">{run.pipeline_status === "partial" || run.status === "partial" ? "Analiza częściowa" : run.pipeline_status === "success" || (!run.pipeline_status && ["success", "succeeded"].includes(run.status)) ? "Analiza zakończona" : ["failed", "timed_out", "cancelled", "interrupted"].includes(run.status) ? "Analiza zatrzymana" : "Analiza w toku"}</p><p className="mt-1 text-muted-foreground">{run.started_at ? new Date(run.started_at).toLocaleString("pl-PL") : "—"} · użyte źródła: {run.analysis?.used_sources?.length ?? 0}</p></div>)}</div></div>}</section></div> : activeTab === "profile" ? <ProductProfilePanel product={p} refreshToken={productRefreshToken} /> : activeTab === "benchmark" ? <div className="flex-1 overflow-auto px-6 py-5"><ProductBenchmarkPanel product={p} initialSelection={comparisonSelection} /></div> : (
       <div className="flex-1 px-6 py-5 grid grid-cols-3 gap-5 min-h-0">
         <div className="col-span-2 flex flex-col gap-4">
           <section className="bg-card border border-border rounded-lg p-4">
@@ -984,7 +1360,7 @@ function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { pr
               const status = fieldStatus(field);
               const usableEvidence = field.evidence.filter((evidence) => Boolean(evidence.source_id && evidence.excerpt));
               return <tr key={field.field_name} className="border-b border-border last:border-0 align-top"><td className="px-2 py-2.5 font-medium text-foreground">{field.field_name}</td><td className="px-2 py-2.5 text-foreground">{field.value === "X" ? "Brak danych" : field.value}</td><td className="px-2 py-2.5"><span className={`inline-flex px-2 py-0.5 rounded border text-[11px] font-medium ${status.cls}`}>{status.label}</span></td><td className="px-2 py-2.5 text-muted-foreground">{field.provenance?.independent_confirmations_count ?? 0} niezależne / {field.provenance?.total_sources_count ?? usableEvidence.length} źródła</td><td className="px-2 py-2.5">{usableEvidence.length ? <div className="flex flex-wrap gap-1">{usableEvidence.map((evidence, index) => <button key={`${field.field_name}-${evidence.source_id}-${index}`} onClick={() => setSelectedEvidence(evidence)} title={`Domena: ${evidence.domain || "brak"}\n${evidence.excerpt}`} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground hover:bg-accent hover:text-primary transition-colors">{evidence.domain || "Źródło"}{evidence.is_independent_confirmation ? " · niezależne" : ""}</button>)}</div> : <span className="text-muted-foreground">Brak zapisanego dowodu</span>}</td></tr>;
-            })}</tbody></table></div></> : <div className="flex items-start gap-2 p-3 bg-muted/30 rounded text-xs text-muted-foreground"><Clock size={13} className="mt-0.5 flex-shrink-0" />Trwa przygotowanie danych produktu. Stan analizy jest widoczny w Historii.</div>}
+            })}</tbody></table></div></> : <div className="flex items-start gap-2 p-3 bg-muted/30 rounded text-xs text-muted-foreground"><Clock size={13} className="mt-0.5 flex-shrink-0" /><div><p className="font-medium text-foreground">Produkt dodany</p><p className="mt-1">Brak zakończonego researchu. Uruchom wyszukiwanie źródeł w Research albo wybierz „Odśwież dane”.</p></div></div>}
           </section>
         </div>
 
@@ -998,7 +1374,7 @@ function PageProduktSzczegoly({ productId, onBack, onResearch, onSources }: { pr
         </div>
       </div>
       )}
-      {refreshRun && <div className={`fixed right-5 bottom-5 z-40 w-[min(420px,calc(100vw-2.5rem))] rounded-lg border bg-card p-4 shadow-lg ${["failed", "timed_out", "cancelled", "interrupted"].includes(refreshRun.status) ? "border-red-200" : ["success", "succeeded"].includes(refreshRun.status) ? "border-emerald-200" : "border-border"}`}><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-foreground">{refreshRun.analysis ? "Analiza zapisanych danych" : "Odświeżanie danych"}</p><span className="text-[11px] text-muted-foreground">{refreshRun.progress}%</span></div><p className="mt-1 text-xs text-muted-foreground">{refreshRun.current_step}</p>{refreshRun.logs_tail[refreshRun.logs_tail.length - 1] && <p className="mt-2 rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">Ostatni log: {refreshRun.logs_tail[refreshRun.logs_tail.length - 1]}</p>}<div className="mt-3 h-1.5 overflow-hidden rounded bg-muted"><div className="h-full rounded bg-primary transition-all" style={{ width: `${refreshRun.progress}%` }} /></div>{["success", "succeeded"].includes(refreshRun.status) && <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{refreshRun.analysis ? <><span>Użyte źródła: {refreshRun.analysis.used_sources?.length ?? 0}</span><span>Zmienione pola: {refreshRun.analysis.fields_changed ?? 0}</span><span>Coverage: {refreshRun.analysis.coverage_before ?? "—"}% → {refreshRun.analysis.coverage_after ?? "—"}%</span></> : <><span>Nowe źródła: {refreshRun.refresh?.new_sources ?? 0}</span><span>Niedostępne: {refreshRun.refresh?.unavailable_sources ?? 0}</span><span>Zmienione pola: {refreshRun.refresh?.fields_changed ?? 0}</span><span>Coverage: {refreshRun.refresh?.coverage_before ?? "—"}% → {refreshRun.refresh?.coverage_after ?? "—"}%</span></>}</div>}{["failed", "timed_out", "cancelled", "interrupted"].includes(refreshRun.status) && <><p className="mt-3 text-xs text-red-700">{refreshRun.error}</p><details className="mt-3 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Dziennik techniczny</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{refreshRun.logs_tail.join("\n")}</pre></details></>}<button onClick={() => setRefreshRun(null)} className="mt-3 text-[11px] text-primary hover:underline">Zamknij</button></div>}
+      {refreshRun && <div className={`fixed right-5 bottom-5 z-40 w-[min(420px,calc(100vw-2.5rem))] rounded-lg border bg-card p-4 shadow-lg ${["failed", "timed_out", "cancelled", "interrupted"].includes(refreshRun.status) ? "border-red-200" : refreshRun.pipeline_status === "partial" ? "border-amber-200" : ["success", "succeeded"].includes(refreshRun.status) ? "border-emerald-200" : "border-border"}`}><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-foreground">{refreshRun.analysis ? "Analiza zapisanych danych" : "Odświeżanie danych"}</p><span className="text-[11px] text-muted-foreground">{refreshRun.progress}%</span></div><p className="mt-1 text-xs text-muted-foreground">{refreshRun.current_step}</p>{refreshRun.logs_tail[refreshRun.logs_tail.length - 1] && <p className="mt-2 rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">Ostatni log: {refreshRun.logs_tail[refreshRun.logs_tail.length - 1]}</p>}<div className="mt-3 h-1.5 overflow-hidden rounded bg-muted"><div className="h-full rounded bg-primary transition-all" style={{ width: `${refreshRun.progress}%` }} /></div>{["success", "succeeded"].includes(refreshRun.status) && <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{refreshRun.analysis ? <><span>Użyte źródła: {refreshRun.analysis.used_sources?.length ?? 0}</span><span>Zmienione pola: {refreshRun.analysis.fields_changed ?? 0}</span><span>Coverage: {refreshRun.analysis.coverage_before ?? "—"}% → {refreshRun.analysis.coverage_after ?? "—"}%</span></> : <><span>Nowe źródła: {refreshRun.refresh?.new_sources ?? 0}</span><span>Niedostępne: {refreshRun.refresh?.unavailable_sources ?? 0}</span><span>Zmienione pola: {refreshRun.refresh?.fields_changed ?? 0}</span><span>Coverage: {refreshRun.refresh?.coverage_before ?? "—"}% → {refreshRun.refresh?.coverage_after ?? "—"}%</span></>}<span>Profil: {refreshRun.product_profile_status || "—"}</span></div>}{refreshRun.product_profile_warning && <p className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">Profil produktu: {refreshRun.product_profile_warning}</p>}{["failed", "timed_out", "cancelled", "interrupted"].includes(refreshRun.status) && <><p className="mt-3 text-xs text-red-700">{refreshRun.error}</p><details className="mt-3 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Dziennik techniczny</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{refreshRun.logs_tail.join("\n")}</pre></details></>}<button onClick={() => setRefreshRun(null)} className="mt-3 text-[11px] text-primary hover:underline">Zamknij</button></div>}
       {refreshModalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-xl"><h2 className="text-base font-semibold text-foreground">Odśwież dane: {p.brand} {p.name}</h2><p className="mt-1 text-xs text-muted-foreground">Przed każdą zmianą system zapisze wersję historyczną stanu modelu i dowodów.</p><div className="mt-4 space-y-2"><label className={`block cursor-pointer rounded-lg border p-3 ${refreshMode === "incremental" ? "border-primary bg-accent" : "border-border"}`}><input className="mr-2 accent-primary" type="radio" checked={refreshMode === "incremental"} onChange={() => setRefreshMode("incremental")} /><span className="text-xs font-medium text-foreground">Odśwież tylko nowe i zmienione źródła</span><p className="mt-1 pl-5 text-[11px] text-muted-foreground">Zalecane. Sprawdza zapisane źródła oraz lokalny listing, bez analizy niezmienionych danych.</p></label><label className={`block cursor-pointer rounded-lg border p-3 ${refreshMode === "full_reanalysis" ? "border-primary bg-accent" : "border-border"}`}><input className="mr-2 accent-primary" type="radio" checked={refreshMode === "full_reanalysis"} onChange={() => setRefreshMode("full_reanalysis")} /><span className="text-xs font-medium text-foreground">Pełna ponowna analiza</span><p className="mt-1 pl-5 text-[11px] text-muted-foreground">Ponownie analizuje wszystkie lokalne snapshoty. Wymaga lokalnego klucza OpenAI.</p></label></div>{refreshError && <p className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">{refreshError}</p>}<div className="mt-5 flex justify-end gap-2"><button onClick={() => setRefreshModalOpen(false)} className="px-3 py-2 text-xs font-medium border border-border rounded hover:bg-muted">Anuluj</button><button onClick={() => void startRefresh()} className="px-3 py-2 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90">Uruchom odświeżanie</button></div></div></div>}
     </div>
   );
@@ -1015,8 +1391,20 @@ function SourceContributionPanel({ data, onClose }: { data: SourceContributionRe
   return <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(560px,100vw)] flex-col border-l border-border bg-card shadow-2xl"><div className="flex items-start justify-between gap-3 border-b border-border p-4"><div><p className="text-[11px] text-muted-foreground">Wkład źródła</p><h2 className="mt-1 text-sm font-semibold text-foreground break-words">{data.title}</h2></div><button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Zamknij panel"><X size={16} /></button></div><div className="min-h-0 flex-1 overflow-auto p-4">{data.zero_contribution ? <div className="rounded border border-border bg-muted/30 p-4 text-sm text-muted-foreground">{data.message}</div> : <><div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4"><div className="rounded bg-muted/30 p-2">Nowe: <b>{data.summary.unique_fields_contributed}</b></div><div className="rounded bg-muted/30 p-2">Potwierdzenia: <b>{data.summary.confirmed_fields}</b></div><div className="rounded bg-muted/30 p-2">Konflikty: <b>{data.summary.conflicting_fields}</b></div><div className="rounded bg-muted/30 p-2">Finalnie użyte: <b>{data.summary.final_fields_used}</b></div></div>{sections.map(([title, fields]) => fields.length > 0 && <section key={title} className="mt-5"><h3 className="text-xs font-semibold text-foreground">{title}</h3><div className="mt-2 space-y-2">{fields.map((field, index) => <div key={`${field.field_name}-${index}`} className="rounded border border-border bg-muted/20 p-3"><p className="text-xs font-medium text-foreground">{field.field_name}: <span className="font-normal">{field.value}</span></p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{field.excerpt}</p></div>)}</div></section>)}</>}</div></aside>;
 }
 
+function VisualSourcePanel({ source, snapshot, blocks, media, loading, onClose }: { source: ProductSource; snapshot: VisualSnapshot | null; blocks: VisualBlock[]; media: VisualMedia[]; loading: boolean; onClose: () => void }) {
+  const [region, setRegion] = useState("all");
+  const [contextBlock, setContextBlock] = useState<VisualBlock | null>(null);
+  const apiBase = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api").replace(/\/api$/, "").replace(/\/$/, "");
+  const visible = blocks.filter((block) => region === "all" || block.region === region);
+  const mediaFor = (block: VisualBlock) => media.filter((item) => block.media_ids.includes(item.media_id));
+  const imageUrl = (item: VisualMedia) => item.original_url || "";
+  return <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(680px,100vw)] flex-col border-l border-border bg-card shadow-2xl"><div className="flex items-start justify-between gap-3 border-b border-border p-4"><div className="min-w-0"><p className="text-[11px] text-muted-foreground">Widok źródła</p><h2 className="mt-1 text-sm font-semibold text-foreground break-words">{source.title}</h2><p className="mt-1 text-[11px] text-muted-foreground">{snapshot?.capture_status === "captured" ? "Wizualny snapshot zapisany" : "Kontekst z lokalnego HTML; brak pełnego screenshotu renderu."}</p></div><button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Zamknij panel"><X size={16} /></button></div>{loading ? <p className="p-5 text-sm text-muted-foreground">Wczytywanie widoku źródła…</p> : !snapshot ? <p className="p-5 text-sm text-muted-foreground">Nie zapisano jeszcze kontekstu wizualnego dla tego źródła.</p> : <div className="min-h-0 flex-1 overflow-auto p-4"><div className="rounded border border-border bg-muted/20 p-3 text-xs"><p className="font-medium text-foreground">Status: {snapshot.capture_status === "captured" ? "pełny snapshot" : "częściowy kontekst"}</p><p className="mt-1 text-muted-foreground">Bloki: {snapshot.blocks_count} · media: {snapshot.media_count} · provider: {snapshot.capture_provider}</p>{snapshot.full_page_artifact_id ? <a className="mt-2 inline-flex text-primary hover:underline" href={`${apiBase}/api/visual-artifacts/${snapshot.full_page_artifact_id}`} target="_blank" rel="noreferrer">Otwórz pełny screenshot</a> : <p className="mt-2 text-muted-foreground">Brak pełnego screenshotu: nie został wykonany drugi request tylko dla wizualizacji.</p>}</div><div className="mt-4 flex flex-wrap gap-1.5">{[["all", "Wszystkie"], ["gallery", "Galeria"], ["feature", "Funkcje"], ["dimensions", "Wymiary"], ["included", "Zestaw"], ["accessory", "Akcesoria"], ["variant", "Warianty"]].map(([key, label]) => <button key={key} onClick={() => setRegion(key)} className={`rounded-full border px-2.5 py-1 text-[11px] ${region === key ? "border-primary bg-accent text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>{label}</button>)}</div><div className="mt-4 space-y-3">{visible.length === 0 ? <p className="rounded border border-dashed border-border p-4 text-xs text-muted-foreground">Brak bloków dla wybranego filtra.</p> : visible.map((block) => <article key={block.block_id} className="rounded-lg border border-border bg-card p-3"><div className="flex items-start justify-between gap-3"><div><span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{block.region}</span><h3 className="mt-2 text-xs font-semibold text-foreground">{block.heading || "Fragment źródła"}</h3></div><button onClick={() => setContextBlock(block)} className="text-[11px] text-primary hover:underline">Pokaż w kontekście</button></div><p className="mt-2 text-xs leading-relaxed text-muted-foreground">{block.body_text || "Brak tekstowego opisu w tym samym kontenerze DOM."}</p><div className="mt-3 flex flex-wrap gap-2">{mediaFor(block).map((item) => item.media_type === "image" && imageUrl(item) ? <a key={item.media_id} href={imageUrl(item)} target="_blank" rel="noreferrer" className="block h-16 w-16 overflow-hidden rounded border border-border bg-muted"><img src={imageUrl(item)} alt={item.alt_text || block.heading || "Medium źródła"} className="h-full w-full object-cover" /></a> : <a key={item.media_id} href={imageUrl(item)} target="_blank" rel="noreferrer" className="rounded border border-border bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground">{item.media_type === "video" ? "Wideo / animacja" : "Medium"}</a>)}</div></article>)}</div>{contextBlock && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-xl rounded-lg border border-border bg-card p-4 shadow-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[11px] text-muted-foreground">Kontekst bloku</p><h3 className="text-sm font-semibold text-foreground">{contextBlock.heading || "Fragment źródła"}</h3></div><button onClick={() => setContextBlock(null)} className="rounded p-1 hover:bg-muted"><X size={15} /></button></div>{contextBlock.section_artifact_id ? <img className="mt-3 max-h-[55vh] w-full rounded object-contain" src={`${apiBase}/api/visual-artifacts/${contextBlock.section_artifact_id}`} alt={contextBlock.heading || "Crop sekcji"} /> : <div className="mt-3 rounded border border-dashed border-border bg-muted/20 p-4 text-xs text-muted-foreground">Crop sekcji nie jest dostępny, bo lokalny HTML nie zawiera wiarygodnego bounding boxa z tego samego renderu.</div>}<p className="mt-3 text-xs leading-relaxed text-foreground">{contextBlock.body_text || "Brak opisu w bloku."}</p>{source.original_url && <a href={source.original_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex text-xs text-primary hover:underline">Otwórz źródło</a>}</div></div>}</div>}</aside>;
+}
+
 function PageProduktZrodla({ productId, onBack }: { productId: string; onBack: () => void }) {
-  const product = PRODUCTS.find((item) => item.id === productId) || PRODUCTS[0];
+  const { products } = useCatalog();
+  const product = products.find((item) => item.id === productId) || null;
+  if (!product) return <div className="p-6 text-sm text-muted-foreground">Nie znaleziono produktu w katalogu.</div>;
   const [data, setData] = useState<ProductSourcesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1026,6 +1414,10 @@ function PageProduktZrodla({ productId, onBack }: { productId: string; onBack: (
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [contribution, setContribution] = useState<SourceContributionResponse | null>(null);
   const [contributionLoading, setContributionLoading] = useState(false);
+  const [visualSnapshot, setVisualSnapshot] = useState<VisualSnapshot | null>(null);
+  const [visualBlocks, setVisualBlocks] = useState<VisualBlock[]>([]);
+  const [visualMedia, setVisualMedia] = useState<VisualMedia[]>([]);
+  const [visualLoading, setVisualLoading] = useState(false);
 
   const loadSources = async () => {
     setLoading(true);
@@ -1072,6 +1464,31 @@ function PageProduktZrodla({ productId, onBack }: { productId: string; onBack: (
     }
   };
 
+  const openVisual = async (source: ProductSource) => {
+    setSelectedSource(source);
+    setSnapshot(null);
+    setContribution(null);
+    setVisualSnapshot(null);
+    setVisualBlocks([]);
+    setVisualMedia([]);
+    setVisualLoading(true);
+    try {
+      const encoded = encodeURIComponent(source.source_id);
+      const [visuals, blocks, media] = await Promise.all([
+        apiRequest<VisualEnvelope>(`/sources/${encoded}/visuals`),
+        apiRequest<VisualPage<VisualBlock>>(`/sources/${encoded}/visual-blocks?limit=120`),
+        apiRequest<VisualPage<VisualMedia>>(`/sources/${encoded}/media?limit=160`),
+      ]);
+      setVisualSnapshot(visuals.snapshot);
+      setVisualBlocks(blocks.items);
+      setVisualMedia(media.items);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Nie udało się wczytać widoku źródła.");
+    } finally {
+      setVisualLoading(false);
+    }
+  };
+
   const sourceStatus = (status: ProductSource["source_status"]) => ({
     active: { label: "URL aktywny", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
     unavailable: { label: "Aukcja niedostępna", cls: "bg-red-50 text-red-700 border-red-200" },
@@ -1105,23 +1522,28 @@ function PageProduktZrodla({ productId, onBack }: { productId: string; onBack: (
       ["Użyta w benchmarku", source.used_in_benchmark],
     ];
     const contributionSummary = source.contribution;
-    return <article className="rounded-lg border border-border bg-card p-4 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><span className="text-[11px] font-medium text-primary">{roleLabel(source.role)}</span><span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${status.cls}`}>{status.label}</span></div><h3 className="mt-1.5 text-sm font-semibold text-foreground break-words">{source.title}</h3><p className="mt-1 text-[11px] text-muted-foreground">{source.marketplace === "manufacturer" ? "Oficjalne źródło producenta" : "Aukcja marketplace"} · {source.domain || "brak domeny"}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => void openContribution(source)} className="rounded border border-border px-2.5 py-1.5 text-[11px] font-medium hover:bg-muted">Pokaż wkład źródła</button>{source.snapshot_available ? <button onClick={() => void openSnapshot(source)} className="rounded border border-border px-2.5 py-1.5 text-[11px] font-medium hover:bg-muted">Otwórz snapshot</button> : <span className="rounded border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground">Brak snapshotu</span>}{source.original_url ? <a href={source.original_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded bg-primary px-2.5 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"><ExternalLink size={12} />Otwórz aukcję</a> : <span className="rounded bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">Brak URL</span>}</div></div><div className="mt-3 flex flex-wrap gap-1.5">{checks.map(([label, complete]) => <span key={String(label)} className={`rounded border px-1.5 py-0.5 text-[10px] ${complete ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted text-muted-foreground"}`}>{complete ? "✓" : "—"} {label}</span>)}</div><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4"><div className="rounded bg-muted/30 p-2">Nowe pola: <b>{contributionSummary?.unique_fields_contributed.length ?? 0}</b></div><div className="rounded bg-muted/30 p-2">Potwierdzenia: <b>{contributionSummary?.confirmed_fields.length ?? 0}</b></div><div className="rounded bg-muted/30 p-2">Konflikty: <b>{contributionSummary?.conflicting_fields.length ?? 0}</b></div><div className="rounded bg-muted/30 p-2">Finalnie użyte: <b>{contributionSummary?.final_fields_used.length ?? 0}</b></div></div><div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-[11px] sm:grid-cols-3 xl:grid-cols-5"><div><p className="text-muted-foreground">ID oferty</p><p className="mt-0.5 font-mono text-foreground break-all">{source.offer_id || "—"}</p></div><div><p className="text-muted-foreground">Cena</p><p className="mt-0.5 text-foreground">{source.price || "—"}</p></div><div><p className="text-muted-foreground">Sprzedawca</p><p className="mt-0.5 text-foreground break-words">{source.seller.name || "—"}{source.seller.rating ? ` · ${source.seller.rating}` : ""}</p></div><div><p className="text-muted-foreground">Stan pobrania</p><p className="mt-0.5 text-foreground">{fetchStatus(source.fetch_status)} · {cleanerStatus(source.cleaner_status)}</p></div><div><p className="text-muted-foreground">Wartość źródła</p><p className="mt-0.5 text-foreground">{source.offer_quality.score ?? "—"}{source.offer_quality.score !== null ? "/100" : ""}</p></div></div>{source.fetch_error && <p className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-[11px] text-red-700">Błąd pobrania: {source.fetch_error}</p>}<div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-[11px] text-muted-foreground"><span>Źródło: <span className="font-mono text-foreground">{source.source_id}</span></span><span>Pierwsze pobranie: {source.first_fetched_at ? new Date(source.first_fetched_at).toLocaleString("pl-PL") : "—"}</span><span>Ostatnie pobranie: {source.last_fetched_at ? new Date(source.last_fetched_at).toLocaleString("pl-PL") : "—"}</span></div></article>;
+    return <article className="rounded-lg border border-border bg-card p-4 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><span className="text-[11px] font-medium text-primary">{roleLabel(source.role)}</span><span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${status.cls}`}>{status.label}</span></div><h3 className="mt-1.5 text-sm font-semibold text-foreground break-words">{source.title}</h3><p className="mt-1 text-[11px] text-muted-foreground">{source.marketplace === "manufacturer" ? "Oficjalne źródło producenta" : "Aukcja marketplace"} · {source.domain || "brak domeny"}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => void openVisual(source)} className="rounded border border-border px-2.5 py-1.5 text-[11px] font-medium hover:bg-muted">Widok źródła</button><button onClick={() => void openContribution(source)} className="rounded border border-border px-2.5 py-1.5 text-[11px] font-medium hover:bg-muted">Pokaż wkład źródła</button>{source.snapshot_available ? <button onClick={() => void openSnapshot(source)} className="rounded border border-border px-2.5 py-1.5 text-[11px] font-medium hover:bg-muted">Otwórz snapshot</button> : <span className="rounded border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground">Brak snapshotu</span>}{source.original_url ? <a href={source.original_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded bg-primary px-2.5 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"><ExternalLink size={12} />Otwórz aukcję</a> : <span className="rounded bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">Brak URL</span>}</div></div><div className="mt-3 flex flex-wrap gap-1.5">{checks.map(([label, complete]) => <span key={String(label)} className={`rounded border px-1.5 py-0.5 text-[10px] ${complete ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-muted text-muted-foreground"}`}>{complete ? "✓" : "—"} {label}</span>)}</div><div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4"><div className="rounded bg-muted/30 p-2">Nowe pola: <b>{contributionSummary?.unique_fields_contributed.length ?? 0}</b></div><div className="rounded bg-muted/30 p-2">Potwierdzenia: <b>{contributionSummary?.confirmed_fields.length ?? 0}</b></div><div className="rounded bg-muted/30 p-2">Konflikty: <b>{contributionSummary?.conflicting_fields.length ?? 0}</b></div><div className="rounded bg-muted/30 p-2">Finalnie użyte: <b>{contributionSummary?.final_fields_used.length ?? 0}</b></div></div><div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-[11px] sm:grid-cols-3 xl:grid-cols-5"><div><p className="text-muted-foreground">ID oferty</p><p className="mt-0.5 font-mono text-foreground break-all">{source.offer_id || "—"}</p></div><div><p className="text-muted-foreground">Cena</p><p className="mt-0.5 text-foreground">{source.price || "—"}</p></div><div><p className="text-muted-foreground">Sprzedawca</p><p className="mt-0.5 text-foreground break-words">{source.seller.name || "—"}{source.seller.rating ? ` · ${source.seller.rating}` : ""}</p></div><div><p className="text-muted-foreground">Stan pobrania</p><p className="mt-0.5 text-foreground">{fetchStatus(source.fetch_status)} · {cleanerStatus(source.cleaner_status)}</p></div><div><p className="text-muted-foreground">Wartość źródła</p><p className="mt-0.5 text-foreground">{source.offer_quality.score ?? "—"}{source.offer_quality.score !== null ? "/100" : ""}</p></div></div>{source.fetch_error && <p className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-[11px] text-red-700">Błąd pobrania: {source.fetch_error}</p>}<div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-[11px] text-muted-foreground"><span>Źródło: <span className="font-mono text-foreground">{source.source_id}</span></span><span>Pierwsze pobranie: {source.first_fetched_at ? new Date(source.first_fetched_at).toLocaleString("pl-PL") : "—"}</span><span>Ostatnie pobranie: {source.last_fetched_at ? new Date(source.last_fetched_at).toLocaleString("pl-PL") : "—"}</span></div></article>;
   };
 
-  return <div className="h-full overflow-auto"><div className="border-b border-border bg-card px-6 py-4"><div className="flex items-center gap-1.5 text-xs text-muted-foreground"><button onClick={onBack} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft size={11} />{product.brand} {product.name}</button><ChevronRight size={11} /><span className="font-medium text-foreground">Aukcje i źródła</span></div><div className="mt-3 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-base font-semibold text-foreground">Aukcje i źródła: {product.brand} {product.name}</h1><p className="mt-1 text-xs text-muted-foreground">Każda wybrana oferta jest rozliczona niezależnie od powodzenia pobrania i przypięcia do benchmarku.</p></div><button onClick={() => void loadSources()} className="inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"><RefreshCw size={13} />Odśwież widok</button></div><div className="mt-4 flex gap-1 overflow-x-auto" role="tablist" aria-label="Sekcje produktu"><button onClick={onBack} className="border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">Dane produktu</button><button onClick={onBack} className="border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">Benchmark</button><span className="border-b-2 border-primary px-3 py-2 text-xs font-medium text-primary">Aukcje i źródła</span><button onClick={onBack} className="border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">Historia</button></div></div><main className="px-6 py-5"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[["Wybrane", data?.selected_count ?? 0], ["Pobrane", data?.fetched_count ?? 0], ["Błędy pobrania", data?.failed_count ?? 0], ["Przypięte", data?.attached_count ?? 0], ["Niewykorzystane", data?.unattached_count ?? 0]].map(([label, count]) => <div key={String(label)} className="rounded-lg border border-border bg-card p-3"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold text-foreground">{count}</p></div>)}</div><div className="mt-3 flex flex-wrap gap-2">{[["Wszystkie", "all"], ["Główne", "primary"], ["Uzupełniające", "supplementary"], ["Oficjalne", "manufacturer"], ["Niewykorzystane", "fetched_but_unattached"], ["Nieudane", "failed"], ["Duplikaty", "duplicate"], ["Odrzucone", "rejected"]].map(([label, key]) => <button key={String(key)} onClick={() => setFilter(key as typeof filter)} className={`rounded-full border px-3 py-1 text-[11px] ${filter === key ? "border-primary bg-accent text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>{label}</button>)}</div>{loading ? <div className="mt-6 rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">Wczytywanie źródeł produktu…</div> : error ? <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div> : data?.total === 0 ? <div className="mt-6 rounded-lg border border-dashed border-border bg-card p-10 text-center"><Layers size={28} className="mx-auto text-muted-foreground opacity-50" /><p className="mt-3 text-sm font-medium text-foreground">Ten produkt nie ma jeszcze zapisanych aukcji.</p><p className="mt-1 text-xs text-muted-foreground">Uruchom research, aby przypisać źródła do produktu.</p></div> : <div className="mt-6 space-y-7">{sections.map((section) => section.sources.length > 0 && <section key={section.key}><div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold text-foreground">{section.title}</h2><span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{section.sources.length}</span></div><div className="space-y-3">{section.sources.map((source) => <SourceCard key={source.source_id} source={source} />)}</div></section>)}</div>}</main>{contribution && <SourceContributionPanel data={contribution} onClose={() => { setContribution(null); setSelectedSource(null); }} />}{selectedSource && !contribution && <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(560px,100vw)] flex-col border-l border-border bg-card shadow-2xl"><div className="flex items-start justify-between gap-3 border-b border-border p-4"><div className="min-w-0"><p className="text-[11px] text-muted-foreground">{snapshot ? "Lokalny snapshot" : "Użyte dane źródła"}</p><h2 className="mt-1 text-sm font-semibold text-foreground break-words">{selectedSource.title}</h2></div><button onClick={() => { setSelectedSource(null); setSnapshot(null); }} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Zamknij panel"><X size={16} /></button></div>{snapshotLoading ? <p className="p-5 text-sm text-muted-foreground">Otwieranie zapisanego snapshotu…</p> : snapshot ? <div className="min-h-0 flex-1 overflow-auto p-4"><p className="mb-3 text-[11px] text-muted-foreground">{snapshot.snapshot_path}</p><pre className="whitespace-pre-wrap break-words rounded border border-border bg-muted/30 p-3 text-xs leading-relaxed text-foreground">{snapshot.content}</pre></div> : <div className="min-h-0 flex-1 overflow-auto p-4"><div className="grid grid-cols-2 gap-3 text-xs"><div><p className="text-muted-foreground">Źródło</p><p className="mt-1 font-mono text-foreground break-all">{selectedSource.source_id}</p></div><div><p className="text-muted-foreground">Domena</p><p className="mt-1 text-foreground">{selectedSource.domain || "—"}</p></div></div><h3 className="mt-5 text-xs font-semibold text-foreground">Pola oparte o to źródło</h3>{selectedSource.used_fields.length ? <div className="mt-2 space-y-2">{selectedSource.used_fields.map((field, index) => <div key={`${field.field_name}-${index}`} className="rounded border border-border bg-muted/20 p-3"><p className="text-xs font-medium text-foreground">{field.field_name}: <span className="font-normal">{field.value}</span></p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{field.excerpt}</p></div>)}</div> : <p className="mt-2 text-xs text-muted-foreground">To źródło nie ma zapisanego evidence przypisanego do pól produktu.</p>}<div className="mt-5 rounded border border-border bg-muted/20 p-3 text-[11px] text-muted-foreground"><p>Snapshot surowy: <span className="font-mono text-foreground break-all">{selectedSource.raw_snapshot_path || "Brak"}</span></p><p className="mt-1">Snapshot oczyszczony: <span className="font-mono text-foreground break-all">{selectedSource.clean_snapshot_path || "Brak"}</span></p></div></div>}</aside>}</div>;
+  return <div className="h-full overflow-auto"><div className="border-b border-border bg-card px-6 py-4"><div className="flex items-center gap-1.5 text-xs text-muted-foreground"><button onClick={onBack} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft size={11} />{product.brand} {product.name}</button><ChevronRight size={11} /><span className="font-medium text-foreground">Aukcje i źródła</span></div><div className="mt-3 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-base font-semibold text-foreground">Aukcje i źródła: {product.brand} {product.name}</h1><p className="mt-1 text-xs text-muted-foreground">Każda wybrana oferta jest rozliczona niezależnie od powodzenia pobrania i przypięcia do benchmarku.</p></div><button onClick={() => void loadSources()} className="inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"><RefreshCw size={13} />Odśwież widok</button></div><div className="mt-4 flex gap-1 overflow-x-auto" role="tablist" aria-label="Sekcje produktu"><button onClick={onBack} className="border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">Dane produktu</button><button onClick={onBack} className="border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">Benchmark</button><span className="border-b-2 border-primary px-3 py-2 text-xs font-medium text-primary">Aukcje i źródła</span><button onClick={onBack} className="border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">Historia</button></div></div><main className="px-6 py-5"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[["Wybrane", data?.selected_count ?? 0], ["Pobrane", data?.fetched_count ?? 0], ["Błędy pobrania", data?.failed_count ?? 0], ["Przypięte", data?.attached_count ?? 0], ["Niewykorzystane", data?.unattached_count ?? 0]].map(([label, count]) => <div key={String(label)} className="rounded-lg border border-border bg-card p-3"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold text-foreground">{count}</p></div>)}</div><div className="mt-3 flex flex-wrap gap-2">{[["Wszystkie", "all"], ["Główne", "primary"], ["Uzupełniające", "supplementary"], ["Oficjalne", "manufacturer"], ["Niewykorzystane", "fetched_but_unattached"], ["Nieudane", "failed"], ["Duplikaty", "duplicate"], ["Odrzucone", "rejected"]].map(([label, key]) => <button key={String(key)} onClick={() => setFilter(key as typeof filter)} className={`rounded-full border px-3 py-1 text-[11px] ${filter === key ? "border-primary bg-accent text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>{label}</button>)}</div>{loading ? <div className="mt-6 rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">Wczytywanie źródeł produktu…</div> : error ? <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div> : data?.total === 0 ? <div className="mt-6 rounded-lg border border-dashed border-border bg-card p-10 text-center"><Layers size={28} className="mx-auto text-muted-foreground opacity-50" /><p className="mt-3 text-sm font-medium text-foreground">Ten produkt nie ma jeszcze zapisanych aukcji.</p><p className="mt-1 text-xs text-muted-foreground">Uruchom research, aby przypisać źródła do produktu.</p></div> : <div className="mt-6 space-y-7">{sections.map((section) => section.sources.length > 0 && <section key={section.key}><div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold text-foreground">{section.title}</h2><span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{section.sources.length}</span></div><div className="space-y-3">{section.sources.map((source) => <SourceCard key={source.source_id} source={source} />)}</div></section>)}</div>}</main>{contribution && <SourceContributionPanel data={contribution} onClose={() => { setContribution(null); setSelectedSource(null); }} />}{selectedSource && !contribution && visualSnapshot === null && !visualLoading && <aside className="fixed right-0 top-0 z-50 flex h-full w-[min(560px,100vw)] flex-col border-l border-border bg-card shadow-2xl"><div className="flex items-start justify-between gap-3 border-b border-border p-4"><div className="min-w-0"><p className="text-[11px] text-muted-foreground">{snapshot ? "Lokalny snapshot" : "Użyte dane źródła"}</p><h2 className="mt-1 text-sm font-semibold text-foreground break-words">{selectedSource.title}</h2></div><button onClick={() => { setSelectedSource(null); setSnapshot(null); }} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Zamknij panel"><X size={16} /></button></div>{snapshotLoading ? <p className="p-5 text-sm text-muted-foreground">Otwieranie zapisanego snapshotu…</p> : snapshot ? <div className="min-h-0 flex-1 overflow-auto p-4"><p className="mb-3 text-[11px] text-muted-foreground">{snapshot.snapshot_path}</p><pre className="whitespace-pre-wrap break-words rounded border border-border bg-muted/30 p-3 text-xs leading-relaxed text-foreground">{snapshot.content}</pre></div> : <div className="min-h-0 flex-1 overflow-auto p-4"><div className="grid grid-cols-2 gap-3 text-xs"><div><p className="text-muted-foreground">Źródło</p><p className="mt-1 font-mono text-foreground break-all">{selectedSource.source_id}</p></div><div><p className="text-muted-foreground">Domena</p><p className="mt-1 text-foreground">{selectedSource.domain || "—"}</p></div></div><h3 className="mt-5 text-xs font-semibold text-foreground">Pola oparte o to źródło</h3>{selectedSource.used_fields.length ? <div className="mt-2 space-y-2">{selectedSource.used_fields.map((field, index) => <div key={`${field.field_name}-${index}`} className="rounded border border-border bg-muted/20 p-3"><p className="text-xs font-medium text-foreground">{field.field_name}: <span className="font-normal">{field.value}</span></p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{field.excerpt}</p></div>)}</div> : <p className="mt-2 text-xs text-muted-foreground">To źródło nie ma zapisanego evidence przypisanego do pól produktu.</p>}<div className="mt-5 rounded border border-border bg-muted/20 p-3 text-[11px] text-muted-foreground"><p>Snapshot surowy: <span className="font-mono text-foreground break-all">{selectedSource.raw_snapshot_path || "Brak"}</span></p><p className="mt-1">Snapshot oczyszczony: <span className="font-mono text-foreground break-all">{selectedSource.clean_snapshot_path || "Brak"}</span></p></div></div>}</aside>}{selectedSource && (visualSnapshot !== null || visualLoading) && <VisualSourcePanel source={selectedSource} snapshot={visualSnapshot} blocks={visualBlocks} media={visualMedia} loading={visualLoading} onClose={() => { setSelectedSource(null); setVisualSnapshot(null); setVisualBlocks([]); setVisualMedia([]); }} />}</div>;
 }
 
 // ─── Page: Research Wizard ────────────────────────────────────────────────────
 const WIZARD_STEPS = ["Produkt", "Źródła", "Potwierdzenie", "Analiza", "Wynik"];
 
 function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: string }) {
+  const { products, refreshCatalog } = useCatalog();
   const [step, setStep] = useState(0);
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
+  const [categoryKey, setCategoryKey] = useState("");
+  const [benchmarkGroup, setBenchmarkGroup] = useState("");
+  const [categoryOptions, setCategoryOptions] = useState<CategoryOption[]>([]);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [selectedOfferIds, setSelectedOfferIds] = useState<Set<string>>(new Set());
   const [selectedManufacturerSourceIds, setSelectedManufacturerSourceIds] = useState<Set<string>>(new Set());
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [catalogSaving, setCatalogSaving] = useState(false);
   const [runLoading, setRunLoading] = useState(false);
   const [run, setRun] = useState<ApiRun | null>(null);
   const runFailed = ["failed", "timed_out", "cancelled", "interrupted"].includes(run?.status || "");
@@ -1131,11 +1553,9 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
   const previousPreviewSlugRef = useRef(previousProductSlug);
 
   const acceptedOffers = preview?.offers.filter((offer) => offer.match_status === "exact_match") || [];
+  const probableOffers = preview?.offers.filter((offer) => offer.match_status === "probable_match") || [];
   const previewOffers = preview?.offers || [];
-  const primaryOffers = previewOffers.filter((offer) => offer.source_group === "primary_source");
-  const supplementaryOffers = previewOffers.filter((offer) => offer.source_group === "supplementary_source");
-  const accessoryOffers = previewOffers.filter((offer) => offer.product_type === "accessory");
-  const otherOffers = previewOffers.filter((offer) => !offer.source_group && offer.product_type !== "accessory");
+  const rejectedOffers = previewOffers.filter((offer) => offer.match_status === "rejected");
   const manufacturerSources = preview?.manufacturer_sources || [];
   const selectedSourcesCount = selectedOfferIds.size + selectedManufacturerSourceIds.size;
   const includeManufacturerSources = selectedManufacturerSourceIds.size > 0;
@@ -1144,17 +1564,19 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
   const showConditionColumn = previewOffers.some((offer) => Boolean(offer.condition));
   const summary = preview?.summary || {};
   const comparable = (value: string) => value.trim().toLocaleLowerCase("pl-PL");
-  const previewKey = (nextBrand: string, nextModel: string) => {
-    const slugPart = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").replace(/Ł/g, "l").toLocaleLowerCase("pl-PL").trim().replace(/\s+/g, "-");
-    return `allegro|${slugPart(nextBrand)}|${slugPart(nextModel)}`;
+  const previewKey = (nextBrand: string, nextModel: string, nextCategoryKey: string) => {
+    const slugPart = (value: string) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").replace(/Ł/g, "l").toLocaleLowerCase("pl-PL").trim().replace(/\s+/g, "-");
+    return `allegro|${slugPart(nextBrand)}|${slugPart(nextModel)}|${nextCategoryKey}`;
   };
-  const catalogBrands = [...new Set(PRODUCTS.map((product) => product.brand).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl"));
+  const catalogBrands = [...new Set(products.map((product) => product.brand).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl"));
   const modelsForBrand = [...new Set(
-    PRODUCTS.filter((product) => comparable(product.brand) === comparable(brand)).map((product) => product.name),
+    products.filter((product) => comparable(product.brand) === comparable(brand)).map((product) => product.name),
   )].sort((a, b) => a.localeCompare(b, "pl"));
-  const existingProduct = PRODUCTS.find(
+  const existingProduct = products.find(
     (product) => comparable(product.brand) === comparable(brand) && comparable(product.name) === comparable(model),
   );
+  const selectedCategory = categoryOptions.find((item) => item.category_key === categoryKey);
+  const selectedGroups = groupsForCategory(categoryOptions, categoryKey);
   const trimInput = (value: string, setValue: (next: string) => void) => setValue(value.trim());
 
   const clearProductResearchState = () => {
@@ -1172,6 +1594,20 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
     setStep(0);
   };
 
+  useEffect(() => {
+    let active = true;
+    apiRequest<{ categories: CategoryOption[] }>("/categories")
+      .then((result) => { if (active) setCategoryOptions(result.categories || []); })
+      .catch(() => { if (active) setRequestError("Nie udało się wczytać obsługiwanych kategorii."); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!existingProduct) return;
+    if (!categoryKey && existingProduct.category_key) setCategoryKey(existingProduct.category_key);
+    if (!benchmarkGroup && existingProduct.benchmark_group) setBenchmarkGroup(existingProduct.benchmark_group);
+  }, [existingProduct?.slug, existingProduct?.category_key, existingProduct?.benchmark_group]);
+
   const updateBrand = (value: string) => {
     if (value !== brand) clearProductResearchState();
     setBrand(value);
@@ -1182,14 +1618,40 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
     setModel(value);
   };
 
-  const checkOffers = async () => {
-    if (!brand.trim() || !model.trim()) {
-      setRequestError("Wpisz markę i model produktu.");
+  const saveProductToCatalog = async (quiet = false): Promise<boolean> => {
+    if (!brand.trim() || !model.trim() || !isValidCategorySelection(categoryOptions, categoryKey, benchmarkGroup)) {
+      setRequestError("Wpisz markę i model oraz wybierz kategorię i grupę benchmarkową.");
+      return false;
+    }
+    setCatalogSaving(true);
+    setRequestError("");
+    try {
+      await apiRequest<{ created: boolean; product: CatalogProduct }>("/products", {
+        method: "POST",
+        body: JSON.stringify({
+          brand: brand.trim(), model: model.trim(), category_key: categoryKey, benchmark_group: benchmarkGroup,
+        }),
+      });
+      await refreshCatalog();
+      if (!quiet) setRequestError("Produkt zapisano w katalogu. Możesz teraz wyszukać źródła.");
+      return true;
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Nie udało się zapisać produktu w katalogu.");
+      return false;
+    } finally {
+      setCatalogSaving(false);
+    }
+  };
+
+  const checkOffers = async (searchMode: "live" | "cache" = "live") => {
+    if (!brand.trim() || !model.trim() || !isValidCategorySelection(categoryOptions, categoryKey, benchmarkGroup)) {
+      setRequestError("Wpisz markę i model oraz wybierz kategorię i grupę benchmarkową.");
       return;
     }
+    if (!(await saveProductToCatalog(true))) return;
     const submittedBrand = brand.trim();
     const submittedModel = model.trim();
-    const expectedKey = previewKey(submittedBrand, submittedModel);
+    const expectedKey = previewKey(submittedBrand, submittedModel, categoryKey);
     activePreviewKeyRef.current = expectedKey;
     setPreview(null);
     setSelectedOfferIds(new Set());
@@ -1199,9 +1661,9 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
     try {
       const result = await apiRequest<PreviewResponse>("/research/preview", {
         method: "POST",
-        body: JSON.stringify({ brand: submittedBrand, model: submittedModel, marketplace: "allegro", previous_product_slug: previousPreviewSlugRef.current }),
+        body: JSON.stringify({ brand: submittedBrand, model: submittedModel, marketplace: "allegro", category_key: categoryKey, benchmark_group: benchmarkGroup, search_mode: searchMode, previous_product_slug: previousPreviewSlugRef.current }),
       });
-      const responseKey = previewKey(result.requested_brand, result.requested_model);
+      const responseKey = previewKey(result.requested_brand, result.requested_model, categoryKey);
       if (
         comparable(result.requested_brand) !== comparable(submittedBrand)
         || comparable(result.requested_model) !== comparable(submittedModel)
@@ -1213,8 +1675,13 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
       }
       console.info("FIELDNOTE preview", result.preview_diagnostics);
       setPreview(result);
-      setSelectedOfferIds(new Set(result.offers.filter((offer) => offer.source_group === "primary_source").map((offer) => offer.offer_id)));
+      if (result.status !== "ok") {
+        setRequestError(result.message || "Nie udało się pobrać aktualnych ofert.");
+        return;
+      }
+      setSelectedOfferIds(new Set(result.offers.filter((offer) => offer.match_status === "exact_match").map((offer) => offer.offer_id)));
       setSelectedManufacturerSourceIds(new Set(result.manufacturer_sources.filter((source) => source.model_match && source.match_status === "matched").map((source) => source.source_id)));
+      await refreshCatalog();
       setStep(1);
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : "Nie udało się sprawdzić ofert.");
@@ -1251,7 +1718,10 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
         body: JSON.stringify({
           brand: brand.trim(),
           model: model.trim(),
+          category_key: categoryKey,
+          benchmark_group: benchmarkGroup,
           selected_offer_ids: [...selectedOfferIds],
+          selected_manufacturer_source_ids: [...selectedManufacturerSourceIds],
           include_manufacturer_sources: includeManufacturerSources,
         }),
       });
@@ -1316,20 +1786,23 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
     clearProductResearchState();
     setBrand("");
     setModel("");
+    setCategoryKey("");
+    setBenchmarkGroup("");
   };
 
   const renderOfferTable = (offers: PreviewOffer[], emptyMessage: string, allowSelection: boolean) => {
     if (!offers.length) return <p className="mt-3 text-xs text-muted-foreground">{emptyMessage}</p>;
     return <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">Wybór</th><th className="p-3">Oferta</th>{showSellerColumn && <th className="p-3">Sprzedawca</th>}{showPriceColumn && <th className="p-3">Cena</th>}{showConditionColumn && <th className="p-3">Stan</th>}<th className="p-3">Typ</th><th className="p-3">Wartość źródła</th><th className="p-3">Dopasowanie</th></tr></thead><tbody className="divide-y divide-border">{offers.map((offer) => {
-      const selectable = allowSelection && offer.match_status === "exact_match" && offer.product_type === "stroller";
-      const statusLabel = offer.match_status === "exact_match" ? "Dokładne" : offer.match_status === "uncertain" ? "Niepewne" : "Odrzucone";
-      const statusClass = offer.match_status === "exact_match" ? "bg-emerald-50 text-emerald-700" : offer.match_status === "uncertain" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700";
-      const typeLabel = offer.product_type === "stroller" ? "Wózek" : offer.product_type === "accessory" ? "Akcesorium" : "Nieustalony";
+      const selectable = canSelectPreviewOffer(allowSelection, offer);
+      const statusLabel = offer.match_status === "exact_match" ? "Dokładne" : offer.match_status === "probable_match" ? "Prawdopodobne" : "Odrzucone";
+      const statusClass = offer.match_status === "exact_match" ? "bg-emerald-50 text-emerald-700" : offer.match_status === "probable_match" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700";
+      const probableReason = offer.rejection_reason === "missing_year_token" ? "Brak roku w tytule" : offer.rejection_reason === "missing_generation_token" ? "Brak oznaczenia generacji w tytule" : "";
+      const typeLabel = offer.product_type_label;
       const quality = offer.offer_quality;
       const qualityLabel = quality.level === "high" ? "Wysoka" : quality.level === "medium" ? "Średnia" : "Niska";
       const qualityClass = quality.level === "high" ? "bg-emerald-50 text-emerald-700" : quality.level === "medium" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700";
       const sellerDetails = [offer.seller_name, offer.seller_type, offer.seller_rating !== null ? `${offer.seller_rating}%` : "", offer.seller_reviews_count !== null ? `${offer.seller_reviews_count} opinii` : ""].filter(Boolean).join(" · ");
-      return <tr key={offer.offer_id} className={offer.match_status === "rejected" ? "opacity-60" : ""}><td className="p-3"><input type="checkbox" disabled={!selectable} checked={selectedOfferIds.has(offer.offer_id)} onChange={() => toggleOffer(offer.offer_id)} className="accent-primary disabled:opacity-30" /></td><td className="p-3"><a href={offer.url} target="_blank" rel="noreferrer" className="font-medium text-foreground hover:underline">{offer.title || offer.offer_id}</a><p className="mt-1 flex flex-wrap gap-1 font-mono text-[10px] text-muted-foreground"><span>{offer.offer_id}</span>{offer.sponsored && <span className="rounded bg-muted px-1.5 py-0.5 font-sans">Sponsorowana</span>}</p></td>{showSellerColumn && <td className="p-3 text-muted-foreground">{sellerDetails}</td>}{showPriceColumn && <td className="p-3 text-foreground">{offer.price || ""}</td>}{showConditionColumn && <td className="p-3 text-muted-foreground">{offer.condition || ""}</td>}<td className="p-3 text-muted-foreground">{typeLabel}</td><td className="p-3"><span title={quality.reasons.join("\n")} className={`inline-flex cursor-help rounded px-2 py-1 text-[11px] ${qualityClass}`}>{quality.score}/100 · {qualityLabel}</span></td><td className="p-3"><span className={`rounded px-2 py-1 text-[11px] ${statusClass}`}>{statusLabel}</span></td></tr>;
+      return <tr key={offer.offer_id} className={offer.match_status === "rejected" ? "opacity-60" : ""}><td className="p-3"><input type="checkbox" disabled={!selectable} checked={selectedOfferIds.has(offer.offer_id)} onChange={() => toggleOffer(offer.offer_id)} className="accent-primary disabled:opacity-30" /></td><td className="p-3"><a href={offer.url} target="_blank" rel="noreferrer" className="font-medium text-foreground hover:underline">{offer.title || offer.offer_id}</a><p className="mt-1 flex flex-wrap gap-1 font-mono text-[10px] text-muted-foreground"><span>{offer.offer_id}</span>{offer.sponsored && <span className="rounded bg-muted px-1.5 py-0.5 font-sans">Sponsorowana</span>}</p></td>{showSellerColumn && <td className="p-3 text-muted-foreground">{sellerDetails}</td>}{showPriceColumn && <td className="p-3 text-foreground">{offer.price || ""}</td>}{showConditionColumn && <td className="p-3 text-muted-foreground">{offer.condition || ""}</td>}<td className="p-3 text-muted-foreground">{typeLabel}</td><td className="p-3"><span title={quality.reasons.join("\n")} className={`inline-flex cursor-help rounded px-2 py-1 text-[11px] ${qualityClass}`}>{quality.score}/100 · {qualityLabel}</span></td><td className="p-3"><span className={`rounded px-2 py-1 text-[11px] ${statusClass}`}>{statusLabel}</span>{probableReason && <p className="mt-1 text-[10px] text-amber-700">{probableReason}</p>}</td></tr>;
     })}</tbody></table></div>;
   };
 
@@ -1391,15 +1864,36 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
                 <datalist id="fieldnote-models">{modelsForBrand.map((catalogModel) => <option key={catalogModel} value={catalogModel} />)}</datalist>
               </label>
             </div>
-            {existingProduct && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">Ten produkt jest już w katalogu.</p><p className="mt-1 text-[11px] text-amber-700">Możesz bezpiecznie sprawdzić aktualne źródła, ale nie utworzymy drugiego researchu.</p><div className="mt-3 flex gap-2 flex-wrap"><button onClick={() => { window.location.assign(`/products/${existingProduct.slug}`); }} className="px-3 py-1.5 text-xs font-medium border border-amber-300 rounded text-amber-900 hover:bg-amber-100">Otwórz produkt</button><button onClick={() => void refreshExistingProduct()} disabled={runLoading} className="px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50">Odśwież dane</button><button onClick={checkOffers} disabled={previewLoading} className="px-3 py-1.5 text-xs font-medium border border-amber-300 rounded text-amber-900 hover:bg-amber-100 disabled:opacity-50">Zobacz źródła</button></div></div>}
-            {requestError && <p className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{requestError}</p>}
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="text-xs text-muted-foreground">Kategoria
+                <select value={categoryKey} onChange={(event) => { setCategoryKey(event.target.value); setBenchmarkGroup(""); clearProductResearchState(); }} className="mt-1 w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground">
+                  <option value="">Wybierz kategorię</option>
+                  {categoryOptions.map((option) => <option key={option.category_key} value={option.category_key}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-muted-foreground">Grupa benchmarkowa
+                <select value={benchmarkGroup} disabled={!selectedCategory} onChange={(event) => { setBenchmarkGroup(event.target.value); clearProductResearchState(); }} className="mt-1 w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-50">
+                  <option value="">{selectedCategory ? "Wybierz grupę" : "Najpierw wybierz kategorię"}</option>
+                  {selectedGroups.map((option) => <option key={option.benchmark_group} value={option.benchmark_group}>{option.label}</option>)}
+                </select>
+              </label>
+            </div>
+            {existingProduct && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-medium text-amber-800">Ten produkt jest już w katalogu.</p><p className="mt-1 text-[11px] text-amber-700">Możesz bezpiecznie sprawdzić aktualne źródła, ale nie utworzymy drugiego researchu.</p><div className="mt-3 flex gap-2 flex-wrap"><button onClick={() => { window.location.assign(`/products/${existingProduct.slug}`); }} className="px-3 py-1.5 text-xs font-medium border border-amber-300 rounded text-amber-900 hover:bg-amber-100">Otwórz produkt</button><button onClick={() => void checkOffers("live")} disabled={previewLoading} className="px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50">Odśwież dane</button><button onClick={() => void checkOffers("live")} disabled={previewLoading} className="px-3 py-1.5 text-xs font-medium border border-amber-300 rounded text-amber-900 hover:bg-amber-100 disabled:opacity-50">Szukaj aktualnych ofert</button></div></div>}
+            {requestError && <div className={`mt-3 rounded border px-3 py-2 text-xs ${requestError.startsWith("Produkt zapisano") ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}`}><p>{requestError}</p>{preview?.result_mode === "live_failed" && preview.cached_result_available && <div className="mt-2 flex flex-wrap items-center gap-2"><span className="text-[11px]">Dostępne są zapisane wyniki z: {preview.cached_at ? new Date(preview.cached_at).toLocaleString("pl-PL") : "nieznanej daty"}.</span><button onClick={() => void checkOffers("cache")} disabled={previewLoading} className="rounded border border-red-300 bg-white px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50">Użyj zapisanych wyników</button></div>}</div>}
             {!existingProduct && <div className="mt-6">
               <button
-                onClick={checkOffers}
-                disabled={previewLoading || !brand.trim() || !model.trim()}
+                onClick={() => void saveProductToCatalog()}
+                disabled={catalogSaving || !brand.trim() || !model.trim() || !isValidCategorySelection(categoryOptions, categoryKey, benchmarkGroup)}
+                className="mr-2 px-4 py-2 text-xs font-medium border border-border rounded hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {catalogSaving ? "Zapisywanie…" : "Dodaj produkt do katalogu"}
+              </button>
+              <button
+                onClick={() => void checkOffers("live")}
+                disabled={previewLoading || catalogSaving || !brand.trim() || !model.trim() || !isValidCategorySelection(categoryOptions, categoryKey, benchmarkGroup)}
                 className="px-4 py-2 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {previewLoading ? "Wyszukiwanie źródeł…" : "Znajdź źródła"}
+                {previewLoading ? "Wyszukiwanie źródeł…" : "Szukaj aktualnych ofert"}
               </button>
             </div>}
           </div>
@@ -1410,6 +1904,10 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
           <div className="max-w-4xl">
             <h2 className="text-sm font-semibold text-foreground mb-1">Źródła dla {brand.trim()} {model.trim()}</h2>
             <p className="text-xs text-muted-foreground mb-4">Wybór w tym kroku jest tylko podglądem. Nie zapisujemy jeszcze żadnych zmian.</p>
+            <div className={`mb-4 rounded-lg border px-3 py-2 text-xs ${preview?.is_fresh ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+              <p className="font-medium">{preview?.result_mode === "live_firecrawl" ? "Aktualne wyszukiwanie Firecrawl" : "Zapisane wyniki"}</p>
+              <p className="mt-1">{preview?.result_mode === "live_firecrawl" ? `Pobrano: ${preview.fetched_at ? new Date(preview.fetched_at).toLocaleString("pl-PL") : "—"}` : `Pobrano pierwotnie: ${preview?.cached_at ? new Date(preview.cached_at).toLocaleString("pl-PL") : "—"}`}</p>
+            </div>
 
             <section className="rounded-lg border border-border bg-card p-4">
               <div className="flex items-center justify-between gap-3"><h3 className="text-xs font-semibold text-foreground">Oficjalne źródła</h3><span className="text-[11px] text-muted-foreground">{manufacturerSources.length} znaleziono</span></div>
@@ -1417,16 +1915,15 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
                 const selectable = source.match_status === "matched" || source.match_status === "uncertain";
                 const statusLabel = source.match_status === "matched" ? "Dopasowane" : source.match_status === "uncertain" ? "Niepewne" : source.match_status === "unavailable" ? "Niedostępne" : "Odrzucone";
                 const statusClass = source.match_status === "matched" ? "bg-emerald-50 text-emerald-700" : source.match_status === "uncertain" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700";
-                return <div key={source.source_id} className="flex gap-3 py-3"><input type="checkbox" disabled={!selectable} checked={selectedManufacturerSourceIds.has(source.source_id)} onChange={() => toggleManufacturerSource(source.source_id)} className="mt-0.5 accent-primary disabled:opacity-30" /><div className="min-w-0 flex-1"><p className="text-xs font-medium text-foreground">{source.title}</p><p className="mt-1 text-[11px] text-muted-foreground">{source.type_label} · {source.domain || "brak domeny"}</p>{source.url && <a href={source.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"><ExternalLink size={10} />Otwórz źródło</a>}</div><span className={`h-fit rounded px-2 py-1 text-[11px] ${statusClass}`}>{statusLabel}</span></div>;
+                return <div key={source.source_id} className="flex gap-3 py-3"><input type="checkbox" disabled={!selectable} checked={selectedManufacturerSourceIds.has(source.source_id)} onChange={() => toggleManufacturerSource(source.source_id)} className="mt-0.5 accent-primary disabled:opacity-30" /><div className="min-w-0 flex-1"><p className="text-xs font-medium text-foreground">{source.title}</p><p className="mt-1 text-[11px] text-muted-foreground">{source.type_label} · {source.domain || "brak domeny"}</p><div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground"><span className="rounded bg-muted px-1.5 py-0.5">{source.cached ? "z cache" : "lokalny zapis niedostępny"}</span><span className="rounded bg-muted px-1.5 py-0.5">pobranie: {source.fetch_status || "nieznany"}</span><span className="rounded bg-muted px-1.5 py-0.5">clean: {source.clean_status || "nieznany"}</span>{source.last_fetched_at && <span className="rounded bg-muted px-1.5 py-0.5">ostatnie: {new Date(source.last_fetched_at).toLocaleDateString("pl-PL")}</span>}{source.refresh_recommended && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">wymaga odświeżenia</span>}</div>{source.url && <a href={source.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"><ExternalLink size={10} />Otwórz źródło</a>}</div><span className={`h-fit rounded px-2 py-1 text-[11px] ${statusClass}`}>{statusLabel}</span></div>;
               })}</div> : <p className="mt-3 text-xs text-muted-foreground">Brak zapisanych oficjalnych źródeł dla tego modelu.</p>}
             </section>
 
             <section className="mt-4 rounded-lg border border-border bg-card p-4">
               <div className="flex items-center justify-between gap-3"><h3 className="text-xs font-semibold text-foreground">Oferty Allegro</h3><div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground"><span className="rounded bg-muted px-2 py-1">Znaleziono: {String(summary.unique_offer_ids ?? previewOffers.length)}</span><span className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">Wózki dokładnie dopasowane: {acceptedOffers.length}</span></div></div>
-              <div className="mt-5"><div className="flex items-center justify-between gap-3"><h4 className="text-xs font-semibold text-foreground">Top 10 źródeł do analizy</h4><span className="text-[11px] text-muted-foreground">{primaryOffers.length}/10</span></div><p className="mt-1 text-[11px] text-muted-foreground">Domyślnie zaznaczone są tylko te wózki: dokładnie dopasowane, bez akcesoriów i posortowane według wartości źródła.</p>{renderOfferTable(primaryOffers, "Brak dokładnie dopasowanych wózków.", true)}</div>
-              <div className="mt-6 border-t border-border pt-5"><div className="flex items-center justify-between gap-3"><h4 className="text-xs font-semibold text-foreground">Pozostałe oferty uzupełniające</h4><span className="text-[11px] text-muted-foreground">{supplementaryOffers.length}</span></div><p className="mt-1 text-[11px] text-muted-foreground">Prawidłowe oferty wózków, które nie weszły do pierwszej dziesiątki. Możesz je wybrać ręcznie.</p>{renderOfferTable(supplementaryOffers, "Brak ofert uzupełniających.", true)}</div>
-              <div className="mt-6 border-t border-border pt-5"><div className="flex items-center justify-between gap-3"><h4 className="text-xs font-semibold text-foreground">Odrzucone akcesoria</h4><span className="text-[11px] text-muted-foreground">{accessoryOffers.length}</span></div><p className="mt-1 text-[11px] text-muted-foreground">Akcesoria kompatybilne z {brand.trim()} {model.trim()} nie są źródłami danych o wózku i nie mogą zostać wybrane.</p>{renderOfferTable(accessoryOffers, "Brak odrzuconych akcesoriów.", false)}</div>
-              {otherOffers.length > 0 && <details className="mt-6 border-t border-border pt-5"><summary className="cursor-pointer text-xs font-medium text-muted-foreground">Oferty niepewne lub niedopasowane ({otherOffers.length})</summary><p className="mt-2 text-[11px] text-muted-foreground">Nie zostały wybrane, ponieważ nie potwierdzają jednoznacznie modelu albo typu produktu.</p>{renderOfferTable(otherOffers, "Brak dodatkowych ofert.", false)}</details>}
+              <div className="mt-5"><div className="flex items-center justify-between gap-3"><h4 className="text-xs font-semibold text-foreground">Dokładnie dopasowane</h4><span className="text-[11px] text-muted-foreground">{acceptedOffers.length}</span></div><p className="mt-1 text-[11px] text-muted-foreground">Dopasowania są automatycznie zaznaczone.</p>{renderOfferTable(acceptedOffers, "Brak dokładnie dopasowanych ofert.", true)}</div>
+              <div className="mt-6 border-t border-border pt-5"><div className="flex items-center justify-between gap-3"><h4 className="text-xs font-semibold text-foreground">Prawdopodobne dopasowania</h4><span className="text-[11px] text-muted-foreground">{probableOffers.length}</span></div><p className="mt-1 text-[11px] text-muted-foreground">Nie są zaznaczone automatycznie. Możesz wybrać je ręcznie.</p>{renderOfferTable(probableOffers, "Brak prawdopodobnych dopasowań.", true)}</div>
+              <div className="mt-6 border-t border-border pt-5"><div className="flex items-center justify-between gap-3"><h4 className="text-xs font-semibold text-foreground">Odrzucone</h4><span className="text-[11px] text-muted-foreground">{rejectedOffers.length}</span></div><p className="mt-1 text-[11px] text-muted-foreground">Oferty innego modelu, akcesoria lub niezgodne typy produktu nie mogą zostać wybrane.</p>{renderOfferTable(rejectedOffers, "Brak odrzuconych ofert.", false)}</div>
             </section>
             <div className="mt-6 flex gap-2">
               <button onClick={() => setStep(0)} className="px-4 py-2 text-xs font-medium border border-border rounded hover:bg-muted transition-colors">
@@ -1595,9 +2092,10 @@ function PageUruchomienia() {
     catch (err) { setError(err instanceof Error ? err.message : "Nie udało się anulować uruchomienia."); }
     finally { setWorking(null); }
   };
-  const failed = (status: string) => ["failed", "timed_out", "cancelled", "interrupted"].includes(status);
-  const succeeded = (status: string) => status === "succeeded" || status === "success";
-  const statusLabel = (status: string) => succeeded(status) ? "Sukces" : status === "running" ? "W toku" : status === "queued" ? "W kolejce" : status === "timed_out" ? "Przekroczony czas" : status === "cancelled" ? "Anulowano" : status === "interrupted" ? "Przerwano" : "Błąd";
+  const failed = (run: ApiRun) => isRunFailure(run);
+  const partial = (run: ApiRun) => isRunPartial(run);
+  const succeeded = (run: ApiRun) => isRunSuccess(run);
+  const statusLabel = (run: ApiRun) => succeeded(run) ? "Sukces" : partial(run) ? "Częściowo" : run.status === "running" ? "W toku" : run.status === "queued" ? "W kolejce" : run.status === "timed_out" ? "Przekroczony czas" : run.status === "cancelled" ? "Anulowano" : run.status === "interrupted" ? "Przerwano" : "Błąd";
   const duration = (run: ApiRun) => {
     if (!run.started_at || !run.finished_at) return "—";
     const seconds = Math.max(0, Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000));
@@ -1614,12 +2112,12 @@ function PageUruchomienia() {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-1">
             <CheckCircle2 size={12} className="text-emerald-500" />
-            {runs.filter((run) => succeeded(run.status)).length} sukces
+            {runs.filter((run) => succeeded(run)).length} sukces
           </div>
           <span>·</span>
           <div className="flex items-center gap-1">
             <XCircle size={12} className="text-red-400" />
-            {runs.filter((run) => failed(run.status)).length} błędy
+            {runs.filter((run) => failed(run)).length} błędy
           </div>
         </div>
       </div>
@@ -1635,12 +2133,12 @@ function PageUruchomienia() {
               {loading ? <p className="py-4 text-xs text-muted-foreground">Wczytywanie historii uruchomień…</p> : error ? <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</div> : runs.length === 0 ? <p className="py-4 text-xs text-muted-foreground">Brak zapisanych uruchomień.</p> : runs.map((run) => (
                 <div key={run.run_id} className="flex gap-4 relative pb-4">
                   {/* dot */}
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 z-10 border-2 ${succeeded(run.status) ? "bg-white border-emerald-400" : failed(run.status) ? "bg-white border-red-300" : "bg-white border-blue-300"}`}>
-                    {succeeded(run.status) ? <CheckCircle2 size={15} className="text-emerald-600" /> : failed(run.status) ? <XCircle size={15} className="text-red-600" /> : <Clock size={15} className="text-blue-600" />}
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 z-10 border-2 ${succeeded(run) ? "bg-white border-emerald-400" : failed(run) ? "bg-white border-red-300" : partial(run) ? "bg-white border-amber-300" : "bg-white border-blue-300"}`}>
+                    {succeeded(run) ? <CheckCircle2 size={15} className="text-emerald-600" /> : failed(run) ? <XCircle size={15} className="text-red-600" /> : partial(run) ? <AlertCircle size={15} className="text-amber-600" /> : <Clock size={15} className="text-blue-600" />}
                   </div>
 
                   {/* card */}
-                  <div className={`flex-1 bg-card border rounded-lg p-3 ${failed(run.status) ? "border-red-100" : "border-border"}`}>
+                  <div className={`flex-1 bg-card border rounded-lg p-3 ${failed(run) ? "border-red-100" : partial(run) ? "border-amber-100" : "border-border"}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
@@ -1656,10 +2154,10 @@ function PageUruchomienia() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${succeeded(run.status) ? "bg-emerald-50 text-emerald-700 border-emerald-200" : failed(run.status) ? "bg-red-50 text-red-600 border-red-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}>
-                          {statusLabel(run.status)}
+                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${succeeded(run) ? "bg-emerald-50 text-emerald-700 border-emerald-200" : failed(run) ? "bg-red-50 text-red-600 border-red-200" : partial(run) ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}>
+                          {statusLabel(run)}
                         </span>
-                        {failed(run.status) && (
+                        {failed(run) && (
                           <button
                             onClick={() => void retry(run.run_id)}
                             disabled={working === run.run_id}
@@ -1679,7 +2177,7 @@ function PageUruchomienia() {
                         {run.error}
                       </div>
                     )}
-                    {(failed(run.status) || run.status === "running") && <button onClick={() => setExpandedLog(expandedLog === run.run_id ? null : run.run_id)} className="mt-2 text-[11px] text-primary hover:underline">{expandedLog === run.run_id ? "Ukryj log" : "Pokaż log"}</button>}
+                    {(failed(run) || partial(run) || run.status === "running") && <button onClick={() => setExpandedLog(expandedLog === run.run_id ? null : run.run_id)} className="mt-2 text-[11px] text-primary hover:underline">{expandedLog === run.run_id ? "Ukryj log" : "Pokaż log"}</button>}
                     {expandedLog === run.run_id && <RunLog runId={run.run_id} />}
                   </div>
                 </div>
@@ -1897,11 +2395,22 @@ function PagePomoc() {
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState<Page>("produkty");
+  const [page, setPage] = useState<Page>("benchmarki");
+  const [products, setProducts] = useState<Product[]>(FALLBACK_PRODUCTS);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [researchSession, setResearchSession] = useState(0);
   const [previousResearchProductSlug, setPreviousResearchProductSlug] = useState("");
+  const [comparisonSelection, setComparisonSelection] = useState<string[]>([]);
+
+  const refreshCatalog = async () => {
+    try {
+      const response = await apiRequest<{ items: CatalogProduct[] }>("/products?limit=500&offset=0");
+      if (Array.isArray(response.items)) setProducts(response.items.map(productFromCatalog));
+    } catch {
+      // Keep the locally generated snapshot as a safe offline fallback.
+    }
+  };
 
   const beginResearch = (previousProductSlug = "") => {
     setPreviousResearchProductSlug(previousProductSlug);
@@ -1923,6 +2432,14 @@ export default function App() {
     setSelectedProductId(id);
     setPage("produkt-szczegoly");
     window.history.pushState({}, "", `/products/${id}`);
+  };
+
+  const openComparison = (ids: string[]) => {
+    if (ids.length < 2) return;
+    setComparisonSelection(ids);
+    setSelectedProductId(ids[0]);
+    setPage("produkt-szczegoly");
+    window.history.pushState({}, "", `/products/${ids[0]}?tab=benchmark`);
   };
 
   const openSources = (id: string) => {
@@ -1948,19 +2465,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    void refreshCatalog();
+  }, []);
+
+  useEffect(() => {
     const syncRoute = () => {
-      const route = parseFieldnoteRoute(window.location.pathname, new Set(PRODUCTS.map((product) => product.slug)));
+      const route = parseFieldnoteRoute(window.location.pathname, new Set(products.map((product) => product.slug)));
       if (route.productSlug) setSelectedProductId(route.productSlug);
       setPage(route.page);
     };
     syncRoute();
     window.addEventListener("popstate", syncRoute);
     return () => window.removeEventListener("popstate", syncRoute);
-  }, []);
+  }, [products]);
 
   const sidebarCollapsed = isNarrow ? !sidebarOpen : false;
+  const selectedProduct = products.find((product) => product.id === selectedProductId);
+  const navigationPage: Page = (page === "produkt-szczegoly" || page === "produkt-zrodla")
+    ? (selectedProduct && isLioneloProduct(selectedProduct) ? "benchmarki" : "produkty-konkurencji")
+    : page;
 
   return (
+    <CatalogContext.Provider value={{ products, refreshCatalog }}>
     <div
       className="flex h-screen bg-background overflow-hidden"
       style={{ fontFamily: "'Inter', sans-serif" }}
@@ -1979,7 +2505,7 @@ export default function App() {
         style={isNarrow ? { transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 200ms ease" } : {}}
       >
         <Sidebar
-          current={page}
+          current={navigationPage}
           onNav={(p) => { nav(p); if (isNarrow) setSidebarOpen(false); }}
           collapsed={false}
         />
@@ -2000,9 +2526,12 @@ export default function App() {
           )}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="text-foreground font-medium">
-              {page === "produkty" ? "Produkty" :
-               page === "produkt-szczegoly" ? `Produkty / ${PRODUCTS.find(p => p.id === selectedProductId)?.name || ""}` :
-               page === "produkt-zrodla" ? `Produkty / ${PRODUCTS.find(p => p.id === selectedProductId)?.name || ""} / Aukcje i źródła` :
+              {page === "benchmarki" ? "Benchmarki" :
+               page === "produkty-konkurencji" ? "Produkty konkurencji" :
+               page === "zrodla" ? "Źródła" :
+               page === "produkty" ? "Produkty" :
+               page === "produkt-szczegoly" ? `${isLioneloProduct(selectedProduct || { brand: "" }) ? "Benchmarki" : "Produkty konkurencji"} / ${selectedProduct?.name || ""}` :
+               page === "produkt-zrodla" ? `Źródła / ${selectedProduct?.name || ""} / Aukcje i źródła` :
                page === "research" ? "Research" :
                page === "uruchomienia" ? "Uruchomienia" : "Pomoc"}
             </span>
@@ -2012,16 +2541,18 @@ export default function App() {
 
         {/* Page content */}
         <div className="flex-1 overflow-hidden">
-          {page === "produkty" && <PageProdukty onDetail={openDetail} onResearch={() => beginResearch()} />}
+          {page === "benchmarki" && <PageBenchmarki onDetail={openDetail} />}
+          {page === "produkty-konkurencji" && <PageProduktyKonkurencji onDetail={openDetail} />}
+          {page === "zrodla" && <PageZrodlaIndex onSources={openSources} />}
+          {page === "produkty" && <PageProdukty onDetail={openDetail} onResearch={() => beginResearch()} onCompare={openComparison} />}
           {page === "produkt-szczegoly" && (
             <PageProduktSzczegoly
               productId={selectedProductId}
-              onBack={() => {
-                window.history.pushState({}, "", "/products");
-                setPage("produkty");
-              }}
+              onBack={() => nav(isLioneloProduct(selectedProduct || { brand: "" }) ? "benchmarki" : "produkty-konkurencji")}
+              backLabel={isLioneloProduct(selectedProduct || { brand: "" }) ? "Benchmarki" : "Produkty konkurencji"}
               onResearch={() => beginResearch(selectedProductId)}
               onSources={() => openSources(selectedProductId)}
+              comparisonSelection={comparisonSelection}
             />
           )}
           {page === "produkt-zrodla" && <PageProduktZrodla productId={selectedProductId} onBack={() => openDetail(selectedProductId)} />}
@@ -2031,5 +2562,6 @@ export default function App() {
         </div>
       </div>
     </div>
+    </CatalogContext.Provider>
   );
 }

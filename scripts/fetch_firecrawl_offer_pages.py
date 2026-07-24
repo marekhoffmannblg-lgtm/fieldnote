@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import os
@@ -36,6 +37,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=f"Ponawia rekordy error z retry_count mniejszym niż {MAX_RETRIES}.",
     )
+    parser.add_argument("--no-visuals", action="store_true", help="Nie żądaj screenshotu i listy mediów podczas nowego fetchu.")
+    parser.add_argument("--visuals-from-cache", action="store_true", help="Zbuduj kontekst wizualny wyłącznie z istniejącego HTML.")
+    parser.add_argument("--refresh-visuals", action="store_true", help="Przebuduj lokalny kontekst wizualny mimo cache HTML.")
     parser.add_argument(
         "--offer-id",
         action="append",
@@ -65,8 +69,13 @@ def require_api_key() -> str:
     return api_key
 
 
-def scrape_offer(url: str, api_key: str) -> dict[str, object]:
-    payload = json.dumps({"url": url, "formats": ["markdown", "html", "links"]}).encode("utf-8")
+def scrape_offer(url: str, api_key: str, *, capture_visuals: bool = True) -> dict[str, object]:
+    # Firecrawl receives visual formats inside the same scrape request. No
+    # follow-up render is issued merely to obtain a screenshot.
+    formats = ["markdown", "html", "rawHtml", "links"]
+    if capture_visuals:
+        formats.extend(["images", "screenshot"])
+    payload = json.dumps({"url": url, "formats": formats}).encode("utf-8")
     request = Request(
         FIRECRAWL_SCRAPE_URL,
         data=payload,
@@ -92,8 +101,23 @@ def save_response(output_dir: Path, response: dict[str, object]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "markdown.md").write_text(str(data.get("markdown", "")), encoding="utf-8")
     (output_dir / "html.html").write_text(str(data.get("html", "")), encoding="utf-8")
+    raw_html = data.get("rawHtml", data.get("raw_html", ""))
+    if raw_html:
+        (output_dir / "raw_html.html").write_text(str(raw_html), encoding="utf-8")
     (output_dir / "links.txt").write_text(_links_text(data.get("links", "")), encoding="utf-8")
     (output_dir / "metadata.json").write_text(json.dumps(data.get("metadata", {}), ensure_ascii=False, indent=2), encoding="utf-8")
+    if "images" in data:
+        (output_dir / "firecrawl_images.json").write_text(json.dumps(data.get("images"), ensure_ascii=False, indent=2), encoding="utf-8")
+    screenshot = data.get("screenshot")
+    if isinstance(screenshot, str) and screenshot.startswith("data:image/"):
+        header, encoded = screenshot.split(",", 1)
+        extension = ".webp" if "webp" in header else ".png"
+        visual_dir = output_dir / "visual"
+        visual_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (visual_dir / f"full_page{extension}").write_bytes(base64.b64decode(encoded))
+        except ValueError:
+            pass
     (output_dir / "raw_response.json").write_text(json.dumps(response, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -165,6 +189,9 @@ def fetch_pending_rows(
     retry_errors: bool = False,
     root_dir: Path = ROOT_DIR,
     offer_pages_root: Path = OFFER_PAGES_ROOT,
+    capture_visuals: bool = True,
+    visuals_from_cache: bool = False,
+    refresh_visuals: bool = False,
 ) -> FetchRunResult:
     if limit < 1:
         raise ValueError("--limit musi być większy od zera.")
@@ -178,6 +205,16 @@ def fetch_pending_rows(
             result.offers_skipped += 1
             continue
         work_indices.append(index)
+    if visuals_from_cache:
+        from visual_snapshots import extract_visual_context
+        for index in indices:
+            row = rows[index]
+            try:
+                extract_visual_context(f"allegro:{row.get('offer_id', '')}", refresh=refresh_visuals)
+            except (OSError, ValueError, FileNotFoundError):
+                pass
+        result.fetch_status = fetch_status_for(result)
+        return result
     if not work_indices:
         result.fetch_status = fetch_status_for(result)
         return result
@@ -212,10 +249,18 @@ def fetch_pending_rows(
             continue
 
         try:
-            response = scrape_offer(row["normalized_url"], api_key)
+            response = scrape_offer(row["normalized_url"], api_key, capture_visuals=capture_visuals)
             if response.get("success") is False:
                 raise ValueError(str(response.get("error", "Firecrawl zwrócił success=false.")))
             save_response(output_dir, response)
+            if capture_visuals:
+                try:
+                    from visual_snapshots import extract_visual_context
+                    extract_visual_context(f"allegro:{row.get('offer_id', '')}", directory=output_dir, provider="firecrawl")
+                except (OSError, ValueError, FileNotFoundError):
+                    # Visual capture is intentionally non-blocking for the
+                    # text pipeline; the response itself remains fetched.
+                    pass
             row["status"] = "fetched"
             row["fetched_at"] = timestamp()
             row["error_message"] = ""
@@ -245,6 +290,9 @@ def main() -> int:
             args.force,
             offer_ids=set(args.offer_id) or None,
             retry_errors=args.retry_errors,
+            capture_visuals=not args.no_visuals,
+            visuals_from_cache=args.visuals_from_cache,
+            refresh_visuals=args.refresh_visuals,
         )
     except (RuntimeError, ValueError) as exc:
         print(f"Błąd: {exc}")

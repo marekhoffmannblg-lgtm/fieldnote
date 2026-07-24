@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import re
+import socket
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -14,6 +16,17 @@ ROOT = Path(__file__).resolve().parent.parent
 GROUPS = ROOT / "output" / "model_groups"
 FIELDS = ("Marka", "Model", "Status", "Rama", "Koła", "Udźwig", "Regulacja oparcia", "Auto-folding", "Składanie jedną ręką", "Waga", "Wymiary po złożeniu", "Siedzisko", "Amortyzacja", "Koła 360°", "Hamulec", "Budka XXL", "Filtr UPF50+", "Wodoodporna budka", "Regulacja rączki", "Wymiary oparcia / miejsce do spania", "Akcesoria")
 NEGATIVE_EVIDENCE = ("brak informacji", "nie podano", "brak danych", "nie określono", "nie znaleziono", "brak wzmianki", "źródło nie podaje")
+SOURCE_ANALYSIS_PROVIDER_ERROR_EXIT = 20
+
+
+class SourceAnalysisProviderError(RuntimeError):
+    """A safe, per-source provider failure that must not corrupt model state."""
+
+    def __init__(self, code: str, message: str, source_id: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.source_id = source_id
 
 
 def normalize_evidence_items(value, current_value="") -> list[dict]:
@@ -124,12 +137,48 @@ Zwróć wyłącznie JSON patcha: {{"offer_id":"...","fields":{{"pole":{{"value":
 """
 
 
-def call_api(prompt: str, key: str, model: str) -> dict:
+def call_api(prompt: str, key: str, model: str, source_id: str = "") -> dict:
     body = {"model": model, "temperature": 0, "response_format": {"type": "json_object"}, "messages": [{"role": "user", "content": prompt}]}
     request = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=120) as response:
-        result = json.loads(response.read().decode())
-    return json.loads(result["choices"][0]["message"]["content"])
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.loads(response.read().decode())
+    except (TimeoutError, socket.timeout):
+        raise SourceAnalysisProviderError("source_analysis_timeout", "Analiza źródła przekroczyła limit czasu. Zachowano dotychczasowe dane.", source_id) from None
+    except urllib.error.HTTPError:
+        raise SourceAnalysisProviderError("source_analysis_http_error", "Provider analizy źródła zwrócił błąd. Zachowano dotychczasowe dane.", source_id) from None
+    except urllib.error.URLError:
+        raise SourceAnalysisProviderError("source_analysis_network_error", "Nie udało się połączyć z providerem analizy źródła. Zachowano dotychczasowe dane.", source_id) from None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise SourceAnalysisProviderError("source_analysis_invalid_response", "Provider analizy źródła zwrócił nieprawidłową odpowiedź. Zachowano dotychczasowe dane.", source_id) from None
+    try:
+        choices = result.get("choices") if isinstance(result, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices else None
+        message = choice.get("message") if isinstance(choice, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("missing content")
+        patch = json.loads(content)
+        if not isinstance(patch, dict):
+            raise ValueError("patch is not an object")
+        return patch
+    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        raise SourceAnalysisProviderError("source_analysis_invalid_response", "Provider analizy źródła zwrócił niepełną odpowiedź. Zachowano dotychczasowe dane.", source_id) from None
+
+
+def record_source_analysis_error(state: dict, error: SourceAnalysisProviderError, state_path: Path) -> None:
+    """Persist a failed source without changing its processing lifecycle."""
+    source_id = error.source_id
+    state["last_analysis_error_code"] = error.code
+    state["last_analysis_error_message"] = error.message
+    state["last_analysis_error_source_id"] = source_id
+    processed = state.setdefault("processed_source_ids", [])
+    if source_id in processed:
+        processed.remove(source_id)
+    remaining = state.setdefault("remaining_source_ids", [])
+    if source_id and source_id not in remaining:
+        remaining.append(source_id)
+    atomic_write_json(state_path, state)
 
 
 def merge(state: dict, patch: dict, source: dict) -> None:
@@ -249,7 +298,15 @@ def main() -> int:
             if args.mock_responses_dir:
                 patch = read_json(Path(args.mock_responses_dir) / f"{offer.get('external_offer_id', offer.get('offer_id',''))}.json")
             else:
-                patch = call_api(prompt, key, args.model)
+                try:
+                    patch = call_api(prompt, key, args.model, source_id)
+                except SourceAnalysisProviderError as error:
+                    record_source_analysis_error(state, error, state_path)
+                    print("source_analysis_status=failed")
+                    print(f"source_analysis_error_code={error.code}")
+                    print(f"source_analysis_error_source_id={error.source_id}")
+                    print(f"source_analysis_error_message={error.message}")
+                    return SOURCE_ANALYSIS_PROVIDER_ERROR_EXIT
             merge(state, patch, offer)
             state.setdefault("processed_source_ids", []).append(source_id)
             state["remaining_source_ids"] = [value for value in state.get("remaining_source_ids", []) if value != source_id]

@@ -20,7 +20,8 @@ if str(SRC) not in sys.path:
 
 from firecrawl_offer_export import export_firecrawl_offer_urls
 from prepare_firecrawl_offer_queue import QUEUE_COLUMNS, prepare_queue
-from catalog_registry import ensure_catalog_product, ensure_group_directory
+from catalog_registry import ensure_catalog_product, ensure_group_directory, product_for_group_key
+from category_registry import CategoryValidationError, validate_category_assignment
 from p0_runtime import (
     FileLock,
     LockUnavailableError,
@@ -36,8 +37,12 @@ def normalized(value: str) -> str:
 
 def path_slug(value: str) -> str:
     import re
+    import unicodedata
 
-    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    normalized_value = unicodedata.normalize("NFKD", value)
+    normalized_value = "".join(char for char in normalized_value if not unicodedata.combining(char))
+    normalized_value = normalized_value.replace("ł", "l").replace("Ł", "l")
+    return re.sub(r"[^a-z0-9]+", "-", normalized_value.lower()).strip("-")
 
 
 def read_json(path: Path, default: object) -> object:
@@ -118,20 +123,82 @@ def load_run_context(path: str | None) -> dict[str, object]:
     return value
 
 
-def materialize_selected_offers(source_path: Path, destination_path: Path, selected_offer_ids: set[str]) -> list[dict[str, str]]:
-    """Copy one run's selection without mutating shared targeted-search data."""
+REQUIRED_OFFER_SNAPSHOTS = (
+    "markdown.md",
+    "html.html",
+    "raw_response.json",
+    "technical_clean.md",
+    "offer_sections.json",
+)
+
+
+def offer_snapshot_complete(offer_id: str, offer_pages_root: Path | None = None) -> bool:
+    """A fetched source is reusable only when downstream artifacts are present."""
+    base = (offer_pages_root or ROOT / "input" / "firecrawl_offer_pages") / offer_id
+    return bool(offer_id) and all((base / name).is_file() for name in REQUIRED_OFFER_SNAPSHOTS)
+
+
+def materialize_selected_offers(
+    source_path: Path,
+    destination_path: Path,
+    selected_offer_ids: set[str],
+    *,
+    queue_path: Path | None = None,
+    offer_pages_root: Path | None = None,
+) -> list[dict[str, str]]:
+    """Materialize exactly the UI selection, including known offers.
+
+    `candidate_offers.csv` deliberately excludes already known records, so it
+    cannot be the source of truth for an owned run. The full extracted listing
+    is filtered by immutable `selected_offer_ids`; each selected source is
+    either reused from complete local artifacts or scheduled for one fetch.
+    """
     if not source_path.exists():
         return []
     with source_path.open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         fields = reader.fieldnames or []
         rows = list(reader)
-    selected = [
-        row for row in rows
-        if not selected_offer_ids or str(row.get("external_offer_id", "")).strip() in selected_offer_ids
-    ]
-    atomic_write_csv(destination_path, fields, selected, preserve_previous=False)
+    queue_by_offer_id = {
+        str(row.get("offer_id", "")).strip(): row
+        for row in read_csv(queue_path or ROOT / "output" / "firecrawl_offer_queue.csv")
+        if str(row.get("offer_id", "")).strip()
+    }
+    selected: list[dict[str, str]] = []
+    for row in rows:
+        offer_id = str(row.get("offer_id", row.get("external_offer_id", ""))).strip()
+        if offer_id not in selected_offer_ids:
+            continue
+        item = dict(row)
+        item["external_offer_id"] = offer_id
+        queue_row = queue_by_offer_id.get(offer_id, {})
+        item["owned_run_status"] = "reused" if offer_snapshot_complete(offer_id, offer_pages_root) else "fetch"
+        item["queue_status_before"] = str(queue_row.get("status", ""))
+        selected.append(item)
+    output_fields = list(dict.fromkeys([*fields, "external_offer_id", "owned_run_status", "queue_status_before"]))
+    atomic_write_csv(destination_path, output_fields, selected, preserve_previous=False)
     return selected
+
+
+def prepare_selected_offer_queue(offer_ids: set[str], queue_path: Path | None = None) -> set[str]:
+    """Schedule only explicitly selected existing rows for one normal fetch."""
+    if not offer_ids:
+        return set()
+    path = queue_path or ROOT / "output" / "firecrawl_offer_queue.csv"
+    rows = read_csv(path)
+    existing: set[str] = set()
+    changed = False
+    for row in rows:
+        offer_id = str(row.get("offer_id", "")).strip()
+        if offer_id not in offer_ids:
+            continue
+        existing.add(offer_id)
+        if row.get("status", "").lower() != "pending":
+            row["status"] = "pending"
+            changed = True
+    if changed:
+        atomic_write_csv(path, QUEUE_COLUMNS, rows)
+    return existing
 
 
 def run_stage(
@@ -250,7 +317,19 @@ def coverage_for_group(group_key: str) -> dict[str, object]:
     return {}
 
 
+def is_controlled_source_analysis_failure(returncode: int, output: str) -> bool:
+    """Recognize the cascade's safe per-source failure without parsing tracebacks."""
+    return returncode == SOURCE_ANALYSIS_PROVIDER_ERROR_EXIT and "source_analysis_status=failed" in output
+
+
+def controlled_source_analysis_message(output: str) -> str:
+    if "source_analysis_error_code=source_analysis_timeout" in output:
+        return "Analiza źródła przekroczyła limit czasu. Zachowano dotychczasowe dane."
+    return "Analiza źródła nie powiodła się. Zachowano dotychczasowe dane."
+
+
 FETCH_KEYS = ("fetch_status", "offers_requested", "offers_fetched", "offers_failed", "offers_skipped")
+SOURCE_ANALYSIS_PROVIDER_ERROR_EXIT = 20
 FIXTURE_SCENARIOS = ("success", "partial", "failed", "empty_results")
 MAX_RESEARCH_RUNS = 500
 PREVIEW_KEYS = (
@@ -511,9 +590,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--marketplace", required=True)
     parser.add_argument("--brand", required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--category-key", help="Kanoniczna kategoria z rejestru FIELDNOTE.")
+    parser.add_argument("--benchmark-group", help="Grupa benchmarkowa zgodna z kategorią.")
     parser.add_argument("--apply", action="store_true", help="Dodaje nowe aukcje do kolejki i pobiera ich karty.")
     parser.add_argument("--resume", action="store_true", help="Wznawia na zapisanych listingach i stanach modelu.")
     parser.add_argument("--skip-ai", action="store_true", help="Pomija kaskadową ekstrakcję AI.")
+    parser.add_argument("--skip-product-profile", action="store_true", help="Pozostawia opcjonalny profil parent workerowi API.")
     parser.add_argument("--retry-errors", action="store_true", help="Ponawia błędne pobrania bez targeted search ani dodawania ofert do kolejki.")
     parser.add_argument("--fixture-scenario", choices=FIXTURE_SCENARIOS, help="Uruchamia izolowany scenariusz demonstracyjny bez API i bez modyfikacji produkcyjnych danych.")
     parser.add_argument("--fixture-root", help="Katalog fixture używany wyłącznie razem z --fixture-scenario.")
@@ -646,6 +728,7 @@ def main() -> int:
     search_summary: dict[str, str] = {}
     coverage: dict[str, object] = {}
     new_offer_ids: set[str] = set()
+    reused_offer_ids: set[str] = set()
     retry_offer_ids: set[str] = set()
     fetched_offer_ids: set[str] = set()
     failed_offer_ids: set[str] = set()
@@ -653,8 +736,25 @@ def main() -> int:
     offers_cleaned = 0
     registry_records_updated = 0
     groups_updated = 0
+    analysis_partial = False
+    analysis_error_message = ""
     context_path: Path | None = None
     current_stage = "validation"
+
+    existing_catalog_product = product_for_group_key(group_key)
+    requested_category_key = str(args.category_key or existing_catalog_product.get("category_key", "")).strip()
+    requested_benchmark_group = str(args.benchmark_group or existing_catalog_product.get("benchmark_group", "")).strip()
+    try:
+        category_assignment = validate_category_assignment(
+            requested_category_key,
+            requested_benchmark_group,
+            require_complete=bool(args.apply),
+        )
+    except CategoryValidationError as exc:
+        print(f"pipeline_status=failed\nmode={mode}\nerror={exc.code}: {exc.message}")
+        history.complete("failed", error_stage=current_stage, error_message=f"{exc.code}: {exc.message}")
+        history.save()
+        return 2
 
     if marketplace != "allegro":
         print("pipeline_status=failed")
@@ -675,7 +775,12 @@ def main() -> int:
     # fetched. Preview remains read-only by design.
     if args.apply:
         try:
-            catalog_product = ensure_catalog_product(args.brand, args.model)
+            catalog_product = ensure_catalog_product(
+                args.brand,
+                args.model,
+                category_key=category_assignment["category_key"],
+                benchmark_group=category_assignment["benchmark_group"],
+            )
             group_directory = ensure_group_directory(catalog_product)
             print(f"catalog_product_id={catalog_product['product_id']}")
             print(f"catalog_group_directory={group_directory.relative_to(ROOT)}")
@@ -688,6 +793,7 @@ def main() -> int:
     targeted_dir = ROOT / "input" / "targeted_search" / f"{path_slug(args.brand)}__{path_slug(args.model)}" / marketplace
     summary_path = targeted_dir / "research_summary.json"
     shared_new_offers_path = targeted_dir / "new_offers.csv"
+    candidate_offers_path = targeted_dir / "candidate_offers.csv"
     new_offers_path = shared_new_offers_path
 
     try:
@@ -735,14 +841,29 @@ def main() -> int:
                 current_stage = "targeted search"
                 run_stage(1, "targeted search", None, "resume: existing listing", history=history)
             else:
-                command = [sys.executable, str(SCRIPTS / "fetch_targeted_model_offers.py"), "--marketplace", marketplace, "--brand", args.brand, "--model", args.model]
+                command = [sys.executable, str(SCRIPTS / "fetch_targeted_model_offers.py"), "--marketplace", marketplace, "--brand", args.brand, "--model", args.model, "--category-key", category_assignment["category_key"]]
                 current_stage = "targeted search"
                 run_stage(1, "targeted search", command, history=history)
 
             if immutable_context:
                 destination = ROOT / str(immutable_context.get("selected_offers_csv", ""))
                 selected_ids = {str(value) for value in immutable_context.get("selected_offer_ids", []) if str(value)}
-                new_rows = materialize_selected_offers(shared_new_offers_path, destination, selected_ids)
+                # The immutable UI selection is authoritative. Unlike
+                # candidate_offers.csv, the full listing retains known offers
+                # that may be reusable or may require one explicit fetch.
+                selection_source = targeted_dir / "extracted_offers.json"
+                if selection_source.exists():
+                    # Convert the listing JSON to the CSV shape expected by the
+                    # materializer without changing shared search artifacts.
+                    listing_rows = read_json(selection_source, [])
+                    staging_source = destination.with_name("selected_listing.csv")
+                    if isinstance(listing_rows, list):
+                        listing_fields = sorted({key for row in listing_rows if isinstance(row, dict) for key in row})
+                        atomic_write_csv(staging_source, listing_fields, [row for row in listing_rows if isinstance(row, dict)], preserve_previous=False)
+                        selection_source = staging_source
+                else:
+                    selection_source = candidate_offers_path if candidate_offers_path.exists() else shared_new_offers_path
+                new_rows = materialize_selected_offers(selection_source, destination, selected_ids)
                 new_offers_path = destination
             else:
                 new_rows = read_csv(shared_new_offers_path)
@@ -753,17 +874,32 @@ def main() -> int:
                 print_preview_summary(group_key, search_summary)
                 return 0
 
-            new_offer_ids = {row.get("external_offer_id", "") for row in new_rows if row.get("external_offer_id", "")}
-            offers_in_run = len(new_offer_ids)
+            reused_offer_ids = {
+                row.get("external_offer_id", "")
+                for row in new_rows
+                if row.get("external_offer_id", "") and row.get("owned_run_status") == "reused"
+            }
+            fetch_rows = [row for row in new_rows if row.get("owned_run_status") == "fetch"]
+            new_offer_ids = {row.get("external_offer_id", "") for row in fetch_rows if row.get("external_offer_id", "")}
+            offers_in_run = len(new_rows)
+            for row in new_rows:
+                print(f"selected_offer={row.get('external_offer_id', '')} result={row.get('owned_run_status', 'fetch')}")
 
-            if new_rows:
-                merge_command = [sys.executable, str(SCRIPTS / "merge_targeted_model_offers.py"), "--marketplace", marketplace, "--brand", args.brand, "--model", args.model, "--input-csv", str(new_offers_path)]
+            existing_queue_ids = prepare_selected_offer_queue(new_offer_ids)
+            new_queue_rows = [row for row in fetch_rows if row.get("external_offer_id", "") not in existing_queue_ids]
+            if new_queue_rows:
+                new_queue_path = new_offers_path.with_name("selected_new_queue_offers.csv")
+                atomic_write_csv(new_queue_path, list(new_queue_rows[0]), new_queue_rows, preserve_previous=False)
+                merge_command = [sys.executable, str(SCRIPTS / "merge_targeted_model_offers.py"), "--marketplace", marketplace, "--brand", args.brand, "--model", args.model, "--input-csv", str(new_queue_path)]
                 current_stage = "merge"
                 run_stage(2, "merge", merge_command, history=history)
-                add_new_offers_to_queue(new_rows, args.brand, args.model)
+                add_new_offers_to_queue(new_queue_rows, args.brand, args.model)
+            elif fetch_rows:
+                current_stage = "merge"
+                run_stage(2, "merge", None, "selected existing offers queued for one fetch", history=history)
             else:
                 current_stage = "merge"
-                run_stage(2, "merge", None, "no new offers", history=history)
+                run_stage(2, "merge", None, "selected snapshots reused", history=history)
 
             if new_offer_ids:
                 move_queue_rows_first(new_offer_ids)
@@ -773,6 +909,8 @@ def main() -> int:
                     "--limit",
                     str(len(new_offer_ids)),
                 ]
+                if any((ROOT / "input" / "firecrawl_offer_pages" / offer_id).exists() for offer_id in new_offer_ids):
+                    fetch_command.append("--force")
                 for offer_id in sorted(new_offer_ids):
                     fetch_command.extend(["--offer-id", offer_id])
                 current_stage = "fetch offer pages"
@@ -803,6 +941,7 @@ def main() -> int:
             "model": args.model,
             "group_key": group_key,
             "new_offer_ids": sorted(new_offer_ids),
+            "reused_offer_ids": sorted(reused_offer_ids),
             "fetched_offer_ids": sorted(fetched_offer_ids),
             "failed_offer_ids": sorted(failed_offer_ids),
             "retry_offer_ids": sorted(retry_offer_ids),
@@ -861,17 +1000,50 @@ def main() -> int:
             cascade_command = [sys.executable, str(SCRIPTS / "extract_model_facts_cascade.py"), "--group-key", group_key]
             if args.resume:
                 cascade_command.append("--resume")
-            run_stage(7, "model facts cascade", cascade_command, history=history)
+            cascade_output, cascade_code = run_stage(
+                7,
+                "model facts cascade",
+                cascade_command,
+                allow_failure=True,
+                history=history,
+            )
+            if is_controlled_source_analysis_failure(cascade_code, cascade_output):
+                analysis_partial = True
+                analysis_error_message = controlled_source_analysis_message(cascade_output)
+                history.update_latest_stage("partial", analysis_error_message)
+                print("analysis_status=partial")
+                print(f"analysis_error_message={analysis_error_message}")
+            elif cascade_code:
+                raise RuntimeError("Etap 7/9 nie powiódł się: model facts cascade")
 
         current_stage = "model benchmark"
         run_stage(8, "model benchmark", [sys.executable, str(SCRIPTS / "build_model_benchmark.py")], history=history)
         current_stage = "coverage report"
         run_stage(9, "coverage report", [sys.executable, str(SCRIPTS / "report_model_coverage.py")], history=history)
 
+        # Optional narrative profile never blocks the factual research result.
+        current_stage = "product profile generation"
+        if args.skip_product_profile:
+            run_stage(10, "product profile generation", None, "skipped_by_parent_api_worker", history=history)
+        elif os.getenv("PRODUCT_PROFILE_AI_ENABLED", "").lower() in {"1", "true", "yes"}:
+            profile_output, profile_code = run_stage(
+                10,
+                "product profile generation",
+                [sys.executable, str(SCRIPTS / "generate_product_profile.py"), "--product-slug", f"{path_slug(args.brand)}__{path_slug(args.model)}", "--allow-openai", "--owned-lock-run-id", history.run_id],
+                "optional source-backed narrative profile",
+                allow_failure=True,
+                history=history,
+            )
+            history.update_latest_stage("completed" if profile_code == 0 else "partial", profile_output[-500:])
+        else:
+            run_stage(10, "product profile generation", None, "disabled_by_PRODUCT_PROFILE_AI_ENABLED", history=history)
+
         coverage = coverage_for_group(group_key)
         if not coverage:
             raise RuntimeError(f"Brak rekordu coverage dla {group_key}")
         pipeline_status = pipeline_status_for_fetch(fetch_summary["fetch_status"])
+        if analysis_partial and pipeline_status == "success":
+            pipeline_status = "partial"
         history.update_summary(
             preview=search_summary, fetch=fetch_summary, coverage_before=coverage_before, coverage_after=coverage,
             new_offers=len(new_rows), offers_in_run=offers_in_run, offers_cleaned=offers_cleaned,

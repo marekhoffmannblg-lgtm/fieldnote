@@ -57,7 +57,8 @@ def default_source_record(source_id: str) -> dict[str, Any]:
         "cleaning": {"status": "not_started", "cleaned_at": None, "error": None},
         "assignment": {"status": "unassigned", "assigned_at": None, "assignment_reason": None, "rejection_reason": None, "duplicate_of": None},
         "usage": {"used_in_final_product": False, "used_fields_count": 0, "confirmed_fields_count": 0, "conflicting_fields_count": 0, "rejected_evidence_count": 0},
-        "content": {"content_hash": None, "content_family_id": None, "raw_snapshot_path": None, "clean_snapshot_path": None, "snapshot_available": False},
+        "content": {"content_hash": None, "content_family_id": None, "raw_snapshot_path": None, "clean_snapshot_path": None, "snapshot_available": False,
+                    "visual_snapshot_path": None, "visual_blocks_path": None, "media_manifest_path": None, "visual_capture_status": "skipped"},
         "metadata": {"title": None, "price_amount": None, "price_currency": None, "seller_name": None, "seller_rating": None, "offer_quality_score": None},
         "first_seen_at": None, "last_seen_at": None, "updated_at": utc_now(),
     }
@@ -534,15 +535,26 @@ def product_source_counters(
         return str(cleaning.get("status", ""))
 
     selected = [item for item in values if bool((item.get("selection") or {}).get("selected"))]
+    # Marketplace lifecycle counters remain stable when a primary manufacturer
+    # source is attached. Manufacturer sources are reported separately rather
+    # than changing the historical Allegro selection/fetch totals.
+    marketplace_selected = [
+        item for item in selected
+        if str((sources_by_id.get(str(item.get("source_id", "")), {}) or {}).get("marketplace", "")) != "manufacturer"
+    ]
+    manufacturer_selected = [item for item in selected if item not in marketplace_selected]
     return {
-        "selected_count": len(selected),
-        "fetched_count": sum(fetch_status(item) == "fetched" for item in selected),
-        "fetch_failed_count": sum(fetch_status(item) == "failed" for item in selected),
-        "cleaned_count": sum(cleaning_status(item) == "cleaned" for item in selected),
-        "assigned_count": sum((item.get("assignment") or {}).get("status") == "assigned" for item in selected),
-        "unattached_count": sum(fetch_status(item) == "fetched" and (item.get("assignment") or {}).get("status") == "unassigned" for item in selected),
-        "used_count": sum(bool((item.get("usage") or {}).get("used_in_final_product")) for item in selected),
-        "rejected_count": sum((item.get("assignment") or {}).get("status") == "rejected" for item in selected),
-        "duplicate_count": sum((item.get("assignment") or {}).get("status") == "duplicate" for item in selected),
-        "unavailable_count": sum(fetch_status(item) == "unavailable" for item in selected),
+        "selected_count": len(marketplace_selected),
+        "fetched_count": sum(fetch_status(item) == "fetched" for item in marketplace_selected),
+        "fetch_failed_count": sum(fetch_status(item) == "failed" for item in marketplace_selected),
+        "cleaned_count": sum(cleaning_status(item) == "cleaned" for item in marketplace_selected),
+        "assigned_count": sum((item.get("assignment") or {}).get("status") == "assigned" for item in marketplace_selected),
+        "unattached_count": sum(fetch_status(item) == "fetched" and (item.get("assignment") or {}).get("status") == "unassigned" for item in marketplace_selected),
+        "used_count": sum(bool((item.get("usage") or {}).get("used_in_final_product")) for item in marketplace_selected),
+        "rejected_count": sum((item.get("assignment") or {}).get("status") == "rejected" for item in marketplace_selected),
+        "duplicate_count": sum((item.get("assignment") or {}).get("status") == "duplicate" for item in marketplace_selected),
+        "unavailable_count": sum(fetch_status(item) == "unavailable" for item in marketplace_selected),
+        "manufacturer_selected_count": len(manufacturer_selected),
+        "manufacturer_fetched_count": sum(fetch_status(item) == "fetched" for item in manufacturer_selected),
+        "manufacturer_assigned_count": sum((item.get("assignment") or {}).get("status") == "assigned" for item in manufacturer_selected),
     }
