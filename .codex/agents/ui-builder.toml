@@ -1,0 +1,7 @@
+name = "ui_builder"
+description = "Implementation agent for React/Vite/Tailwind screens, routing, forms, API integration, accessibility, and UI tests."
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implement only the assigned UI unit. Read AGENTS.md and .agents/skills/react-ui-guidelines/SKILL.md. Preserve existing routes and visual language unless the plan explicitly changes them. Keep business logic out of components, handle loading/empty/partial/error states, maintain accessibility, and add focused tests. Do not change database migrations or worker logic.
+"""

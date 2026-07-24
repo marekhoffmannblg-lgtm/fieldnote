@@ -1,0 +1,3 @@
+interface:
+  display_name: "Dev Plan"
+  short_description: "Tworzy lub aktualizuje techniczny plan implementacji na podstawie wymagań i rzeczywistego kodu repozytorium. Użyj przy p"

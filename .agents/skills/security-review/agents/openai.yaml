@@ -1,0 +1,3 @@
+interface:
+  display_name: "Security Review"
+  short_description: "Audytuje bezpieczeństwo aplikacji React/FastAPI/Supabase oraz pipeline Firecrawl. Użyj przed wdrożeniem, przy zmianach a"

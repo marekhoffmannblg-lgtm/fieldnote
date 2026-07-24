@@ -41,6 +41,7 @@ output/**/visual/
 # Fixtures under fixtures/ are the only test data intended for the public repo.
 input/*
 !input/firecrawl_listings/
+input/firecrawl_listings/*
 !input/firecrawl_listings/.gitkeep
 output/*
 !output/.gitkeep

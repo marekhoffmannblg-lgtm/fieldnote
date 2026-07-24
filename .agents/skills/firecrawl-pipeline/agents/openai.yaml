@@ -1,0 +1,3 @@
+interface:
+  display_name: "Firecrawl Pipeline"
+  short_description: "Projektuje i implementuje pipeline researchu produktów przez Firecrawl oraz ekstrakcję AI z pełnym provenance, snapshota"

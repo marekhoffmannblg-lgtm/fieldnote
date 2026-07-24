@@ -1,0 +1,3 @@
+interface:
+  display_name: "Fastapi Python Guidelines"
+  short_description: "Stosuje wzorce FastAPI/Python dla API, workerów, usług domenowych, repozytoriów, walidacji Pydantic i testów. Użyj przy "

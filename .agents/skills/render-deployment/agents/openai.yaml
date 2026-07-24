@@ -1,0 +1,3 @@
+interface:
+  display_name: "Render Deployment"
+  short_description: "Przygotowuje bezpieczne wdrożenie aplikacji React, FastAPI i workera Python na Render z Supabase jako bazą i storage. Uż"

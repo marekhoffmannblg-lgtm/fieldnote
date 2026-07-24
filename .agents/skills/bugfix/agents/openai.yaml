@@ -1,0 +1,3 @@
+interface:
+  display_name: "Bugfix"
+  short_description: "Prowadzi systematyczną naprawę błędu: reprodukcja, znalezienie przyczyny źródłowej, test regresyjny, minimalna poprawka "

@@ -1,0 +1,15 @@
+interface:
+  display_name: dev brainstorm
+  short_description: Walidacja i doprecyzowanie pomysłu przed planowaniem. Interaktywny
+    dialog, pressure test, eksploracja podejść, requirements doc. Używaj przy "mam
+    pomysł", "zróbmy brainstorm", "co myślisz o", "pomóż mi przemyśleć", "chcę zbudować",
+    niejasny scope, wiele możliwych rozwiązań.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

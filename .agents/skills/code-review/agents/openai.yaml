@@ -1,0 +1,3 @@
+interface:
+  display_name: "Code Review"
+  short_description: "Przegląda diff, branch lub wskazane pliki pod kątem realnych regresji, bezpieczeństwa, błędów logicznych i brakujących t"

@@ -1,0 +1,41 @@
+{
+  "description": "Codex lifecycle hooks for active-task context, compaction handoff, and a lightweight stop quality gate.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/session_context.py\"",
+            "statusMessage": "Loading project and active-task context"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/pre_compact_handoff.py\"",
+            "timeout": 10,
+            "statusMessage": "Preparing active-task handoff"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/stop_quality_gate.py\"",
+            "timeout": 120,
+            "statusMessage": "Running lightweight quality gate"
+          }
+        ]
+      }
+    ]
+  }
+}

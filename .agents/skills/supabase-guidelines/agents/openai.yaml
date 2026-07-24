@@ -1,0 +1,3 @@
+interface:
+  display_name: "Supabase Guidelines"
+  short_description: "Stosuje bezpieczne wzorce Supabase dla PostgreSQL, Auth, Storage, migracji i RLS w aplikacji z FastAPI i React. Użyj prz"

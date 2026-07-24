@@ -1,0 +1,3 @@
+interface:
+  display_name: "React Ui Guidelines"
+  short_description: "Buduje i poprawia frontend React/Vite/Tailwind dla wewnętrznej aplikacji benchmarkowej. Użyj przy ekranach, formularzach"
