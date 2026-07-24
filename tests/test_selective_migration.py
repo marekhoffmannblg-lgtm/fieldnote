@@ -1,11 +1,16 @@
 from __future__ import annotations
+import io
+import json
 import sys
+import types
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from audit_supabase_migration import audit, expected_lionelo_ids
-from migrate_validated_state_to_supabase import load_fixture, migrate, run_migration
+from migrate_validated_state_to_supabase import load_fixture, main, migrate, run_migration
 
 class FakeCatalog:
     def __init__(self): self.brands = {}; self.products = {}
@@ -65,5 +70,46 @@ class SelectiveMigrationTests(unittest.TestCase):
         self.assertEqual(result["rejected"], [{"kind": "migration", "id": "lionelo_product_ids", "reason": "canonical_lionelo_set_mismatch"}])
         self.assertEqual((catalog.brands, catalog.products), ({}, {}))
         self.assertEqual((sources.sources, sources.links, sources.evidence), ({}, {}, {}))
+
+    def test_main_rejects_noncanonical_fixture_before_client_or_repository_construction(self):
+        fixture = load_fixture(ROOT / "fixtures" / "unit3" / "validated_state_v1.json")
+        malicious = json.loads(json.dumps(fixture))
+        for index, product in enumerate(malicious["products"]):
+            if product.get("brand") == "Lionelo":
+                product["product_id"] = f"product:lionelo:synthetic-{index}:"
+
+        class SentinelClient:
+            @classmethod
+            def from_env(cls):
+                raise AssertionError("SupabaseClient.from_env must not run before preflight")
+
+        class SentinelCatalog:
+            def __init__(self, *_args):
+                raise AssertionError("CatalogRepository must not be built before preflight")
+
+        class SentinelSources:
+            def __init__(self, *_args):
+                raise AssertionError("SourceRepository must not be built before preflight")
+
+        fake_client = types.ModuleType("repositories.supabase_client")
+        fake_client.SupabaseClient = SentinelClient
+        fake_catalog = types.ModuleType("repositories.catalog_repository")
+        fake_catalog.CatalogRepository = SentinelCatalog
+        fake_sources = types.ModuleType("repositories.source_repository")
+        fake_sources.SourceRepository = SentinelSources
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "malicious.json"
+            path.write_text(json.dumps(malicious), encoding="utf-8")
+            stdout = io.StringIO()
+            with patch.dict(sys.modules, {
+                "repositories.supabase_client": fake_client,
+                "repositories.catalog_repository": fake_catalog,
+                "repositories.source_repository": fake_sources,
+            }), patch("sys.stdout", stdout):
+                self.assertEqual(main(["--input", str(path)]), 2)
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["status"], "review")
+        self.assertEqual(result["rejected"], [{"kind": "migration", "id": "lionelo_product_ids", "reason": "canonical_lionelo_set_mismatch"}])
+        self.assertEqual((result["products"], result["sources"], result["links"], result["evidence"]), (0, 0, 0, 0))
 
 if __name__ == "__main__": unittest.main()

@@ -31,7 +31,7 @@
 - [x] Implementacja: repozytoria catalog/source/benchmark/job/audit, stdlib klient Supabase i selektywna migracja wersjonowanego fixture z trybem `legacy_readonly`; tryb `supabase` fail-closed wymaga serwerowej konfiguracji.
 - [x] Test: `tests/test_supabase_repositories.py`, `tests/test_selective_migration.py` oraz kontrakty API; 34 Lionelo, brak placeholdera, idempotencja migracji, poprawne links/evidence i odrzucenie złych referencji.
 - [x] Weryfikacja: audit migracji raportuje selekcję/odrzucenia; `/api/products` w trybie `supabase` czyta wstrzyknięte repozytorium bez odwołania do legacy katalogu lub danych generowanych.
-- [ ] Review: poprawka P2 preflightu kanonicznego zbioru jest zaimplementowana; oczekuje ograniczony re-review `review-unit-3.md`. Nie rozpoczynać Unit 4.
+- [ ] Review: poprawka P2 testu ścieżki CLI jest zaimplementowana; oczekuje ograniczony re-review `review-unit-3.md`. Nie rozpoczynać Unit 4.
 
 ## Unit 4 — Logowanie, role i administracja kontami
 
@@ -122,3 +122,4 @@
 - [x] P2: ujednolicono `brand_key` dla nazw wielowyrazowych i dodano regresję.
 - [x] P2: CLI audit nie ufa `expected_lionelo_product_ids` z wejściowego fixture; zawsze weryfikuje kanoniczny zbiór specs.
 - [x] P2: migracja waliduje kanoniczny zbiór Lionelo przed pierwszym upsertem; fixture niezgodny z `data/internal_specs` nie może wykonać zapisu.
+- [x] P2: test CLI z niekanonicznym fixturem potwierdza kod 2 przed utworzeniem `SupabaseClient` i repozytoriów.

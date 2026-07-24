@@ -226,3 +226,48 @@ Ponowiono focused suite (29 PASS), `git diff --check 3d638b7^..3d638b7` (PASS) o
 ## Stan po naprawie P2 preflightu
 
 `_canonical_preflight()` wylicza eligible Lionelo z payloadu i porównuje je z kanonicznym zbiorem `data/internal_specs` przed pierwszym upsertem. `main()` wykonuje tę kontrolę przed tworzeniem klienta Supabase i repozytoriów, a `run_migration()` utrzymuje ją także dla wywołań programistycznych. Regresja z syntetycznymi ID potwierdza status `review`, jawny powód `canonical_lionelo_set_mismatch` oraz brak zapisów w fake catalog/source. Focused suite: 30 PASS; `py_compile`, pełna offline bramka i `git diff --check`: PASS. Gate pozostaje do niezależnego ograniczonego re-review.
+
+## Ograniczony re-review — `4dd87e1^..4dd87e1`
+
+- **Data:** 2026-07-24
+- **Tryb:** ograniczony re-review wyłącznie P2 preflightu kanonicznego zbioru
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `WYMAGA POPRAWEK`
+
+### P2 — Brak wykonawczego testu preflightu ścieżki CLI
+
+- File: `tests/test_selective_migration.py:59-67`
+- Evidence: regresja wywołuje `run_migration()` z fake repositories, ale nie uruchamia `main(["--input", ...])`. Blok preflightu w `main()` jest osobną ścieżką, która ma zagwarantować brak konstrukcji `SupabaseClient` i repozytoriów.
+- Impact: późniejszy refaktor może pominąć preflight w CLI, nadal zachować go w `run_migration()` i pozostawić testy zielone, mimo że błędny input inicjalizuje service-role klienta.
+- Scenario: usunięcie warunku preflightu z `main()` przy pozostawieniu preflightu w `run_migration()`.
+- Recommendation: utworzyć tymczasowy niekanoniczny fixture i testować `main(["--input", path])` z sentinelami dla `SupabaseClient.from_env`, `CatalogRepository` oraz `SourceRepository`; oczekiwany jest kod 2 i zero wywołań sentinelów.
+- Missing test: CLI zwraca kod 2 przed konfiguracją klienta/repozytoriów dla niekanonicznego fixture'u.
+
+## Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | P2 ×1 | 1 | 0 |
+| data_reviewer | PASS | 0 | 0 |
+
+## Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused Unit 3/API | PASS | `fieldnote-api/.venv/bin/python -m unittest tests/test_selective_migration.py tests/test_supabase_repositories.py tests/test_fieldnote_api_contracts.py` — 30 tests |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` — backend, checkery i frontend typecheck/test/build |
+| Czystość diffu | PASS | `git diff --check 4dd87e1^..4dd87e1` |
+
+## Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Unit 3 pozostaje nieukończony; Unit 4 nie został rozpoczęty.
+
+## Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 3` — napraw wyłącznie P2 wykonawczego testu preflightu CLI.
+
+## Stan po naprawie P2 testu CLI
+
+Dodano deterministyczny test `main(["--input", path])` z tymczasowym niekanonicznym fixturem. Podstawione moduły repozytoriów mają sentinele, które przerwałyby test przy konstrukcji `SupabaseClient` lub repozytoriów; test potwierdza kod 2, raport `review`, `canonical_lionelo_set_mismatch` i zerowe liczniki przed każdą mutacją. Focused suite: 31 PASS; `py_compile`, pełna offline bramka i `git diff --check`: PASS. Gate pozostaje do niezależnego ograniczonego re-review.
