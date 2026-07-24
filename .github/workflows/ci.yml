@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install Python dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r fieldnote-api/requirements.txt
       - name: Install frontend dependencies
         working-directory: fieldnote-frontend
         run: corepack enable && pnpm install --frozen-lockfile

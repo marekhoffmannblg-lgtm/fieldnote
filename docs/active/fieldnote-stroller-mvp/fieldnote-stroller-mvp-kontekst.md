@@ -44,6 +44,10 @@
 - `python3 -m unittest tests/test_repository_hygiene.py`: PASS (2 testy).
 - `bash scripts/check_fieldnote.sh`: PASS. Backend unit/integration/fixture tests, checkery P0/P1, dry-run provenance i frontend typecheck/test/build przeszły bez Firecrawl/OpenAI.
 - Build Vite zgłosił nieblokujące ostrzeżenie o chunku większym niż 500 kB; nie jest to część Unit 1.
+- Review Unit 1 (`298f40b..c75a0c8`): correctness_reviewer, security_reviewer i test_reviewer niezależnie sprawdzili zakres; UI/data review nie były wymagane. Ponowione `python3 -m unittest tests/test_repository_hygiene.py` i `bash scripts/check_fieldnote.sh` przeszły.
+- Gate review: **WYMAGA POPRAWEK** — 0 P1, 2 P2, 0 P3. P2: CI nie instaluje zależności `fieldnote-api` na czystym runnerze; hygiene test czyta worktree zamiast staged blobu. Raport: `review-unit-1.md`.
+- Naprawa P2: `.github/workflows/ci.yml` instaluje także `fieldnote-api/requirements.txt`; `tests/test_repository_hygiene.py` czyta staged blob przez `git show :<path>`. Dodano regresje dla staged sekretu z bezpiecznym worktree oraz kontrakt CI dla zależności API.
+- Po naprawie: `python3 -m unittest tests/test_repository_hygiene.py` PASS (4 testy), `bash scripts/check_fieldnote.sh` PASS bez Firecrawl/OpenAI. Oczekuje ograniczony re-review wyłącznie tych zmian.
 
 ## Blokery i ryzyka
 
@@ -54,8 +58,8 @@
 ## Przekazanie
 
 - **Bieżący unit:** Unit 1 — Utworzyć bezpieczny baseline repozytorium i CI
-- **Status:** completed; oczekuje na `dev-docs-review`
+- **Status:** completed; P2 naprawione, oczekuje na ograniczony re-review
 - **Pliki w toku:** `.gitignore`, trzy `.env.example`, `.github/`, `docs/SECURITY_BASELINE.md`, `scripts/check_fieldnote.sh`, `tests/test_repository_hygiene.py`, `docs/active/fieldnote-stroller-mvp/`
 - **Ostatnie testy:** hygiene test PASS; `scripts/check_fieldnote.sh` PASS
-- **Bloker:** brak
-- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 1`
+- **Bloker:** brak techniczny; gate re-review jest wymagany przed rozpoczęciem Unit 2
+- **Następny krok:** ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 1`

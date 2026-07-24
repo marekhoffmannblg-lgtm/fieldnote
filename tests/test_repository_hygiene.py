@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -32,11 +33,30 @@ SECRET_PATTERNS = (
 )
 
 
-def tracked_paths() -> list[str]:
+def tracked_paths(root: Path = ROOT) -> list[str]:
     result = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True
+        ["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True
     )
     return [item.decode("utf-8") for item in result.stdout.split(b"\0") if item]
+
+
+def indexed_text(relative: str, root: Path = ROOT) -> str:
+    result = subprocess.run(
+        ["git", "show", f":{relative}"], cwd=root, check=True, capture_output=True
+    )
+    return result.stdout.decode("utf-8")
+
+
+def secret_violations(root: Path = ROOT) -> list[str]:
+    violations: list[str] = []
+    for relative in tracked_paths(root):
+        try:
+            content = indexed_text(relative, root)
+        except (subprocess.CalledProcessError, UnicodeDecodeError):
+            continue
+        if any(pattern.search(content) for pattern in SECRET_PATTERNS):
+            violations.append(relative)
+    return violations
 
 
 class RepositoryHygieneTests(unittest.TestCase):
@@ -57,16 +77,26 @@ class RepositoryHygieneTests(unittest.TestCase):
         self.assertEqual(violations, [], f"tracked local artifacts: {violations}")
 
     def test_tracked_text_does_not_contain_secret_shaped_values(self) -> None:
-        violations: list[str] = []
-        for relative in tracked_paths():
-            path = ROOT / relative
-            try:
-                content = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            if any(pattern.search(content) for pattern in SECRET_PATTERNS):
-                violations.append(relative)
+        violations = secret_violations()
         self.assertEqual(violations, [], f"secret-shaped values in tracked files: {violations}")
+
+    def test_staged_secret_is_detected_when_worktree_is_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tracked = root / "example.env"
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            tracked.write_text("OPENAI_API_KEY=sk-abcdefghijklmnopqrst\\n", encoding="utf-8")
+            subprocess.run(["git", "add", "example.env"], cwd=root, check=True)
+            tracked.write_text("OPENAI_API_KEY=\\n", encoding="utf-8")
+
+            self.assertEqual(secret_violations(root), ["example.env"])
+
+    def test_ci_offline_gate_installs_api_dependencies(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "python -m pip install -r requirements.txt -r fieldnote-api/requirements.txt",
+            workflow,
+        )
 
 
 if __name__ == "__main__":
