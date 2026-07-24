@@ -250,3 +250,73 @@ Brak odchyleń funkcjonalnych. Nie rozpoczęto Unit 3.
 ## Status wykonania ostatniego P2
 
 Executor zmienił wyłącznie `tests/test_supabase_runtime_contract.py`: JWT analyst otrzymuje odmowę zapisu `brands` przez PostgREST, a JWT admin wykonuje idempotentny UPSERT tego samego fixture po `brand_key`. Wyniki: runtime integration 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); pełna offline bramka PASS; `git diff --check` PASS. Ten wpis nie jest re-review — gate pozostaje **WYMAGA POPRAWEK** do czasu ograniczonego review poprawki.
+
+---
+
+## Ograniczony re-review — `39c5fdd^..39c5fdd`
+
+### Kryterium i zakres
+
+Re-review obejmuje wyłącznie wykonawczy zapis katalogu `brands` przez PostgREST: odmowę dla analyst i uprawniony UPSERT dla admina. Zmiana kodowa jest ograniczona do `tests/test_supabase_runtime_contract.py`; nie obejmuje migracji, modeli ani Unit 3.
+
+### Skonsolidowane findings
+
+#### P1 — blocking
+
+Brak.
+
+#### P2 — important
+
+##### P2 — Test nie weryfikuje idempotencji adminowego zapisu katalogu
+
+- **File:** `tests/test_supabase_runtime_contract.py:279-288`
+- **Evidence:** adminowy POST/UPSERT jest wykonywany tylko raz; test nie wysyła drugiego identycznego requestu ani nie potwierdza, że istnieje dokładnie jeden `brand_key`.
+- **Impact:** regresja obsługi `on_conflict` lub nagłówka upsert może złamać ponowiony zapis katalogu, mimo zielonego testu.
+- **Scenario:** drugi POST po zmianie `Prefer: resolution=merge-duplicates` zwraca konflikt; obecny test nadal przechodzi.
+- **Recommendation:** wykonać drugi identyczny POST admina i potwierdzić sukces obu requestów oraz jedną pozycję fixture.
+- **Missing test:** dwa POST-y dla tego samego `brand_key` przez `/rest/v1/brands`, oba udane, końcowo liczność równa 1.
+
+#### P3 — non-blocking
+
+Brak.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | P2 | 1 | 0 |
+
+`data_reviewer` nie był wymagany: diff nie zmienia migracji, modeli, persistence, importu, scoringu, kolejki ani workera.
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Kontrakty schema/RLS/runtime offline | PASS | 14 testów, 5 opt-in skipped |
+| `FIELDNOTE_SUPABASE_INTEGRATION=1 fieldnote-api/.venv/bin/python -m unittest tests/test_supabase_runtime_contract.py` | PASS | 5 testów |
+| `bash scripts/check_fieldnote.sh` | PASS | backend, checkery i frontend typecheck/test/build |
+| `git diff --check 39c5fdd^ 39c5fdd` | PASS | brak błędów whitespace |
+
+### Bezpieczeństwo
+
+Security review PASS. Test nie wprowadza nowego grantu ani sekretu; nadal sprawdza odmowę zapisu katalogu dla analyst i uprawnienie admina przez PostgREST.
+
+### Odchylenia od planu
+
+Brak odchyleń funkcjonalnych. Nie rozpoczęto Unit 3.
+
+### Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Unit 2 nie jest ukończony.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 2` — napraw wyłącznie P2: wykonaj drugi adminowy POST/UPSERT `brands` przez PostgREST i potwierdź jedną pozycję fixture; następnie ponów ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 2`.
+
+---
+
+## Status wykonania ostatniego P2 po re-review
+
+Executor zmienił wyłącznie `tests/test_supabase_runtime_contract.py`: po pierwszym udanym adminowym UPSERT `brands` wykonuje drugi identyczny request i przez adminowy GET PostgREST potwierdza dokładnie jedną pozycję `runtime-admin-catalog`. Odmowa zapisu dla analyst pozostaje. Wyniki: runtime integration 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); pełna offline bramka PASS; `git diff --check` PASS. Ten wpis nie jest re-review — gate pozostaje **WYMAGA POPRAWEK** do czasu ograniczonego review poprawki.

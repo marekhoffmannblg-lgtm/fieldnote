@@ -108,3 +108,4 @@
 - [x] P2: dodano wykonawcze requesty PostgREST/API dla anon, viewer, analyst i admin na tabelach RLS (obok helperów/Storage).
 - [x] P2: seed runtime test porównuje stabilne UUID dev i E2E po drugim uruchomieniu.
 - [x] P2: dodano wykonawczy zapis katalogu przez PostgREST jako admin oraz odmowę analogicznej akcji dla analyst.
+- [x] P2: wykonano dwukrotny adminowy POST/UPSERT `brands` przez PostgREST i potwierdzono stabilną pojedynczą pozycję fixture.

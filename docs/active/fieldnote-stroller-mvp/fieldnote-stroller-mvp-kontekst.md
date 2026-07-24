@@ -68,6 +68,10 @@
 - Weryfikacja re-review: kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), runtime Supabase 5 PASS, pełna offline bramka PASS i `git diff --check eaa580e^ eaa580e` PASS. Gate Unit 2 pozostaje **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3.
 - Naprawiono ostatni P2: test PostgREST wykonuje teraz odmowę `POST /brands` dla analyst oraz idempotentny UPSERT identycznego fixture przez admina. Wykonano tylko zmianę runtime contractu; nie zmieniano migracji ani nie rozpoczęto Unit 3.
 - Po naprawie runtime contract PASS (5 testów), kontrakty schema/RLS/runtime offline PASS (14 testów, 5 opt-in skipped), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje wyłącznie ograniczony re-review tej poprawki.
+- Ograniczony re-review `39c5fdd^..39c5fdd` przez correctness, security i tests: correctness/security PASS; tests zgłosił P2. Pierwszy adminowy UPSERT katalogu jest pokryty, ale test nie wykonuje drugiego requestu ani nie sprawdza jednej trwałej pozycji fixture, więc nie dowodzi wykonawczo idempotencji.
+- Weryfikacja re-review: runtime Supabase 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka PASS i `git diff --check 39c5fdd^ 39c5fdd` PASS. Gate Unit 2 pozostaje **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3.
+- Naprawiono ostatni P2 wyłącznie w runtime contract: admin wykonuje drugi identyczny POST/UPSERT `brands`, a adminowy GET przez PostgREST potwierdza dokładnie jeden rekord `runtime-admin-catalog`. Odmowa dla analyst pozostaje.
+- Po naprawie runtime contract PASS (5 testów), kontrakty schema/RLS/runtime offline PASS (14 testów, 5 opt-in skipped), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje wyłącznie ograniczony re-review tej poprawki.
 
 ## Blokery i ryzyka
 
@@ -82,4 +86,4 @@
 - **Pliki w toku:** `tests/test_supabase_runtime_contract.py`, `review-unit-2.md` i aktywne dokumenty Unit 2.
 - **Ostatnie testy:** runtime test 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); pełny offline gate PASS; `git diff --check` PASS.
 - **Bloker:** oczekujący ograniczony re-review ostatniej poprawki P2; nie rozpoczynać Unit 3.
-- **Następny krok:** ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 2` wyłącznie dla adminowego testu katalogu.
+- **Następny krok:** ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 2` wyłącznie dla idempotencji testu katalogu.
