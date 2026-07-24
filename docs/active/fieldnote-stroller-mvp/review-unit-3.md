@@ -158,3 +158,26 @@ Ponowiono focused suite (27 PASS), `git diff --check c8ca42c^..c8ca42c` (PASS) i
 ## Stan po naprawie ograniczonego re-review
 
 Naprawiono wyłącznie findings z powyższej sekcji: fixture ma realny expected set 34 Lionelo ze śledzonych specyfikacji; audit porównuje set, a nie samą liczność; zapis Supabase przez publiczny endpoint jest wyłączony do Unit 4; `brand_key` jest wspólny dla repozytorium. Focused suite: 29 PASS; JSON fixture, `git diff --check` i pełna offline bramka: PASS. Gate pozostaje do niezależnego ograniczonego re-review.
+
+## Ograniczony re-review — `3d638b7^..3d638b7`
+
+- **Data:** 2026-07-24
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `WYMAGA POPRAWEK`
+
+Correctness, security i tests: PASS. Data review potwierdził realną zgodność obecnego fixture'u ze śledzonymi specyfikacjami (34/34), ale wykrył jeden finding:
+
+### P2 — CLI audit ufa deklarowanej liście ID z wejściowego fixture
+
+- File: `scripts/migrate_validated_state_to_supabase.py:64-66`
+- Evidence: `run_migration()` przekazuje `expected_lionelo_product_ids` z dowolnego payloadu do `audit()`, zastępując kanoniczny zbiór z `data/internal_specs`.
+- Impact: fixture z 34 syntetycznymi ID i własną zgodną listą może uzyskać PASS.
+- Scenario: operator uruchamia CLI z `--input` wskazującym taki fixture.
+- Recommendation: CLI ma zawsze używać kanonicznego zbioru specs albo odrzucać mismatch deklaracji fixture względem specs.
+- Missing test: syntetyczny fixture z własną listą expected zwraca `review`.
+
+Ponowiono focused suite (29 PASS), `git diff --check 3d638b7^..3d638b7` (PASS) oraz pełną offline bramkę (PASS). **Gate: WYMAGA POPRAWEK — 0 P1, 1 P2, 0 P3.**
+
+## Stan po naprawie P2 CLI
+
+`run_migration()` nie przekazuje już deklaracji expected z inputu do audytu; audit zawsze pobiera kanoniczny set śledzonych specyfikacji. Regresja z 34 syntetycznymi ID i własną deklaracją fixture kończy się `review`. Focused suite: 30 PASS; pełna offline bramka i `git diff --check`: PASS. Gate pozostaje do ograniczonego re-review.

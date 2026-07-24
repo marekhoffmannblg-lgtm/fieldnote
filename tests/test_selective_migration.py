@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from audit_supabase_migration import audit
+from audit_supabase_migration import audit, expected_lionelo_ids
 from migrate_validated_state_to_supabase import load_fixture, migrate, run_migration
 
 class FakeCatalog:
@@ -33,7 +33,8 @@ class SelectiveMigrationTests(unittest.TestCase):
         first = migrate(fixture, catalog, sources)
         second = migrate(fixture, catalog, sources)
         self.assertEqual(len(first.lionelo_ids), 34)
-        self.assertEqual(audit(first, set(fixture["expected_lionelo_product_ids"]))["status"], "pass")
+        self.assertEqual(set(fixture["expected_lionelo_product_ids"]), expected_lionelo_ids())
+        self.assertEqual(audit(first)["status"], "pass")
         self.assertEqual(len(catalog.products), 35)
         self.assertEqual(len(sources.links), 1)
         self.assertEqual(len(sources.evidence), 1)
@@ -54,5 +55,10 @@ class SelectiveMigrationTests(unittest.TestCase):
         result = run_migration(load_fixture(ROOT / "fixtures" / "unit3" / "validated_state_v1.json"), FakeCatalog(), FakeSources())
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["lionelo_count"], 34)
+
+    def test_run_migration_rejects_input_that_lies_about_expected_ids(self):
+        malicious = payload()
+        malicious["expected_lionelo_product_ids"] = [item["product_id"] for item in malicious["products"] if item["brand"] == "Lionelo"]
+        self.assertEqual(run_migration(malicious, FakeCatalog(), FakeSources())["status"], "review")
 
 if __name__ == "__main__": unittest.main()
