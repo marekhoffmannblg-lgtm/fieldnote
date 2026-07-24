@@ -5,9 +5,9 @@
 
 ## Unit 1 — Bezpieczny baseline repozytorium i CI
 
-- [ ] Implementacja: `.gitignore`, trzy `.env.example`, GitHub CI/Dependabot, `docs/SECURITY_BASELINE.md` oraz offline check bez sekretów, lokalnych danych, snapshotów, runów i środowisk w indeksie.
-- [ ] Test: `tests/test_repository_hygiene.py` odrzuca śledzone `.env`, klucze, bazy, produkcyjne snapshoty i katalogi środowisk.
-- [ ] Weryfikacja: `scripts/check_fieldnote.sh` przechodzi bez Firecrawl/OpenAI; hygiene test nie znajduje sekretów ani artefaktów w indeksie.
+- [x] Implementacja: `.gitignore`, trzy `.env.example`, GitHub CI/Dependabot, `docs/SECURITY_BASELINE.md` oraz offline check bez sekretów, lokalnych danych, snapshotów, runów i środowisk w indeksie.
+- [x] Test: `tests/test_repository_hygiene.py` odrzuca śledzone `.env`, klucze, bazy, produkcyjne snapshoty i katalogi środowisk.
+- [x] Weryfikacja: `scripts/check_fieldnote.sh` przechodzi bez Firecrawl/OpenAI; hygiene test nie znajduje sekretów ani artefaktów w indeksie.
 - [ ] Operator: właściciel tworzy prywatne repo GitHub i rotuje klucze, które mogły znaleźć się w archiwum lub lokalnym env.
 - [ ] Review: brak otwartych P1/P2.
 

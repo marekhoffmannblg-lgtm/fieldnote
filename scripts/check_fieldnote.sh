@@ -7,6 +7,9 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then PYTHON_BIN="python3"; fi
 
 stage() { printf '\n[FIELDNOTE CHECK] %s\n' "$1"; }
 
+stage "Repository hygiene: tracked files contain no secrets or local artifacts"
+"${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_repository_hygiene.py'
+
 stage "Python syntax and imports"
 "${PYTHON_BIN}" -m py_compile "${ROOT}/fieldnote-api/app.py" "${ROOT}/fieldnote-api/contracts.py" "${ROOT}/fieldnote-api/repositories/snapshot_repository.py" "${ROOT}/fieldnote-api/services/product_service.py" "${ROOT}/fieldnote-api/routers/health.py" "${ROOT}/scripts/run_manifest.py" "${ROOT}/scripts/source_lifecycle.py" "${ROOT}/scripts/provenance_v1.py" "${ROOT}/scripts/migrate_provenance_v1.py" "${ROOT}/scripts/source_adapters.py" "${ROOT}/scripts/manufacturer_pipeline.py"
 

@@ -1,13 +1,27 @@
-fieldnote-api/.env*
-fieldnote-frontend/.env.local
+# Local environment files may contain credentials. Examples are intentionally
+# tracked so a fresh checkout can be configured without copying a secret.
 .env
+.env.*
+!.env.example
+fieldnote-api/.env*
+!fieldnote-api/.env.example
+fieldnote-frontend/.env*
+!fieldnote-frontend/.env.example
 .venv/
 venv/
 node_modules/
 .pnpm-store/
 .vite/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
 **/__pycache__/
 *.pyc
+*.pyo
+*.sqlite
+*.sqlite3
+*.db
 .DS_Store
 *.zip
 fieldnote-frontend/dist/
@@ -16,6 +30,12 @@ fieldnote-frontend/build/
 /tmp/
 output/runs/*/work/
 *.zip
+
+# Derived production visual artifacts are local cache only.
+input/**/visual/
+output/**/visual/
+**/full_page.webp
+**/sections/*.webp
 
 # Local market data, fetched snapshots, queues and generated product views.
 # Fixtures under fixtures/ are the only test data intended for the public repo.
@@ -30,3 +50,10 @@ fieldnote-api/runs/*
 !fieldnote-api/runs/.gitkeep
 fieldnote-frontend/src/data/generated/*
 !fieldnote-frontend/src/data/generated/.gitkeep
+.codex/cache/
+.codex/rollout*.jsonl
+.codex-starter-backup/
+__pycache__/
+.ruff_cache/
+dist/
+build/

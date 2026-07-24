@@ -1,7 +1,7 @@
 # FIELDNOTE Stroller MVP — kontekst
 
 - **Branch:** `main` (nieprzełączony z powodu brudnego drzewa roboczego)
-- **Ostatni commit:** `bb05e1b6341f78563292ba8d1be790fb5c0eae4a — Initial FIELDNOTE project`
+- **Ostatni commit przed Unit 1:** `298f40b92953baa23389c49291bf537c56f9d589 — docs: initialize fieldnote stroller mvp task`
 - **Ostatnia aktualizacja:** 2026-07-24
 
 ## Źródła
@@ -14,7 +14,7 @@
 - Drzewo robocze jest obszernie zmodyfikowane i zawiera zarówno zmienione pliki śledzone, jak i nieśledzone artefakty oraz kod projektu. Nie należy go resetować, czyścić ani przełączać brancha podczas inicjalizacji.
 - Istnieje lokalny pipeline Python, FastAPI, frontend React/Vite, provenance, quality gate, retry i historia runów. Kanoniczny entrypoint researchu pozostaje `scripts/run_model_research_pipeline.py`.
 - Repozytoryjny starter Codex v2 jest zainstalowany. Wprowadza workflow `dev-docs`; jego konfiguracja nie wykonuje pracy aplikacyjnej podczas tej inicjalizacji.
-- Nie utworzono commita dla tego aktywnego zadania, ponieważ bezpieczne oddzielenie dokumentów od istniejącego, nieuporządkowanego stanu wymaga najpierw przeglądu Unit 1.
+- Aktywne zadanie jest zapisane w osobnym commicie. Drzewo pozostaje brudne, dlatego Unit 1 stage'uje wyłącznie własne pliki i pojedynczy hunk hygiene w `scripts/check_fieldnote.sh`.
 
 ## Potwierdzone wzorce i ważne pliki
 
@@ -40,8 +40,10 @@
 
 ## Wyniki wykonania i testów
 
-- Inicjalizacja `dev-docs` nie wykonuje testów ani Implementation Unit.
-- Przed oznaczeniem Unit 1 jako ukończonego należy uruchomić wskazane przez plan testy repo hygiene i pełny offline gate w aktualnym stanie.
+- Unit 1 dodał przykładowe pliki środowiskowe, repo hygiene test, CI, Dependabot i security baseline. Pliki lokalnych env, wejść, outputów, runów i artefaktów są ignorowane; istniejące lokalne pliki nie zostały usunięte.
+- `python3 -m unittest tests/test_repository_hygiene.py`: PASS (2 testy).
+- `bash scripts/check_fieldnote.sh`: PASS. Backend unit/integration/fixture tests, checkery P0/P1, dry-run provenance i frontend typecheck/test/build przeszły bez Firecrawl/OpenAI.
+- Build Vite zgłosił nieblokujące ostrzeżenie o chunku większym niż 500 kB; nie jest to część Unit 1.
 
 ## Blokery i ryzyka
 
@@ -52,8 +54,8 @@
 ## Przekazanie
 
 - **Bieżący unit:** Unit 1 — Utworzyć bezpieczny baseline repozytorium i CI
-- **Status:** pending
-- **Pliki w toku:** `docs/active/fieldnote-stroller-mvp/`
-- **Ostatnie testy:** nie uruchamiano w ramach inicjalizacji
+- **Status:** completed; oczekuje na `dev-docs-review`
+- **Pliki w toku:** `.gitignore`, trzy `.env.example`, `.github/`, `docs/SECURITY_BASELINE.md`, `scripts/check_fieldnote.sh`, `tests/test_repository_hygiene.py`, `docs/active/fieldnote-stroller-mvp/`
+- **Ostatnie testy:** hygiene test PASS; `scripts/check_fieldnote.sh` PASS
 - **Bloker:** brak
-- **Następny krok:** `$dev-docs-execute docs/active/fieldnote-stroller-mvp`
+- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 1`
