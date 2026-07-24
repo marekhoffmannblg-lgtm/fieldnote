@@ -60,18 +60,22 @@
 - Gate Unit 2: **WYMAGA POPRAWEK** — 0 P1, 4 P2, 0 P3. Zaakceptowano: spoofing `audit_events.actor_id`, niespójny link evidence/provenance, brak wykonawczych testów RLS/Storage oraz brak wykonawczego testu idempotencji obu seedów. Raport: `review-unit-2.md`.
 - Naprawa czterech P2 Unit 2: trigger `fieldnote_set_audit_actor` odrzuca cudzy `actor_id` i przypisuje subject JWT; trigger `fieldnote_validate_evidence_link` odrzuca niespójny product/source/link. Dodano opt-in test wykonawczy `tests/test_supabase_runtime_contract.py`; korzysta wyłącznie z lokalnego `supabase db query`, krótkotrwałych testowych użytkowników i JWT podpisanych lokalnym sekretem pobranym w pamięci przez CLI, bez sekretów w repozytorium.
 - Po poprawkach `supabase db reset --local --yes` PASS; `FIELDNOTE_SUPABASE_INTEGRATION=1 fieldnote-api/.venv/bin/python -m unittest tests/test_supabase_runtime_contract.py` PASS (4). Kontrakty schema/RLS przechodzą (9 testów), pełny `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
+- Ograniczony re-review `53af30a..c436472` przez correctness, security, tests i data: spoofing aktora audytu jest zamknięty, ale gate pozostaje **WYMAGA POPRAWEK** (0 P1, 3 P2, 0 P3). P2: update użytego linku rozjeżdża evidence, runtime test nie wykonuje RLS tabel przez anon/API, test seedów nie porównuje stabilnych UUID. Raport: `review-unit-2.md`.
+- Re-review uruchomił kontrakty schema/RLS (9 PASS), runtime contract (4 PASS) oraz `git diff --check 53af30a..c436472` (PASS). Nie wykonano Unit 3.
+- Naprawiono trzy pozostałe P2 z re-review: trigger `fieldnote_prevent_link_provenance_rewrite` blokuje zmianę produktu lub źródła linku, gdy wskazuje go evidence; test wykonawczy wysyła requesty PostgREST dla anon/viewer/analyst/admin; seed test porównuje UUID brandów i produktów dev/E2E po drugim uruchomieniu. Dla PostgREST dodano niezbędne granty roli `authenticated`; RLS pozostaje granicą autoryzacji, a `anon` nie ma grantów tabel.
+- Po naprawach `supabase db reset --local --yes` PASS; runtime contract PASS (5 testów); kontrakty schema/RLS i runtime offline PASS (14 testów, 5 opt-in skipped); pełna offline bramka `bash scripts/check_fieldnote.sh` PASS; `git diff --check` PASS.
 
 ## Blokery i ryzyka
 
-- Runtime Supabase działa; wszystkie cztery P2 Unit 2 są naprawione i oczekują tylko ograniczonego re-review.
+- Runtime Supabase działa; trzy P2 z ograniczonego re-review zostały naprawione i oczekują na ograniczony re-review.
 - Istniejące lokalne dane, outputy i środowiska nie mogą trafić do repo.
 - Live provider calls i koszty są poza automatyczną weryfikacją.
 
 ## Przekazanie
 
 - **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
-- **Status:** partial — poprawki i wszystkie testy są zielone, lecz Unit 2 nie jest ukończony do czasu ograniczonego re-review.
-- **Pliki w toku:** migracje `202607230002`/`202607230005`, kontrakty schema/RLS/runtime i aktywne dokumenty Unit 2.
-- **Ostatnie testy:** `supabase db reset` PASS; runtime test 4 PASS; kontrakty schema/RLS 9 PASS; pełny offline gate PASS.
-- **Bloker:** ograniczony re-review czterech zamkniętych P2; nie rozpoczynać Unit 3.
-- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 2` w trybie ograniczonym wyłącznie dla tych poprawek.
+- **Status:** partial — naprawiono trzy P2; Unit 2 oczekuje na ograniczony re-review.
+- **Pliki w toku:** migracje `202607230002`/`202607230005`, kontrakty schema/RLS/runtime, `review-unit-2.md` i aktywne dokumenty Unit 2.
+- **Ostatnie testy:** runtime test 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); `git diff --check` PASS.
+- **Bloker:** oczekujący ograniczony re-review trzech napraw P2; nie rozpoczynać Unit 3.
+- **Następny krok:** ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 2` wyłącznie dla trzech napraw P2.

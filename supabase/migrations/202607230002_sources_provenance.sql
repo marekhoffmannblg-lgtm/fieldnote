@@ -102,6 +102,29 @@ before insert or update of product_id, source_id, product_source_link_id
 on public.evidence_items
 for each row execute function public.fieldnote_validate_evidence_link();
 
+create or replace function public.fieldnote_prevent_link_provenance_rewrite()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (new.product_id is distinct from old.product_id or new.source_id is distinct from old.source_id)
+     and exists (
+       select 1 from public.evidence_items
+        where product_source_link_id = old.link_id
+     ) then
+    raise exception 'a product_source_link with evidence cannot change product or source'
+      using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger fieldnote_prevent_link_provenance_rewrite
+before update of product_id, source_id on public.product_source_links
+for each row execute function public.fieldnote_prevent_link_provenance_rewrite();
+
 create table public.attribute_values (
   id uuid primary key default gen_random_uuid(),
   product_id text not null references public.products(product_id) on delete cascade,

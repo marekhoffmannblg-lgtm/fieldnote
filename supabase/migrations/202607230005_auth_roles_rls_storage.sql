@@ -64,6 +64,13 @@ grant execute on function public.fieldnote_can_read() to authenticated;
 grant execute on function public.fieldnote_can_write_data() to authenticated;
 grant execute on function public.fieldnote_is_admin() to authenticated;
 
+-- PostgREST reaches public tables as the authenticated database role. Table
+-- privileges permit that role to reach RLS; the policies below remain the
+-- authorization boundary. Anon gets schema usage only and no table grant.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
 alter table public.brands enable row level security;
 alter table public.products enable row level security;
 alter table public.product_aliases enable row level security;

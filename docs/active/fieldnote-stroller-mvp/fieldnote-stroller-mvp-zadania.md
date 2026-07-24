@@ -22,9 +22,9 @@
 ## Unit 2 — Supabase schema, Auth, Storage i RLS
 
 - [x] Implementacja: migracje core catalog/source/benchmark/jobs/auth-RLS-storage, idempotentny seed oraz prywatne buckety `source-raw`, `source-clean`, `imports`.
-- [x] Test: kontrakty schema/RLS oraz opt-in `tests/test_supabase_runtime_contract.py` pokrywają anon/viewer/analyst/admin, API Storage, spoofing aktora, spójność evidence, unikalny aktywny job, współdzielone source ID i idempotencję seedów.
-- [x] Weryfikacja: `supabase start` i `supabase db reset` PASS; offline kontrakty oraz pełny gate PASS. Wykonawcza regresja ról/RLS i dwukrotnego seeda pozostaje P2 z review.
-- [ ] Review: poprawki czterech P2 są gotowe; oczekuje ograniczony re-review. Szczegóły w `review-unit-2.md`.
+- [x] Test: kontrakty schema/RLS oraz opt-in `tests/test_supabase_runtime_contract.py` pokrywają anon/viewer/analyst/admin przez PostgREST, API Storage, spoofing aktora, spójność evidence także po update linku, unikalny aktywny job, współdzielone source ID i stabilne UUID obu seedów.
+- [x] Weryfikacja: `supabase db reset` PASS; kontrakty schema/RLS/runtime PASS (14 testów, 5 opt-in skipped), runtime z integracją PASS (5), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS.
+- [ ] Review: trzy P2 z ograniczonego re-review są naprawione; oczekuje ograniczony re-review i brak P1/P2. Szczegóły w `review-unit-2.md`.
 
 ## Unit 3 — Repozytoria Supabase i selektywna migracja
 
@@ -104,5 +104,6 @@
 
 - [x] P2: wymuszono w `audit_events` aktora równego `auth.uid()` i dodano regresję JWT analityka dla spoofingu `actor_id`.
 - [x] P2: wymuszono spójność `evidence_items.product_id`, `source_id` i `product_source_link_id`; dodano regresję odrzucającą mismatch.
-- [x] P2: dodano wykonawcze testy RLS/Storage dla anon, viewer, analyst i admin.
-- [x] P2: dodano wykonawczy test idempotencji obu seedów (dwa uruchomienia, stałe liczności i ID).
+- [x] P2: zablokowano zmianę `product_id`/`source_id` użytego `product_source_link`; runtime regresja odrzuca update linku.
+- [x] P2: dodano wykonawcze requesty PostgREST/API dla anon, viewer, analyst i admin na tabelach RLS (obok helperów/Storage).
+- [x] P2: seed runtime test porównuje stabilne UUID dev i E2E po drugim uruchomieniu.

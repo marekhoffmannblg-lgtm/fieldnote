@@ -47,6 +47,8 @@ class SupabaseSchemaContractTests(unittest.TestCase):
         self.assertIn("group_key text not null unique", catalog)
         self.assertIn("source_id text not null unique", provenance)
         self.assertIn("unique (product_id, source_id)", provenance)
+        self.assertIn("fieldnote_validate_evidence_link", provenance)
+        self.assertIn("fieldnote_prevent_link_provenance_rewrite", provenance)
         self.assertIn("unique index research_jobs_one_active_per_product", jobs)
         self.assertIn("where status in ('queued', 'leased', 'running')", jobs)
 

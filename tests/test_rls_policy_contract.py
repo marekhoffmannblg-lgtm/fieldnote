@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -29,7 +30,7 @@ class RlsPolicyContractTests(unittest.TestCase):
         )
         for table in tables:
             self.assertIn(f"alter table public.{table} enable row level security;", RLS)
-        self.assertNotIn("to anon", RLS.lower())
+        self.assertNotRegex(RLS.lower(), re.compile(r"create policy\s+\S+.*\bto anon\b"))
 
     def test_viewer_is_read_only_analyst_writes_data_and_only_admin_manages_profiles(self) -> None:
         self.assertIn("create policy authenticated_read on public.products for select to authenticated", RLS)

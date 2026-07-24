@@ -1,8 +1,8 @@
 # Review — Unit 2: Supabase schema, Auth, Storage i RLS
 
 - **Data:** 2026-07-24
-- **Zakres diffu:** `807e81bd9176e274925ce3d1feac67fdb3dc9447..53af30a435be85d19f1dce3a01776e13b55be1b3`
-- **Tryb:** `pełny review`
+- **Zakres diffu:** pełny review `807e81b..53af30a`; ograniczony re-review `53af30a435be85d19f1dce3a01776e13b55be1b3..c436472`
+- **Tryb:** `re-review` (zakres ograniczony do czterech P2)
 - **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
 - **Gate:** `WYMAGA POPRAWEK`
 
@@ -103,3 +103,75 @@ Brak odchyleń funkcjonalnych. Nie uruchomiono Unit 3.
 ## Rekomendowany następny krok
 
 `$dev-docs-execute docs/active/fieldnote-stroller-mvp 2` — napraw wyłącznie cztery zaakceptowane P2 z tego raportu; następnie wykonaj ograniczony re-review Unit 2.
+
+---
+
+## Ograniczony re-review — `53af30a..c436472`
+
+### Zakres i zweryfikowane poprawki
+
+Re-review obejmuje wyłącznie naprawy czterech P2: trigger aktora audytu, trigger
+spójności evidence, wykonawcze testy ról/RLS/Storage oraz wykonawczy test seedów.
+Nie obejmuje Unit 3 ani innych fragmentów aplikacji.
+
+### Skonsolidowane findings re-review
+
+#### P2 — Aktualizacja użytego linku provenance omija walidację evidence
+
+- **File:** `supabase/migrations/202607230002_sources_provenance.sql:70-103`; powiązana polityka `supabase/migrations/202607230005_auth_roles_rls_storage.sql:120`
+- **Evidence:** trigger sprawdza wyłącznie insert/update `evidence_items`; analityk może następnie zmienić `product_id` lub `source_id` wskazanego `product_source_links`.
+- **Impact:** istniejący evidence może znów wskazać inny produkt/źródło niż link provenance.
+- **Scenario:** poprawne evidence `(A, X, link(A,X))`, potem update linku na `(B,Y)`.
+- **Recommendation:** zablokować zmianę kluczowych kolumn użytego linku albo walidować zależne evidence przy update; alternatywnie złożony FK/constraint.
+- **Missing test:** update użytego linku musi być odrzucony albo atomowo utrzymać zgodność.
+
+#### P2 — Runtime test nie wykonuje RLS tabel dla anon i ról przez API
+
+- **File:** `tests/test_supabase_runtime_contract.py:155-203`
+- **Evidence:** testuje helpery dla authenticated ról i Storage API, lecz nie wysyła requestu anon ani CRUD tabel przez PostgREST/API.
+- **Impact:** tabela może omyłkowo pozwalać anonowi albo odmawiać/dozwalać operację roli mimo zielonego testu.
+- **Scenario:** zmiana `authenticated_read` lub `analyst_write` na tabeli przechodzi obecne testy helperów oraz Storage.
+- **Recommendation:** dodać API/PostgREST assertions dla anon, viewer, analyst i admin na reprezentatywnej tabeli.
+- **Missing test:** anon denied; viewer read-only; analyst write bez admin-write; admin administruje katalogiem/profilem.
+
+#### P2 — Seed runtime test nie potwierdza stabilnych UUID
+
+- **File:** `tests/test_supabase_runtime_contract.py:114-129`
+- **Evidence:** po dwóch uruchomieniach obu seedów asercja sprawdza wyłącznie liczność rekordów.
+- **Impact:** usunięcie i ponowne utworzenie rekordu mogłoby zachować liczność, ale zerwać referencje UUID.
+- **Scenario:** przyszły seed zastępuje rekord przy zachowaniu jednego produktu na klucz biznesowy.
+- **Recommendation:** zachować UUID po pierwszym uruchomieniu i porównać je po drugim dla brandów, produktów i schema metadata.
+- **Missing test:** powtórny seed zachowuje UUID rekordów dev i E2E.
+
+### Wyniki reviewerów re-review
+
+| Reviewer | Wynik | Findings przyjęte |
+|---|---|---:|
+| correctness_reviewer | P2 | 1 |
+| security_reviewer | PASS | 0 |
+| test_reviewer | P2 | 2 |
+| data_reviewer | P2 | 1 (duplikat correctness) |
+
+### Testy re-review
+
+| Kontrola | Wynik |
+|---|---|
+| Kontrakty schema/RLS | PASS — 9 testów |
+| `FIELDNOTE_SUPABASE_INTEGRATION=1` runtime contract | PASS — 4 testy |
+| `git diff --check 53af30a..c436472` | PASS |
+
+### Decyzja gate re-review
+
+**WYMAGA POPRAWEK** — 0 P1, 3 P2, 0 P3. Poprawka spoofingu aktora audytu jest zaakceptowana; Unit 2 pozostaje nieukończony.
+
+### Rekomendowany następny krok re-review
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 2` — napraw wyłącznie trzy P2 z ograniczonego re-review, potem ponów ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 2`.
+
+---
+
+## Status wykonania napraw trzech P2
+
+Executor wdrożył wyłącznie wskazane naprawy: blokadę rewrite provenance linku używanego przez evidence, requesty PostgREST dla anon/viewer/analyst/admin oraz porównanie stabilnych UUID po drugim uruchomieniu obu seedów. Dodane granty dla `authenticated` pozwalają PostgREST dotrzeć do tabel, przy zachowaniu RLS jako granicy autoryzacji; `anon` nie otrzymał grantów tabel.
+
+Wyniki executora: `supabase db reset --local --yes` PASS, runtime contract 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Ten wpis nie jest re-review: decyzja gate pozostaje **WYMAGA POPRAWEK** do czasu ograniczonego review tych napraw.
