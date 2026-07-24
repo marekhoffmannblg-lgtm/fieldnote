@@ -84,8 +84,9 @@ class RepositoryHygieneTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             tracked = root / "example.env"
+            staged_secret = "sk-" + "abcdefghijklmnopqrst"
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-            tracked.write_text("OPENAI_API_KEY=sk-abcdefghijklmnopqrst\\n", encoding="utf-8")
+            tracked.write_text(f"OPENAI_API_KEY={staged_secret}\\n", encoding="utf-8")
             subprocess.run(["git", "add", "example.env"], cwd=root, check=True)
             tracked.write_text("OPENAI_API_KEY=\\n", encoding="utf-8")
 

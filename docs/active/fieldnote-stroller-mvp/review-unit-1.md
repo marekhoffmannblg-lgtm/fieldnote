@@ -1,10 +1,10 @@
 # Review — Unit 1: Bezpieczny baseline repozytorium i CI
 
 - **Data:** 2026-07-24
-- **Zakres diffu:** `298f40b92953baa23389c49291bf537c56f9d589..c75a0c8f16f1733433fb3a12ad7cc2e9165660e2`
-- **Tryb:** `pełny review`
+- **Zakres diffu:** `a5454f499cf9a8e3aa72ca96748771cc25e54107..staged` (wyłącznie naprawa ostatniego P2 fixture'u)
+- **Tryb:** `re-review`
 - **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer`
-- **Gate:** `WYMAGA POPRAWEK`
+- **Gate:** `GOTOWE DO KONTYNUACJI`
 
 ## Kryteria akceptacji unitu
 
@@ -13,11 +13,11 @@
 
 ## Zgodność z planem i zakresem
 
-Review obejmuje wyłącznie 12 plików w commicie Unit 1: przykładowe env,
-`.gitignore`, workflow CI/Dependabot, security baseline, pojedynczy hunk
-hygiene w `scripts/check_fieldnote.sh`, test hygiene oraz dokumentację zadania.
-Nie obejmuje niepowiązanych zmian w brudnym drzewie roboczym. Unit nie zmieniał
-interfejsu ani persistence, dlatego nie uruchomiono reviewerów UI/data.
+Re-review obejmuje wyłącznie poprawki poprzednio zaakceptowanych P2 w
+`.github/workflows/ci.yml` i `tests/test_repository_hygiene.py`, wraz z ich
+regresjami. Nie obejmuje dokumentacji ani niepowiązanych zmian w brudnym drzewie
+roboczym. Unit nie zmieniał interfejsu ani persistence, dlatego nie uruchomiono
+reviewerów UI/data.
 
 ## Skonsolidowane findings
 
@@ -27,31 +27,32 @@ Brak.
 
 ### P2 — important
 
-#### P2 — CI nie instaluje zależności API przed uruchomieniem pełnej bramki
+#### Zamknięte P2 — CI instaluje zależności API przed uruchomieniem pełnej bramki
 
 - **File:** `.github/workflows/ci.yml:24`
 - **Evidence:** job `offline-gate` instaluje tylko root `requirements.txt`, a
   pełna bramka importuje FastAPI i `python-dotenv`, zdefiniowane wyłącznie w
-  `fieldnote-api/requirements.txt`.
-- **Impact:** świeży runner GitHub Actions nie wykona wymaganej offline bramki.
-- **Scenario:** push lub PR na czystym runnerze kończy się `ModuleNotFoundError`
-  podczas testów importujących `fieldnote-api/app.py`.
-- **Recommendation:** doinstalować zależności `fieldnote-api/requirements.txt`
-  w jobie offline-gate albo użyć jednego deterministycznego manifestu.
-- **Missing test:** smoke test CI-equivalent w czystym środowisku.
+  `fieldnote-api/requirements.txt`. Poprawka instaluje oba pliki requirements,
+  a regresja sprawdza kontrakt workflow.
+- **Status:** zamknięte w `a5454f4`.
 
-#### P2 — Test sekretów odczytuje worktree, a nie zawartość indeksu
+#### Zamknięte P2 — Test sekretów odczytuje worktree, a nie zawartość indeksu
 
 - **File:** `tests/test_repository_hygiene.py:61-68`
 - **Evidence:** ścieżki pochodzą z `git ls-files`, lecz `Path.read_text()`
-  odczytuje bieżący plik roboczy, nie staged blob.
-- **Impact:** bramka może zwrócić PASS, gdy indeks nadal zawiera sekret gotowy
-  do commitu.
-- **Scenario:** użytkownik stage'uje sekret, usuwa go tylko z worktree bez
-  ponownego stage'owania i uruchamia test; test skanuje bezpieczną kopię roboczą.
-- **Recommendation:** odczytywać zawartość przez `git show :<path>` lub batch
-  `git cat-file`, z jednoznaczną obsługą plików binarnych.
-- **Missing test:** regresja z różną zawartością staged i working-tree.
+  odczytuje bieżący plik roboczy, nie staged blob. Poprawka odczytuje
+  `git show :<path>` i ma regresję staged/worktree.
+- **Status:** zamknięte w `a5454f4`.
+
+#### Zamknięte P2 — Fixture regresji jest wykrywany jako sekret we własnym pliku testowym
+
+- **File:** `tests/test_repository_hygiene.py:88`
+- **Evidence:** fixture zapisywał literal zaczynający się od `sk-`, który
+  pasuje do `SECRET_PATTERNS`; po commicie skan indeksu wykrywa sam plik testu.
+- **Resolution:** fixture buduje token z fragmentów; śledzony test nie zawiera
+  ciągu pasującego do skanera, ale runtime staged blob w tymczasowym repo nadal
+  jest wykrywany.
+- **Status:** zamknięte po ograniczonym re-review.
 
 ### P3 — non-blocking
 
@@ -61,32 +62,29 @@ Brak.
 
 | Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
 |---|---|---:|---:|
-| correctness_reviewer | P1, P2 | 2 | 0 |
-| security_reviewer | P2 | 1 (zduplikowane P2) | 0 |
-| test_reviewer | P2 | 1 (zduplikowane P2) | 0 |
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | PASS | 0 | 0 |
 
-Findings correctness o severity P1 dla CI znormalizowano do P2: jest to
-istotnie niespełnione kryterium CI, ale nie luka, utrata danych ani złamany
-główny flow aplikacji.
+Finalny ograniczony re-review objął wyłącznie poprawkę fixture'u. Wszystkie
+trzy perspektywy zwróciły PASS; wszystkie poprzednie P2 są zamknięte.
 
 ## Testy i weryfikacja
 
 | Kontrola | Wynik | Dowód |
 |---|---|---|
-| `python3 -m unittest tests/test_repository_hygiene.py` | PASS | 2 testy, ponowione w review |
-| `bash scripts/check_fieldnote.sh` | PASS | backend, fixture E2E, frontend typecheck/test/build; bez live provider calls |
-| Analiza deklaracji zależności CI | FAIL dla czystego runnera | root `requirements.txt` nie zawiera FastAPI ani python-dotenv |
+| `python3 -m unittest tests/test_repository_hygiene.py` | PASS | 4 testy na staged poprawce |
+| `bash scripts/check_fieldnote.sh` | PASS | pełna offline bramka, bez Firecrawl/OpenAI |
+| Analiza deklaracji zależności CI | PASS | offline-gate instaluje root i `fieldnote-api/requirements.txt` |
 
 ## Bezpieczeństwo
 
 Minimalne uprawnienia workflow (`contents: read`), brak sekretów w workflow i
-przykładowych env oraz brak `pull_request_target` są zgodne z baseline. P2
-dotyczą skuteczności egzekwowania tej ochrony w CI i przy staged content.
+przykładowych env oraz brak `pull_request_target` są zgodne z baseline.
 
 ## Odchylenia od planu
 
-Brak odchyleń funkcjonalnych. CI nie spełnia jeszcze własnego kryterium na
-czystym runnerze.
+Brak odchyleń funkcjonalnych.
 
 ## Kontrole operatora
 
@@ -95,11 +93,8 @@ kluczy. Review ich nie oznacza jako ukończonych.
 
 ## Decyzja gate
 
-**WYMAGA POPRAWEK** — 0 P1, 2 P2, 0 P3. Review nie jest zakończone do czasu
-naprawy obu P2 i ograniczonego re-review.
+**GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Review Unit 1 jest zakończone.
 
 ## Rekomendowany następny krok
 
-`$dev-docs-execute docs/active/fieldnote-stroller-mvp 1` — naprawić wyłącznie
-zaakceptowane P2, dodać ich regresje, a następnie wykonać ograniczony
-`$dev-docs-review docs/active/fieldnote-stroller-mvp 1`.
+W osobnym uruchomieniu można wykonać `$dev-docs-execute docs/active/fieldnote-stroller-mvp 2`.

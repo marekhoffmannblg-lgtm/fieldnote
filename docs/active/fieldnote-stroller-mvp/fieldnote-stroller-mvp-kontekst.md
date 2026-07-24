@@ -48,6 +48,8 @@
 - Gate review: **WYMAGA POPRAWEK** — 0 P1, 2 P2, 0 P3. P2: CI nie instaluje zależności `fieldnote-api` na czystym runnerze; hygiene test czyta worktree zamiast staged blobu. Raport: `review-unit-1.md`.
 - Naprawa P2: `.github/workflows/ci.yml` instaluje także `fieldnote-api/requirements.txt`; `tests/test_repository_hygiene.py` czyta staged blob przez `git show :<path>`. Dodano regresje dla staged sekretu z bezpiecznym worktree oraz kontrakt CI dla zależności API.
 - Po naprawie: `python3 -m unittest tests/test_repository_hygiene.py` PASS (4 testy), `bash scripts/check_fieldnote.sh` PASS bez Firecrawl/OpenAI. Oczekuje ograniczony re-review wyłącznie tych zmian.
+- Ograniczony re-review `c75a0c8..a5454f4`: correctness i security PASS, test reviewer wykrył nowy P2. Po commicie staged fixture z literalnym `sk-...` jest skanowany jako sekret, więc `python3 -m unittest tests/test_repository_hygiene.py` FAIL (1/4). Poprzednie P2 są zamknięte; gate pozostaje **WYMAGA POPRAWEK** (0 P1, 1 P2, 0 P3).
+- Finalna naprawa P2 buduje fixture tokenu z fragmentów, więc śledzony plik testu nie zawiera sekretopodobnego literalu, a staged fixture nadal jest wykrywany w tymczasowym repo. `python3 -m unittest tests/test_repository_hygiene.py` PASS (4), `bash scripts/check_fieldnote.sh` PASS. Ograniczony re-review przez correctness_reviewer, security_reviewer i test_reviewer: PASS; gate **GOTOWE DO KONTYNUACJI** (0 P1, 0 P2, 0 P3).
 
 ## Blokery i ryzyka
 
@@ -58,8 +60,8 @@
 ## Przekazanie
 
 - **Bieżący unit:** Unit 1 — Utworzyć bezpieczny baseline repozytorium i CI
-- **Status:** completed; P2 naprawione, oczekuje na ograniczony re-review
+- **Status:** completed; review PASS
 - **Pliki w toku:** `.gitignore`, trzy `.env.example`, `.github/`, `docs/SECURITY_BASELINE.md`, `scripts/check_fieldnote.sh`, `tests/test_repository_hygiene.py`, `docs/active/fieldnote-stroller-mvp/`
 - **Ostatnie testy:** hygiene test PASS; `scripts/check_fieldnote.sh` PASS
-- **Bloker:** brak techniczny; gate re-review jest wymagany przed rozpoczęciem Unit 2
-- **Następny krok:** ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 1`
+- **Bloker:** brak techniczny; checklist operatora Unit 1 pozostaje ręczna
+- **Następny krok:** Unit 2 może zostać rozpoczęty wyłącznie w osobnym uruchomieniu `$dev-docs-execute docs/active/fieldnote-stroller-mvp 2`

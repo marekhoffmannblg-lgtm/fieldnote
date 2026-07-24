@@ -16,7 +16,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 0 — Unit 1: Bezpieczny baseline repozytorium i CI
 
-- Status: `completed` (P2 naprawione; oczekuje na ograniczony re-review)
+- Status: `completed` (review PASS)
 - Zależności: brak
 - Kryterium ukończenia: repo hygiene i pełna offline bramka przechodzą bez kluczy API; CI wykonuje bramkę i audyt zależności.
 

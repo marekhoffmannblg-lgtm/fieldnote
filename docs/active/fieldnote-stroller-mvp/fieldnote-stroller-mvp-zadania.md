@@ -9,7 +9,7 @@
 - [x] Test: `tests/test_repository_hygiene.py` odrzuca śledzone `.env`, klucze, bazy, produkcyjne snapshoty i katalogi środowisk.
 - [x] Weryfikacja: `scripts/check_fieldnote.sh` przechodzi bez Firecrawl/OpenAI; hygiene test nie znajduje sekretów ani artefaktów w indeksie.
 - [ ] Operator: właściciel tworzy prywatne repo GitHub i rotuje klucze, które mogły znaleźć się w archiwum lub lokalnym env.
-- [ ] Review: P2 naprawione; oczekuje na ograniczony re-review w `review-unit-1.md`.
+- [x] Review: PASS; brak otwartych P1/P2. Szczegóły w `review-unit-1.md`.
 
 ## Unit 2 — Supabase schema, Auth, Storage i RLS
 
@@ -90,3 +90,4 @@
 
 - [x] P2: CI instaluje zależności API przed uruchomieniem pełnej offline bramki.
 - [x] P2: hygiene test skanuje staged blob zamiast zawartości worktree.
+- [x] P2: fixture regresji nie może zawierać w śledzonym pliku literalnego sekretu rozpoznawanego przez hygiene scanner.
