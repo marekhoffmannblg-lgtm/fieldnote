@@ -17,13 +17,37 @@ class MigrationReport:
 def _reject(report: MigrationReport, kind: str, identifier: object, reason: str) -> None:
     report.rejected.append({"kind": kind, "id": str(identifier), "reason": reason})
 
+def _is_eligible(product: dict[str, Any]) -> bool:
+    product_id = str(product.get("product_id", ""))
+    return not (
+        not product_id
+        or product.get("placeholder")
+        or product.get("category_classification_status") == "requires_classification"
+        or "accessory" in str(product.get("category", "")).lower()
+    )
+
+def _is_lionelo(product: dict[str, Any]) -> bool:
+    return bool(product.get("is_lionelo")) or str(product.get("brand", "")).strip().casefold() == "lionelo"
+
+def _canonical_preflight(payload: dict[str, Any]) -> MigrationReport | None:
+    from audit_supabase_migration import expected_lionelo_ids
+    lionelo_ids = {
+        str(product.get("product_id"))
+        for product in payload.get("products", [])
+        if _is_eligible(product) and _is_lionelo(product)
+    }
+    if lionelo_ids == expected_lionelo_ids():
+        return None
+    report = MigrationReport(lionelo_ids=lionelo_ids)
+    _reject(report, "migration", "lionelo_product_ids", "canonical_lionelo_set_mismatch")
+    return report
+
 def migrate(payload: dict[str, Any], catalog: Any, sources: Any) -> MigrationReport:
     report, accepted = MigrationReport(), set()
     for product in payload.get("products", []):
         product_id = str(product.get("product_id", ""))
-        is_lionelo = bool(product.get("is_lionelo")) or str(product.get("brand", "")).strip().casefold() == "lionelo"
-        invalid = not product_id or product.get("placeholder") or product.get("category_classification_status") == "requires_classification" or "accessory" in str(product.get("category", "")).lower()
-        if invalid:
+        is_lionelo = _is_lionelo(product)
+        if not _is_eligible(product):
             _reject(report, "product", product_id, "ineligible_catalog_record"); continue
         catalog.upsert_brand(str(product.get("brand_slug") or product.get("brand", "")).lower(), str(product.get("brand", "")))
         canonical = {key: product.get(key, "") for key in ("product_id", "brand", "model", "product_slug", "group_key", "category_key", "is_lionelo")}
@@ -60,7 +84,7 @@ def load_fixture(path: Path) -> dict[str, Any]:
 
 def run_migration(payload: dict[str, Any], catalog: Any, sources: Any) -> dict[str, Any]:
     from audit_supabase_migration import audit
-    report = migrate(payload, catalog, sources)
+    report = _canonical_preflight(payload) or migrate(payload, catalog, sources)
     return {**audit(report), "products": report.products, "sources": report.sources, "links": report.links, "evidence": report.evidence}
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,6 +92,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input", type=Path, default=Path(__file__).resolve().parents[1] / "fixtures/unit3/validated_state_v1.json")
     args = parser.parse_args(argv)
     payload = load_fixture(args.input)
+    preflight = _canonical_preflight(payload)
+    if preflight is not None:
+        from audit_supabase_migration import audit
+        result = {**audit(preflight), "products": preflight.products, "sources": preflight.sources, "links": preflight.links, "evidence": preflight.evidence}
+        print(json.dumps(result, sort_keys=True))
+        return 2
     api_root = Path(__file__).resolve().parents[1] / "fieldnote-api"
     if str(api_root) not in sys.path:
         sys.path.insert(0, str(api_root))

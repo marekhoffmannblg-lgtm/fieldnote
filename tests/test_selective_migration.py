@@ -59,6 +59,11 @@ class SelectiveMigrationTests(unittest.TestCase):
     def test_run_migration_rejects_input_that_lies_about_expected_ids(self):
         malicious = payload()
         malicious["expected_lionelo_product_ids"] = [item["product_id"] for item in malicious["products"] if item["brand"] == "Lionelo"]
-        self.assertEqual(run_migration(malicious, FakeCatalog(), FakeSources())["status"], "review")
+        catalog, sources = FakeCatalog(), FakeSources()
+        result = run_migration(malicious, catalog, sources)
+        self.assertEqual(result["status"], "review")
+        self.assertEqual(result["rejected"], [{"kind": "migration", "id": "lionelo_product_ids", "reason": "canonical_lionelo_set_mismatch"}])
+        self.assertEqual((catalog.brands, catalog.products), ({}, {}))
+        self.assertEqual((sources.sources, sources.links, sources.evidence), ({}, {}, {}))
 
 if __name__ == "__main__": unittest.main()

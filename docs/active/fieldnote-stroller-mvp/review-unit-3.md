@@ -181,3 +181,48 @@ Ponowiono focused suite (29 PASS), `git diff --check 3d638b7^..3d638b7` (PASS) o
 ## Stan po naprawie P2 CLI
 
 `run_migration()` nie przekazuje już deklaracji expected z inputu do audytu; audit zawsze pobiera kanoniczny set śledzonych specyfikacji. Regresja z 34 syntetycznymi ID i własną deklaracją fixture kończy się `review`. Focused suite: 30 PASS; pełna offline bramka i `git diff --check`: PASS. Gate pozostaje do ograniczonego re-review.
+
+## Ograniczony re-review — `c93ab1f^..c93ab1f`
+
+- **Data:** 2026-07-24
+- **Tryb:** ograniczony re-review wyłącznie poprawki P2 kanonicznego zbioru Lionelo
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `WYMAGA POPRAWEK`
+
+### P2 — Kanoniczna walidacja następuje dopiero po zapisach migracji
+
+- File: `scripts/migrate_validated_state_to_supabase.py:63-65`
+- Evidence: `run_migration()` najpierw wywołuje `migrate()`, która wykonuje upserty produktów, źródeł, linków i evidence, a dopiero potem `audit(report)` porównuje `lionelo_ids` z kanonicznym zbiorem `data/internal_specs`.
+- Impact: poprawnie sformatowany, lecz niekanoniczny fixture może zostać zapisany z użyciem service-role, po czym CLI zwróci `review`; operator dostaje wynik odrzucenia po częściowej mutacji docelowych danych.
+- Scenario: `--input` zawiera 34 fałszywe ID Lionelo zamiast śledzonych specyfikacji. Migrator wykona upserty, następnie audit zwróci `review` i CLI zakończy się kodem 2.
+- Recommendation: przed skonstruowaniem repozytoriów i pierwszym upsertem obliczyć eligible Lionelo z payloadu oraz porównać je z `expected_lionelo_ids()`; przy mismatch przerwać bez zapisu (alternatywnie całą operację objąć transakcją z rollbackiem).
+- Missing test: fixture z niekanonicznymi ID zwraca `review` albo błąd **oraz** nie wywołuje żadnego `upsert_*` na fake repositories.
+
+## Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | P2 ×1 | 1 | 0 |
+| test_reviewer | PASS | 0 | 0 |
+| data_reviewer | P2 ×1 | 1 (scalone z security) | 0 |
+
+## Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused Unit 3/API | PASS | `fieldnote-api/.venv/bin/python -m unittest tests/test_selective_migration.py tests/test_supabase_repositories.py tests/test_fieldnote_api_contracts.py` — 30 tests |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` — backend, checkery i frontend typecheck/test/build |
+| Czystość diffu | PASS | `git diff --check c93ab1f^..c93ab1f` |
+
+## Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Unit 3 pozostaje nieukończony; Unit 4 nie został rozpoczęty.
+
+## Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 3` — napraw wyłącznie P2: wykonaj preflight kanonicznych ID przed każdym upsertem i dodaj regresję potwierdzającą brak zapisów dla niezgodnego fixture'u.
+
+## Stan po naprawie P2 preflightu
+
+`_canonical_preflight()` wylicza eligible Lionelo z payloadu i porównuje je z kanonicznym zbiorem `data/internal_specs` przed pierwszym upsertem. `main()` wykonuje tę kontrolę przed tworzeniem klienta Supabase i repozytoriów, a `run_migration()` utrzymuje ją także dla wywołań programistycznych. Regresja z syntetycznymi ID potwierdza status `review`, jawny powód `canonical_lionelo_set_mismatch` oraz brak zapisów w fake catalog/source. Focused suite: 30 PASS; `py_compile`, pełna offline bramka i `git diff --check`: PASS. Gate pozostaje do niezależnego ograniczonego re-review.
