@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from typing import Protocol
 from repositories.snapshot_repository import SnapshotRepository
+
+class ProductReader(Protocol):
+    def catalog(self) -> list[dict[str, Any]]: ...
+    def product(self, product_slug: str) -> dict[str, Any]: ...
 
 
 class ProductService:
-    def __init__(self, snapshots: SnapshotRepository) -> None:
+    def __init__(self, snapshots: ProductReader) -> None:
         self.snapshots = snapshots
 
     def list(self, limit: int, offset: int) -> dict[str, Any]:

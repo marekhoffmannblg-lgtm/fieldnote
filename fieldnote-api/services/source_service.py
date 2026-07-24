@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from repositories.source_repository import SourceRepository
+
 
 def paginate(items: list[dict[str, Any]], limit: int, offset: int) -> dict[str, Any]:
     safe_limit = min(max(int(limit), 1), 500)

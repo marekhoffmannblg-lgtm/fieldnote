@@ -104,12 +104,19 @@ from contracts import (  # noqa: E402
     ProductV1,
 )
 from repositories.snapshot_repository import SnapshotRepository  # noqa: E402
+from repositories.catalog_repository import CatalogRepository  # noqa: E402
+from repositories.supabase_client import SupabaseClient  # noqa: E402
 from routers.health import health_payload  # noqa: E402
 from services.product_service import ProductService  # noqa: E402
 from services.run_service import index_runs  # noqa: E402
 from services.source_service import paginate  # noqa: E402
 RUN_COORDINATOR = RunCoordinator(runs_root=RUNS_ROOT, output_root=PROJECT_ROOT / "output")
-PRODUCT_SERVICE = ProductService(SnapshotRepository(FRONTEND_SNAPSHOT_ROOT))
+DATA_MODE = os.environ.get("FIELDNOTE_DATA_MODE", "legacy_readonly")
+if DATA_MODE not in {"legacy_readonly", "supabase"}:
+    raise RuntimeError("FIELDNOTE_DATA_MODE must be legacy_readonly or supabase.")
+PRODUCT_SERVICE = ProductService(
+    CatalogRepository(SupabaseClient.from_env()) if DATA_MODE == "supabase" else SnapshotRepository(FRONTEND_SNAPSHOT_ROOT)
+)
 LOCAL_ORIGINS = ("http://127.0.0.1:5173", "http://localhost:5173")
 MAX_LOG_LINES = 240
 MAX_LOG_CHARS = 18_000
@@ -2856,6 +2863,8 @@ def catalog_product_payload(product: dict[str, Any], states: dict[str, dict[str,
 
 def frontend_catalog() -> list[dict[str, Any]]:
     """Merge immutable snapshots with registered, not-yet-researched products."""
+    if DATA_MODE == "supabase":
+        return PRODUCT_SERVICE.snapshots.catalog()
     states = load_product_states()
     snapshots = PRODUCT_SERVICE.snapshots.catalog()
     by_slug = {str(item.get("slug", "")): dict(item) for item in snapshots if isinstance(item, dict)}

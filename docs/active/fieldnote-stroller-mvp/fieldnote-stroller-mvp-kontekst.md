@@ -70,6 +70,10 @@
 - Po naprawie runtime contract PASS (5 testów), kontrakty schema/RLS/runtime offline PASS (14 testów, 5 opt-in skipped), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje wyłącznie ograniczony re-review tej poprawki.
 - Końcowy ograniczony re-review `aa9ca91^..aa9ca91` przez correctness, security i tests: wszyscy PASS. Potwierdzono dwa identyczne UPSERT-y admina, pojedynczy rekord przez adminowy GET PostgREST oraz odmowę dla analyst. Data/UI review nie były wymagane, bo diff dotyczył wyłącznie testu runtime.
 - Weryfikacja końcowego re-review: runtime Supabase 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka PASS i `git diff --check aa9ca91^ aa9ca91` PASS. Gate Unit 2: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3.
+- Unit 3 dodał repozytoria katalogu, źródeł, benchmarków, jobów i audytu na wstrzykiwalnym kliencie stdlib PostgREST. `FIELDNOTE_DATA_MODE=legacy_readonly` pozostaje domyślny; `supabase` wymaga `SUPABASE_URL` i `SUPABASE_SERVICE_ROLE_KEY`, a brak konfiguracji kończy się fail-closed bez wycieku sekretu.
+- Selektywna migracja przyjmuje wyłącznie wersjonowany JSON/fixture. Upsertuje stabilne klucze biznesowe, importuje zaklasyfikowane produkty Lionelo i konkurencję, odrzuca placeholdery, rekordy niezaklasyfikowane oraz błędne linki/evidence do jawnego raportu. Nie odczytuje ani nie wersjonuje lokalnego `data/`/`output/`; snapshoty Storage pozostają poza offline migracją.
+- API katalogu w trybie `supabase` korzysta z `CatalogRepository` i nie wywołuje legacy `load_products()` ani wygenerowanych danych frontendu. Bieżące pipeline, zapisy runów oraz legacy adaptery pozostają nienaruszone do kolejnych unitów.
+- Testy Unit 3: 23 PASS (`test_fieldnote_api_contracts`, `test_supabase_repositories`, `test_selective_migration`); pełny `bash scripts/check_fieldnote.sh` PASS (backend, checkery i frontend typecheck/test/build); `git diff --check` PASS. Unit 3 oczekuje pełnego review; Unit 4 nie został rozpoczęty.
 - Ograniczony re-review `39c5fdd^..39c5fdd` przez correctness, security i tests: correctness/security PASS; tests zgłosił P2. Pierwszy adminowy UPSERT katalogu jest pokryty, ale test nie wykonuje drugiego requestu ani nie sprawdza jednej trwałej pozycji fixture, więc nie dowodzi wykonawczo idempotencji.
 - Weryfikacja re-review: runtime Supabase 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka PASS i `git diff --check 39c5fdd^ 39c5fdd` PASS. Gate Unit 2 pozostaje **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3.
 - Naprawiono ostatni P2 wyłącznie w runtime contract: admin wykonuje drugi identyczny POST/UPSERT `brands`, a adminowy GET przez PostgREST potwierdza dokładnie jeden rekord `runtime-admin-catalog`. Odmowa dla analyst pozostaje.
@@ -84,8 +88,9 @@
 ## Przekazanie
 
 - **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
-- **Status:** completed — review PASS, brak otwartych P1/P2.
-- **Pliki zamknięte:** migracje `202607230001`–`202607230005`, seedy oraz kontrakty schema/RLS/runtime i aktywne dokumenty Unit 2.
-- **Ostatnie testy:** runtime test 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); pełny offline gate PASS; `git diff --check` PASS.
-- **Bloker:** brak dla Unit 2. Unit 3 nie został rozpoczęty w tej sesji.
-- **Następny krok:** po wyraźnym poleceniu użytkownika `$dev-docs-execute docs/active/fieldnote-stroller-mvp 3`.
+- **Bieżący unit:** Unit 3 — Repozytoria Supabase i selektywna migracja.
+- **Status:** completed — implementacja i weryfikacja przeszły; oczekuje pełny review.
+- **Pliki w toku:** `fieldnote-api/repositories/`, repozytoria usług katalogu/źródeł/runów, skrypty selektywnej migracji/audytu oraz testy Unit 3.
+- **Ostatnie testy:** 23 testy Unit 3 PASS; pełny offline gate PASS; `git diff --check` PASS.
+- **Bloker:** pełny review Unit 3; nie rozpoczynać Unit 4.
+- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 3`.

@@ -28,10 +28,10 @@
 
 ## Unit 3 — Repozytoria Supabase i selektywna migracja
 
-- [ ] Implementacja: repozytoria catalog/source/benchmark/job/audit, klient Supabase i migracja zatwierdzonego legacy state z trybem `legacy_readonly`.
-- [ ] Test: `tests/test_supabase_repositories.py`, `tests/test_selective_migration.py`; 34 Lionelo, brak placeholdera i idempotencja migracji.
-- [ ] Weryfikacja: audit migracji nie wykazuje niejawnej utraty poprawnych source links; API czyta katalog z Supabase.
-- [ ] Review: brak otwartych P1/P2.
+- [x] Implementacja: repozytoria catalog/source/benchmark/job/audit, stdlib klient Supabase i selektywna migracja wersjonowanego fixture z trybem `legacy_readonly`; tryb `supabase` fail-closed wymaga serwerowej konfiguracji.
+- [x] Test: `tests/test_supabase_repositories.py`, `tests/test_selective_migration.py` oraz kontrakty API; 34 Lionelo, brak placeholdera, idempotencja migracji, poprawne links/evidence i odrzucenie złych referencji.
+- [x] Weryfikacja: audit migracji raportuje selekcję/odrzucenia; `/api/products` w trybie `supabase` czyta wstrzyknięte repozytorium bez odwołania do legacy katalogu lub danych generowanych.
+- [ ] Review: oczekuje pełny review Unit 3; nie rozpoczynać Unit 4.
 
 ## Unit 4 — Logowanie, role i administracja kontami
 

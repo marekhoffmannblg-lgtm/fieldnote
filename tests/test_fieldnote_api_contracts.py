@@ -16,9 +16,27 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
 
 import app as api  # noqa: E402
+from repositories.supabase_client import SupabaseClient, SupabaseConfigurationError  # noqa: E402
 
 
 class ApiContractTests(unittest.TestCase):
+    def test_explicit_supabase_catalog_never_reads_legacy_files(self):
+        class FakeReader:
+            def catalog(self):
+                return [{"slug": "lionelo__amber", "product_slug": "lionelo__amber", "brand": "Lionelo", "model": "Amber"}]
+            def product(self, _slug):
+                return {}
+
+        service = api.ProductService(FakeReader())
+        with patch.object(api, "DATA_MODE", "supabase"), patch.object(api, "PRODUCT_SERVICE", service), patch.object(api, "load_products", side_effect=AssertionError("legacy catalog read")):
+            payload = api.list_products(limit=10, offset=0)
+        self.assertEqual(payload["items"], [{"slug": "lionelo__amber", "product_slug": "lionelo__amber", "brand": "Lionelo", "model": "Amber"}])
+
+    def test_supabase_client_requires_both_server_environment_values(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SupabaseConfigurationError):
+                SupabaseClient.from_env()
+
     def preview_request(self, mode: str = "live") -> api.PreviewRequest:
         return api.PreviewRequest(brand="Fixture", model="Light", category_key="stroller", benchmark_group="light_stroller", search_mode=mode)
 

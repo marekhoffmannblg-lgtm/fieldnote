@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from services.source_service import paginate
+from repositories.job_repository import JobRepository
 
 
 def index_runs(manifests: list[dict[str, Any]], index_record: Callable[[dict[str, Any]], dict[str, Any]], limit: int, offset: int) -> dict[str, Any]:
