@@ -31,7 +31,7 @@
 - [x] Implementacja: repozytoria catalog/source/benchmark/job/audit, stdlib klient Supabase i selektywna migracja wersjonowanego fixture z trybem `legacy_readonly`; tryb `supabase` fail-closed wymaga serwerowej konfiguracji.
 - [x] Test: `tests/test_supabase_repositories.py`, `tests/test_selective_migration.py` oraz kontrakty API; 34 Lionelo, brak placeholdera, idempotencja migracji, poprawne links/evidence i odrzucenie złych referencji.
 - [x] Weryfikacja: audit migracji raportuje selekcję/odrzucenia; `/api/products` w trybie `supabase` czyta wstrzyknięte repozytorium bez odwołania do legacy katalogu lub danych generowanych.
-- [ ] Review: oczekuje pełny review Unit 3; nie rozpoczynać Unit 4.
+- [ ] Review: poprawki P1/P2 są zaimplementowane; oczekuje ograniczony re-review `review-unit-3.md`. Nie rozpoczynać Unit 4.
 
 ## Unit 4 — Logowanie, role i administracja kontami
 
@@ -109,3 +109,11 @@
 - [x] P2: seed runtime test porównuje stabilne UUID dev i E2E po drugim uruchomieniu.
 - [x] P2: dodano wykonawczy zapis katalogu przez PostgREST jako admin oraz odmowę analogicznej akcji dla analyst.
 - [x] P2: wykonano dwukrotny adminowy POST/UPSERT `brands` przez PostgREST i potwierdzono stabilną pojedynczą pozycję fixture.
+
+### Unit 3
+
+- [x] P1: zmapowano kanoniczny katalog Lionelo (`scope=production`, `refresh_recommended`, brak `is_lionelo`) do kontraktu `products`; fixture obejmuje 34 produktów.
+- [x] P2: w Supabase `POST /api/products` używa repozytorium bez legacy odczytu/zapisu i zachowuje rekord w list/detail.
+- [x] P2: detail w Supabase nie odczytuje legacy provenance.
+- [x] P2: dodano wersjonowany fixture oraz wykonywalny entrypoint migracji i audytu.
+- [x] P2: audit wymaga dokładnie 34 distinct produktów Lionelo, niezależnie od konkurentów i duplikatów.

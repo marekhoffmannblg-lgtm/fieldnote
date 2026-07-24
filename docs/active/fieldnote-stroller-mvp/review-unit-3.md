@@ -1,0 +1,113 @@
+# Review — Unit 3: Repozytoria Supabase i selektywna migracja
+
+- **Data:** 2026-07-24
+- **Zakres diffu:** `16e9371..e7b7443` (`feat: add supabase repositories and selective migration`)
+- **Tryb:** pełny review
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `BLOKUJE`
+
+## Kryteria akceptacji unitu
+
+- 34 produktów Lionelo oraz poprawne provenance są migrowane idempotentnie.
+- Legacy pozostaje read-only, zaś katalog trybu `supabase` korzysta z repozytorium i jest fail-closed bez konfiguracji.
+- Placeholdery i błędne referencje są odrzucane oraz raportowane.
+
+## Zgodność z planem i zakresem
+
+Sprawdzono wyłącznie Unit 3 z commitu `e7b7443`; Unit 4 nie został rozpoczęty. Przełącznik katalogu API, klient PostgREST, repozytoria i migrator mieszczą się w zakresie, ale niżej opisane defekty uniemożliwiają spełnienie kryterium migracji.
+
+## Skonsolidowane findings
+
+### P1 — blocking
+
+#### P1 — Migrator nie transformuje kanonicznego katalogu do kontraktu `products`
+
+- File: `scripts/migrate_validated_state_to_supabase.py:20-26`
+- Evidence: kanoniczny importer zapisuje 34 Lionelo z `scope="production"` i `status="refresh_recommended"` (`scripts/import_lionelo_strollers.py:84-89`), ale migrator rozpoznaje własny katalog tylko przez `scope == "lionelo"` lub prawdziwe `is_lionelo`. Przekazuje też status bez mapowania do enuma `active|eol|draft|archived` i dla brakującego `is_lionelo` wysyła pusty string zamiast boolean (`supabase/migrations/202607230001_core_catalog.sql:3-5,25-26`).
+- Impact: wymagane 34 Lionelo zostaną odrzucone przez selekcję albo PostgREST; główny flow Unit 3 jest złamany.
+- Scenario: kanoniczny rekord `scope=production`, bez `is_lionelo`, nie tworzy zgodnego rekordu `products`.
+- Recommendation: jawnie mapować ownership, status oraz boolean do kontraktu Supabase przed upsertem.
+- Missing test: fixture 34 rekordów w kanonicznym kształcie importera przechodzi migrację do repozytorium walidującego kontrakt tabeli.
+
+### P2 — important
+
+#### P2 — Tryb Supabase zapisuje nowe produkty wyłącznie do legacy katalogu
+
+- File: `fieldnote-api/app.py:2917-2942`
+- Evidence: `create_product()` zawsze używa `load_products()` i `ensure_catalog_product()`, a nie `CatalogRepository`; `frontend_catalog()` w trybie Supabase czyta tylko repozytorium.
+- Impact: produkt utworzony przez API nie trafia do Supabase, znika z kolejnej listy, a legacy nie jest read-only.
+- Scenario: `POST /api/products`, następnie `GET /api/products` przy `FIELDNOTE_DATA_MODE=supabase`.
+- Recommendation: w Supabase upsertować brand i product przez repozytorium bez odczytu/zapisu legacy.
+- Missing test: Supabase POST nie dotyka legacy i rekord jest widoczny w następnym list/detail.
+
+#### P2 — Szczegóły produktu w trybie Supabase nadal czytają legacy provenance
+
+- File: `fieldnote-api/app.py:2948-2966`
+- Evidence: `get_product()` bezwarunkowo wywołuje `load_product_provenance(product_slug)`.
+- Impact: detail po przełączeniu na Supabase może zwracać nieaktualne dane legacy i narusza granicę repozytoryjną.
+- Scenario: `GET /api/products/<slug>` w Supabase odczytuje lokalne provenance.
+- Recommendation: do czasu repozytorium provenance zwracać w tym trybie pustą projekcję albo użyć dedykowanego repozytorium.
+- Missing test: sentinel legacy provenance nie jest wywoływany przez detail w Supabase.
+
+#### P2 — Unit nie dostarcza wykonywalnej migracji zatwierdzonego stanu
+
+- File: `scripts/migrate_validated_state_to_supabase.py:17-50`
+- Evidence: `load_fixture()` i `migrate()` nie mają CLI/entrypointu, a commit nie zawiera wersjonowanego fixture'u 34 Lionelo wraz ze źródłami, links i evidence. Test używa danych syntetycznych w pamięci.
+- Impact: zielone testy nie umożliwiają ani nie dowodzą migracji zatwierdzonego katalogu i provenance do pustego Supabase.
+- Scenario: operator nie ma kanonicznego wejścia ani komendy importu, więc Supabase pozostaje puste.
+- Recommendation: dodać śledzony input i entrypoint `load → migrate → audit` z raportem odrzuceń.
+- Missing test: entrypoint na fixture uruchomiony dwukrotnie pozostawia 34 Lionelo i kontrolowane liczniki provenance.
+
+#### P2 — Audit nie weryfikuje dokładnie 34 produktów Lionelo
+
+- File: `scripts/audit_supabase_migration.py:3-4`
+- Evidence: używa `report.products >= expected_lionelo`; licznik obejmuje konkurentów i duplikaty, nie distinct owned/Lionelo.
+- Impact: 33 Lionelo i konkurent mogą uzyskać PASS.
+- Scenario: payload z 33 Lionelo i jednym konkurentem daje `products == 34`.
+- Recommendation: raportować distinct owned IDs osobno i wymagać dokładnie 34.
+- Missing test: 33 Lionelo + konkurent oraz 35 Lionelo kończą audit wynikiem review/fail.
+
+### P3 — non-blocking
+
+Brak zaakceptowanych findings P3.
+
+## Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | P2 ×2 | 2 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | P2 ×2 | 2 | 0 |
+| data_reviewer | P1 ×1, P2 ×1 | 2 | 0 |
+
+## Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Testy Unit 3 | PASS | `fieldnote-api/.venv/bin/python -m unittest tests/test_fieldnote_api_contracts.py tests/test_supabase_repositories.py tests/test_selective_migration.py` — 23 tests |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` — backend, checkery i frontend typecheck/test/build |
+| Czystość diffu | PASS | `git diff --check 16e9371..e7b7443` |
+
+## Bezpieczeństwo
+
+Security review: PASS. Service-role pozostaje po stronie API, brak konfiguracji jest fail-closed, błędy nie ujawniają sekretu; nie znaleziono obejścia RLS ani dostępu frontendu do klucza.
+
+## Odchylenia od planu
+
+Unit 4 nie został rozpoczęty. Aktualny Unit 3 wymaga naprawy wskazanych P1/P2.
+
+## Kontrole operatora
+
+Po poprawkach operator może wykonać migrację do lokalnego Supabase z zatwierdzonym fixturem; nie oznaczono jej jako wykonanej podczas tego review.
+
+## Decyzja gate
+
+**BLOKUJE** — 1 P1, 4 P2, 0 P3. Unit 3 nie może zostać oznaczony jako ukończony.
+
+## Stan po naprawach
+
+Poprawki P1/P2 są zapisane do ograniczonego re-review: kanoniczne rekordy Lionelo są mapowane do kontraktu Supabase, API Supabase nie dotyka legacy katalogu ani provenance, fixture jest wersjonowany, `run_migration` wykonuje migrację z audytem, a audit wymaga dokładnie 34 distinct Lionelo. Wykonano focused testy (27 PASS), parse JSON fixture, `git diff --check` oraz pełną offline bramkę (PASS). Ten wpis nie zmienia gate — wymaga niezależnego ograniczonego re-review.
+
+## Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 3` — napraw wyłącznie zaakceptowany P1 i cztery P2, a następnie wykonaj ograniczony re-review Unit 3.

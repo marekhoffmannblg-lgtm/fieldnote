@@ -881,6 +881,8 @@ def run_command(
 def validated_product_slug(product_slug: str, *, require_group: bool = True) -> str:
     if not PRODUCT_SLUG_PATTERN.fullmatch(product_slug):
         raise HTTPException(status_code=404, detail="Nie znaleziono produktu.")
+    if DATA_MODE == "supabase":
+        return product_slug
     group_dir = PROJECT_ROOT / "output" / "model_groups" / product_slug
     if require_group:
         registered = any(product_slug_for(item.get("brand", ""), item.get("model", "")) == product_slug for item in load_products())
@@ -2920,6 +2922,18 @@ def create_product(request: ProductCreateRequest) -> dict[str, Any]:
         assignment = validate_category_assignment(request.category_key, request.benchmark_group)
     except CategoryValidationError as exc:
         raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
+    if DATA_MODE == "supabase":
+        repository = PRODUCT_SERVICE.snapshots
+        slug = product_slug_for(request.brand, request.model)
+        existing = repository.product(slug)
+        if existing and (str(existing.get("category_key", "")) != request.category_key or str(existing.get("benchmark_group_key", "")) != request.benchmark_group):
+            raise HTTPException(status_code=409, detail="Produkt istnieje już z inną kategorią lub grupą benchmarkową.")
+        if existing:
+            return {"created": False, "product": existing}
+        brand_key = normalized(request.brand).replace(" ", "-")
+        repository.upsert_brand(brand_key, request.brand)
+        repository.upsert_product({"product_id": f"product:{brand_key}:{path_slug(request.model)}:", "brand": request.brand, "model": request.model, "configuration": "", "product_slug": slug, "group_key": group_key_for(request.brand, request.model), "category_key": request.category_key, "benchmark_group_key": request.benchmark_group, "status": "draft", "is_lionelo": normalized(request.brand) == "lionelo"})
+        return {"created": True, "product": repository.product(slug)}
     slug = product_slug_for(request.brand, request.model)
     existing = next((item for item in load_products() if product_slug_for(item.get("brand", ""), item.get("model", "")) == slug), None)
     if existing and (
@@ -2945,6 +2959,11 @@ def create_product(request: ProductCreateRequest) -> dict[str, Any]:
 @app.get("/api/products/{product_slug}")
 def get_product(product_slug: str) -> dict[str, Any]:
     product_slug = validated_product_slug(product_slug)
+    if DATA_MODE == "supabase":
+        payload = PRODUCT_SERVICE.detail(product_slug)
+        if not payload:
+            raise HTTPException(status_code=404, detail="Nie znaleziono produktu.")
+        return {**payload, "schema_version": "1", "fields": [], "sources": [], "research_snapshot_available": False}
     payload = PRODUCT_SERVICE.detail(product_slug)
     catalog_record = next((item for item in frontend_catalog() if item.get("slug") == product_slug), None)
     if not payload and not catalog_record:
