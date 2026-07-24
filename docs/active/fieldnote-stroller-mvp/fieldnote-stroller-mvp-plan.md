@@ -34,7 +34,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 1 — Unit 3: Repozytoria Supabase i selektywna migracja
 
-- Status: `pending`
+- Status: `completed` (review PASS)
 - Zależności: Unit 2
 - Kryterium ukończenia: 34 produkty Lionelo i prawidłowe provenance są migrowane idempotentnie; legacy pozostaje read-only do porównania.
 

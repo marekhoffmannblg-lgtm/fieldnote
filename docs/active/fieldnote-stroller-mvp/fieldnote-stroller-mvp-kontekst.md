@@ -85,6 +85,7 @@
 - Ograniczony re-review `4dd87e1^..4dd87e1` przez correctness, security, tests i data: correctness, security i data PASS. Tests przyjął P2: regresja pokrywa `run_migration()`, ale nie wywołuje `main(--input ...)` z sentinelami, więc nie dowodzi wykonawczo braku tworzenia klienta/repozytoriów dla niekanonicznego inputu CLI. Focused suite 30 PASS, pełny `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check 4dd87e1^..4dd87e1` PASS. Gate Unit 3: **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3.
 - Naprawiono wyłącznie ten P2: test CLI zapisuje tymczasowy niekanoniczny fixture, uruchamia `main(["--input", path])` i podmienia moduły repozytoriów sentinelami. Potwierdza kod 2, raport `review`, zerowe liczniki oraz brak konstrukcji `SupabaseClient` i repozytoriów.
 - Po naprawie focused Unit 3/API PASS (31), `py_compile` migratora/audytu PASS, pełna offline bramka `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS. Oczekuje ograniczony re-review wyłącznie P2 testu CLI; Unit 4 nie został rozpoczęty.
+- Końcowy ograniczony re-review `8ede9d7^..8ede9d7` przez correctness, security, tests i data: wszyscy PASS. Focused suite 31 PASS, pełna offline bramka PASS oraz `git diff --check 8ede9d7^..8ede9d7` PASS. Gate Unit 3: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3.
 - Końcowy ograniczony re-review `aa9ca91^..aa9ca91` przez correctness, security i tests: wszyscy PASS. Potwierdzono dwa identyczne UPSERT-y admina, pojedynczy rekord przez adminowy GET PostgREST oraz odmowę dla analyst. Data/UI review nie były wymagane, bo diff dotyczył wyłącznie testu runtime.
 - Weryfikacja końcowego re-review: runtime Supabase 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka PASS i `git diff --check aa9ca91^ aa9ca91` PASS. Gate Unit 2: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3.
 - Unit 3 dodał repozytoria katalogu, źródeł, benchmarków, jobów i audytu na wstrzykiwalnym kliencie stdlib PostgREST. `FIELDNOTE_DATA_MODE=legacy_readonly` pozostaje domyślny; `supabase` wymaga `SUPABASE_URL` i `SUPABASE_SERVICE_ROLE_KEY`, a brak konfiguracji kończy się fail-closed bez wycieku sekretu.
@@ -106,8 +107,8 @@
 
 - **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
 - **Bieżący unit:** Unit 3 — Repozytoria Supabase i selektywna migracja.
-- **Status:** in progress — poprawka P2 testu preflightu CLI jest zaimplementowana i zweryfikowana; Unit 3 oczekuje ograniczony re-review przed oznaczeniem ukończenia. Nie rozpoczynać Unit 4.
+- **Status:** completed — Unit 3 ma review PASS i brak otwartych P1/P2. Unit 4 nie został rozpoczęty.
 - **Pliki w toku:** `fieldnote-api/repositories/`, repozytoria usług katalogu/źródeł/runów, skrypty selektywnej migracji/audytu oraz testy Unit 3.
 - **Ostatnie testy:** focused Unit 3/API 31 PASS; `py_compile` migratora/audytu PASS; pełny offline gate PASS; `git diff --check` PASS.
-- **Bloker:** wyłącznie niezależny ograniczony re-review poprawki P2 testu CLI; nie rozpoczynać Unit 4.
-- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 3` — wyłącznie poprawka testu preflightu CLI z bieżącego commitu.
+- **Bloker:** brak dla Unit 3; nie rozpoczynać Unit 4 w ramach tego review.
+- **Następny krok:** `$dev-docs-execute docs/active/fieldnote-stroller-mvp 4` — wyłącznie po osobnej decyzji użytkownika.

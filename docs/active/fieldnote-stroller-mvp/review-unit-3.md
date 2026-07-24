@@ -271,3 +271,24 @@ Ponowiono focused suite (29 PASS), `git diff --check 3d638b7^..3d638b7` (PASS) o
 ## Stan po naprawie P2 testu CLI
 
 Dodano deterministyczny test `main(["--input", path])` z tymczasowym niekanonicznym fixturem. Podstawione moduły repozytoriów mają sentinele, które przerwałyby test przy konstrukcji `SupabaseClient` lub repozytoriów; test potwierdza kod 2, raport `review`, `canonical_lionelo_set_mismatch` i zerowe liczniki przed każdą mutacją. Focused suite: 31 PASS; `py_compile`, pełna offline bramka i `git diff --check`: PASS. Gate pozostaje do niezależnego ograniczonego re-review.
+
+## Końcowy ograniczony re-review — `8ede9d7^..8ede9d7`
+
+- **Data:** 2026-07-24
+- **Tryb:** ograniczony re-review wyłącznie P2 wykonawczego testu CLI
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `GOTOWE DO KONTYNUACJI`
+
+Wszyscy reviewerzy: PASS. Test uruchamia rzeczywiste `main(["--input", path])` z niekanonicznym fixturem, a sentinele dla `SupabaseClient` i repozytoriów wykrywają każdą próbę konstrukcji po błędnym preflightcie. Test potwierdza kod 2, raport `review`, `canonical_lionelo_set_mismatch` i zerowe liczniki przed mutacją.
+
+## Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused Unit 3/API | PASS | `fieldnote-api/.venv/bin/python -m unittest tests/test_selective_migration.py tests/test_supabase_repositories.py tests/test_fieldnote_api_contracts.py` — 31 tests |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` — backend, checkery i frontend typecheck/test/build |
+| Czystość diffu | PASS | `git diff --check 8ede9d7^..8ede9d7` |
+
+## Decyzja gate
+
+**GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 3 jest ukończony; Unit 4 nie został rozpoczęty.
