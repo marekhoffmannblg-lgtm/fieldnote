@@ -61,3 +61,4 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
+supabase/.temp/

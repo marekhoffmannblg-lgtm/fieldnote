@@ -22,9 +22,9 @@
 ## Unit 2 — Supabase schema, Auth, Storage i RLS
 
 - [x] Implementacja: migracje core catalog/source/benchmark/jobs/auth-RLS-storage, idempotentny seed oraz prywatne buckety `source-raw`, `source-clean`, `imports`.
-- [x] Test: `tests/test_supabase_schema_contract.py` i `tests/test_rls_policy_contract.py` pokrywają anon/viewer/analyst/admin, unikalny aktywny job i współdzielone source ID.
-- [ ] Weryfikacja: czysta baza tworzy się z migracji bez błędów; seed jest idempotentny. Bloker: brak lokalnego Supabase CLI/Docker/PostgreSQL; offline kontrakty i pełny gate są PASS.
-- [ ] Review: brak otwartych P1/P2.
+- [x] Test: kontrakty schema/RLS oraz opt-in `tests/test_supabase_runtime_contract.py` pokrywają anon/viewer/analyst/admin, API Storage, spoofing aktora, spójność evidence, unikalny aktywny job, współdzielone source ID i idempotencję seedów.
+- [x] Weryfikacja: `supabase start` i `supabase db reset` PASS; offline kontrakty oraz pełny gate PASS. Wykonawcza regresja ról/RLS i dwukrotnego seeda pozostaje P2 z review.
+- [ ] Review: poprawki czterech P2 są gotowe; oczekuje ograniczony re-review. Szczegóły w `review-unit-2.md`.
 
 ## Unit 3 — Repozytoria Supabase i selektywna migracja
 
@@ -99,3 +99,10 @@
 - [x] P2: CI instaluje zależności API przed uruchomieniem pełnej offline bramki.
 - [x] P2: hygiene test skanuje staged blob zamiast zawartości worktree.
 - [x] P2: fixture regresji nie może zawierać w śledzonym pliku literalnego sekretu rozpoznawanego przez hygiene scanner.
+
+### Unit 2
+
+- [x] P2: wymuszono w `audit_events` aktora równego `auth.uid()` i dodano regresję JWT analityka dla spoofingu `actor_id`.
+- [x] P2: wymuszono spójność `evidence_items.product_id`, `source_id` i `product_source_link_id`; dodano regresję odrzucającą mismatch.
+- [x] P2: dodano wykonawcze testy RLS/Storage dla anon, viewer, analyst i admin.
+- [x] P2: dodano wykonawczy test idempotencji obu seedów (dwa uruchomienia, stałe liczności i ID).

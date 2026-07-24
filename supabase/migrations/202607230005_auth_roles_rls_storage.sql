@@ -6,6 +6,28 @@ create table public.profiles (
   updated_at timestamptz not null default now()
 );
 
+create or replace function public.fieldnote_set_audit_actor()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is not null then
+    if new.actor_id is not null and new.actor_id is distinct from auth.uid() then
+      raise exception 'audit actor must match the authenticated user'
+        using errcode = '42501';
+    end if;
+    new.actor_id := auth.uid();
+  end if;
+  return new;
+end;
+$$;
+
+create trigger fieldnote_set_audit_actor
+before insert on public.audit_events
+for each row execute function public.fieldnote_set_audit_actor();
+
 create or replace function public.fieldnote_current_role()
 returns public.fieldnote_role
 language sql stable security definer set search_path = public

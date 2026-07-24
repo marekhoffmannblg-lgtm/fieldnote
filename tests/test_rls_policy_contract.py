@@ -50,6 +50,11 @@ class RlsPolicyContractTests(unittest.TestCase):
         self.assertIn("analyst_storage_write on storage.objects", RLS)
         self.assertIn("admin_storage_delete on storage.objects", RLS)
 
+    def test_audit_events_bind_the_actor_to_the_authenticated_subject(self) -> None:
+        self.assertIn("fieldnote_set_audit_actor", RLS)
+        self.assertIn("new.actor_id is distinct from auth.uid()", RLS)
+        self.assertIn("new.actor_id := auth.uid()", RLS)
+
 
 if __name__ == "__main__":
     unittest.main()

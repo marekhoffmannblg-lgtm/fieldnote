@@ -56,6 +56,12 @@ class SupabaseSchemaContractTests(unittest.TestCase):
             self.assertIn("on conflict", seed.lower())
             self.assertNotRegex(seed, re.compile(r"auth\.users|password|service_role", re.IGNORECASE))
 
+    def test_evidence_link_trigger_requires_one_consistent_provenance_path(self) -> None:
+        provenance = migration("202607230002_sources_provenance.sql")
+        self.assertIn("fieldnote_validate_evidence_link", provenance)
+        self.assertIn("new.product_id is distinct from linked_product_id", provenance)
+        self.assertIn("new.source_id is distinct from linked_source_id", provenance)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -67,6 +67,41 @@ create table public.evidence_items (
   updated_at timestamptz not null default now()
 );
 
+create or replace function public.fieldnote_validate_evidence_link()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  linked_product_id text;
+  linked_source_id text;
+begin
+  if new.product_source_link_id is null then
+    return new;
+  end if;
+
+  select product_id, source_id
+    into linked_product_id, linked_source_id
+    from public.product_source_links
+   where link_id = new.product_source_link_id;
+
+  if not found
+     or new.product_id is distinct from linked_product_id
+     or new.source_id is distinct from linked_source_id then
+    raise exception 'evidence product, source and product_source_link must agree'
+      using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger fieldnote_validate_evidence_link
+before insert or update of product_id, source_id, product_source_link_id
+on public.evidence_items
+for each row execute function public.fieldnote_validate_evidence_link();
+
 create table public.attribute_values (
   id uuid primary key default gen_random_uuid(),
   product_id text not null references public.products(product_id) on delete cascade,

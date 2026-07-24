@@ -56,18 +56,22 @@
 - RLS obejmuje wszystkie 26 tabel biznesowych. Self-signup i anonymous sign-in są wyłączone; anon nie otrzymuje polityk, viewer ma wyłącznie odczyt, analyst/admin zapis danych, a zarządzanie profilami i katalogiem pozostaje adminowi. Buckety `source-raw`, `source-clean` i `imports` są prywatne; dostęp do obiektów ma wyłącznie analyst/admin.
 - `fieldnote-api/.venv/bin/python -m unittest tests/test_supabase_schema_contract.py tests/test_rls_policy_contract.py`: PASS (7 testów).
 - `bash scripts/check_fieldnote.sh`: PASS; pełny offline gate wraz z API i frontendem przeszedł bez wywołań Firecrawl/OpenAI.
+- Review Unit 2 (`807e81b..53af30a`) objął `correctness_reviewer`, `security_reviewer`, `test_reviewer` i wymagany `data_reviewer`. Ponowione kontrakty Supabase/RLS (7/7), pełny offline gate i `git diff --check` przeszły; executor potwierdził także `supabase start` oraz `supabase db reset` jako PASS.
+- Gate Unit 2: **WYMAGA POPRAWEK** — 0 P1, 4 P2, 0 P3. Zaakceptowano: spoofing `audit_events.actor_id`, niespójny link evidence/provenance, brak wykonawczych testów RLS/Storage oraz brak wykonawczego testu idempotencji obu seedów. Raport: `review-unit-2.md`.
+- Naprawa czterech P2 Unit 2: trigger `fieldnote_set_audit_actor` odrzuca cudzy `actor_id` i przypisuje subject JWT; trigger `fieldnote_validate_evidence_link` odrzuca niespójny product/source/link. Dodano opt-in test wykonawczy `tests/test_supabase_runtime_contract.py`; korzysta wyłącznie z lokalnego `supabase db query`, krótkotrwałych testowych użytkowników i JWT podpisanych lokalnym sekretem pobranym w pamięci przez CLI, bez sekretów w repozytorium.
+- Po poprawkach `supabase db reset --local --yes` PASS; `FIELDNOTE_SUPABASE_INTEGRATION=1 fieldnote-api/.venv/bin/python -m unittest tests/test_supabase_runtime_contract.py` PASS (4). Kontrakty schema/RLS przechodzą (9 testów), pełny `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
 
 ## Blokery i ryzyka
 
-- Lokalny runtime nie ma Supabase CLI, Dockera ani `psql`; nie zweryfikowano wykonania migracji przez `supabase db reset`. Nie instalowano narzędzi ani nie wykonywano destrukcyjnego resetu. Ten krok pozostaje warunkiem domknięcia weryfikacji Unit 2.
+- Runtime Supabase działa; wszystkie cztery P2 Unit 2 są naprawione i oczekują tylko ograniczonego re-review.
 - Istniejące lokalne dane, outputy i środowiska nie mogą trafić do repo.
 - Live provider calls i koszty są poza automatyczną weryfikacją.
 
 ## Przekazanie
 
 - **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
-- **Status:** partial — implementacja i offline kontrakty są zielone, ale brakuje lokalnego runtime Supabase do potwierdzenia czystego `db reset`.
-- **Pliki w toku:** `supabase/`, `e2e/seeds/fieldnote-stroller-mvp-seed.sql`, kontrakty Unit 2 i aktywne dokumenty zadania.
-- **Ostatnie testy:** 7 testów kontraktowych Unit 2 PASS; pełny offline gate PASS.
-- **Bloker:** Supabase CLI/Docker/PostgreSQL nie są dostępne lokalnie; potrzebne jest niedestrukcyjne środowisko Supabase do `supabase db reset` i wykonawczych testów RLS.
-- **Następny krok:** uruchomić wyłącznie weryfikację runtime Unit 2 w przygotowanym środowisku, następnie `$dev-docs-review docs/active/fieldnote-stroller-mvp 2`; nie rozpoczynać Unit 3.
+- **Status:** partial — poprawki i wszystkie testy są zielone, lecz Unit 2 nie jest ukończony do czasu ograniczonego re-review.
+- **Pliki w toku:** migracje `202607230002`/`202607230005`, kontrakty schema/RLS/runtime i aktywne dokumenty Unit 2.
+- **Ostatnie testy:** `supabase db reset` PASS; runtime test 4 PASS; kontrakty schema/RLS 9 PASS; pełny offline gate PASS.
+- **Bloker:** ograniczony re-review czterech zamkniętych P2; nie rozpoczynać Unit 3.
+- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 2` w trybie ograniczonym wyłącznie dla tych poprawek.
