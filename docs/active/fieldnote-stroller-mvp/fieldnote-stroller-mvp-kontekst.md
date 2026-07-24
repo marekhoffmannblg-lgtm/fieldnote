@@ -1,7 +1,7 @@
 # FIELDNOTE Stroller MVP — kontekst
 
-- **Branch:** `main` (nieprzełączony z powodu brudnego drzewa roboczego)
-- **Ostatni commit przed Unit 1:** `298f40b92953baa23389c49291bf537c56f9d589 — docs: initialize fieldnote stroller mvp task`
+- **Branch:** `main` (preflight Unit 2: czyste drzewo i synchronizacja z `origin/main`)
+- **Ostatni commit przed Unit 2:** `807e81bd9176e274925ce3d1feac67fdb3dc9447 — data: add lionelo internal specification fixtures`
 - **Ostatnia aktualizacja:** 2026-07-24
 
 ## Źródła
@@ -11,7 +11,7 @@
 
 ## Obecny stan repozytorium
 
-- Drzewo robocze jest obszernie zmodyfikowane i zawiera zarówno zmienione pliki śledzone, jak i nieśledzone artefakty oraz kod projektu. Nie należy go resetować, czyścić ani przełączać brancha podczas inicjalizacji.
+- Przed rozpoczęciem Unit 2 drzewo robocze było czyste, a `main` oraz `origin/main` wskazywały commit `807e81b`.
 - Istnieje lokalny pipeline Python, FastAPI, frontend React/Vite, provenance, quality gate, retry i historia runów. Kanoniczny entrypoint researchu pozostaje `scripts/run_model_research_pipeline.py`.
 - Repozytoryjny starter Codex v2 jest zainstalowany. Wprowadza workflow `dev-docs`; jego konfiguracja nie wykonuje pracy aplikacyjnej podczas tej inicjalizacji.
 - Aktywne zadanie jest zapisane w osobnym commicie. Drzewo pozostaje brudne, dlatego Unit 1 stage'uje wyłącznie własne pliki i pojedynczy hunk hygiene w `scripts/check_fieldnote.sh`.
@@ -52,18 +52,22 @@
 - Finalna naprawa P2 buduje fixture tokenu z fragmentów, więc śledzony plik testu nie zawiera sekretopodobnego literalu, a staged fixture nadal jest wykrywany w tymczasowym repo. `python3 -m unittest tests/test_repository_hygiene.py` PASS (4), `bash scripts/check_fieldnote.sh` PASS. Ograniczony re-review przez correctness_reviewer, security_reviewer i test_reviewer: PASS; gate **GOTOWE DO KONTYNUACJI** (0 P1, 0 P2, 0 P3).
 - Unit 1.5: zapisano `repository-cleanup-plan.md` po odczytowym audycie rootu. Usunięto wyłącznie odtwarzalne cache/local env (`.venv`, API venv, pnpm/Vite cache, oba node_modules, dist, pycache i `.DS_Store`), a 31 ZIP-ów diagnostycznych przeniesiono do `archive/repository-cleanup/2026-07-24/`. `project_files.txt` przeniesiono do tracked archive. Nie ruszono kodu ani kanonicznych ścieżek danych.
 - Przed cleanupem `bash scripts/check_fieldnote.sh` PASS. Po cleanupie `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_repository_hygiene.py` PASS (4); lokalne uruchomienie API/UI wymaga ponownej instalacji zależności.
+- Unit 2 dodał wersjonowany baseline Supabase: `config.toml`, pięć uporządkowanych migracji (katalog, provenance, rynek/benchmarki, joby/audyt oraz Auth/RLS/Storage), idempotentne seedy dev/E2E i offline kontrakty schematu oraz polityk. Zachowano stabilne tekstowe `product_id`, `source_id` i `evidence_id`; częściowy indeks blokuje drugi aktywny job produktu; źródło może łączyć się z wieloma produktami.
+- RLS obejmuje wszystkie 26 tabel biznesowych. Self-signup i anonymous sign-in są wyłączone; anon nie otrzymuje polityk, viewer ma wyłącznie odczyt, analyst/admin zapis danych, a zarządzanie profilami i katalogiem pozostaje adminowi. Buckety `source-raw`, `source-clean` i `imports` są prywatne; dostęp do obiektów ma wyłącznie analyst/admin.
+- `fieldnote-api/.venv/bin/python -m unittest tests/test_supabase_schema_contract.py tests/test_rls_policy_contract.py`: PASS (7 testów).
+- `bash scripts/check_fieldnote.sh`: PASS; pełny offline gate wraz z API i frontendem przeszedł bez wywołań Firecrawl/OpenAI.
 
 ## Blokery i ryzyka
 
-- Brudne drzewo robocze: konieczne ścisłe, jawne stage'owanie plików bieżącego unitu.
-- Istniejące lokalne dane, outputy i środowiska nie mogą trafić do repo; Unit 1 ma utworzyć audytowalny baseline.
+- Lokalny runtime nie ma Supabase CLI, Dockera ani `psql`; nie zweryfikowano wykonania migracji przez `supabase db reset`. Nie instalowano narzędzi ani nie wykonywano destrukcyjnego resetu. Ten krok pozostaje warunkiem domknięcia weryfikacji Unit 2.
+- Istniejące lokalne dane, outputy i środowiska nie mogą trafić do repo.
 - Live provider calls i koszty są poza automatyczną weryfikacją.
 
 ## Przekazanie
 
-- **Bieżący unit:** Unit 1.5 — Repository cleanup
-- **Status:** completed; oczekuje na review bezpiecznego zakresu
-- **Pliki w toku:** `.gitignore`, `repository-cleanup-plan.md`, aktywne dokumenty zadania oraz `archive/repository-cleanup/2026-07-24/project_files.txt`
-- **Ostatnie testy:** pełny offline gate PASS przed cleanupem; hygiene test PASS po cleanupie
-- **Bloker:** brak techniczny; local API/UI wymaga reinstall po usunięciu env/cache
-- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 1.5` tylko dla bezpiecznego cleanupu
+- **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
+- **Status:** partial — implementacja i offline kontrakty są zielone, ale brakuje lokalnego runtime Supabase do potwierdzenia czystego `db reset`.
+- **Pliki w toku:** `supabase/`, `e2e/seeds/fieldnote-stroller-mvp-seed.sql`, kontrakty Unit 2 i aktywne dokumenty zadania.
+- **Ostatnie testy:** 7 testów kontraktowych Unit 2 PASS; pełny offline gate PASS.
+- **Bloker:** Supabase CLI/Docker/PostgreSQL nie są dostępne lokalnie; potrzebne jest niedestrukcyjne środowisko Supabase do `supabase db reset` i wykonawczych testów RLS.
+- **Następny krok:** uruchomić wyłącznie weryfikację runtime Unit 2 w przygotowanym środowisku, następnie `$dev-docs-review docs/active/fieldnote-stroller-mvp 2`; nie rozpoczynać Unit 3.

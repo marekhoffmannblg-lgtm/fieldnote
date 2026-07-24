@@ -1,0 +1,13 @@
+[project]
+project_id = "fieldnote-stroller-mvp"
+
+[api]
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+
+[auth]
+enable_signup = false
+enable_anonymous_sign_ins = false
+
+[storage]
+file_size_limit = "25MiB"

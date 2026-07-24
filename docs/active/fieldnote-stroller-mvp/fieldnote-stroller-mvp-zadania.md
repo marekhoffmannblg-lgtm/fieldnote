@@ -1,6 +1,6 @@
 # FIELDNOTE Stroller MVP — zadania
 
-- **Branch:** `main` (brudne drzewo robocze)
+- **Branch:** `main` (czyste i zsynchronizowane z `origin/main` przed Unit 2)
 - **Ostatnia aktualizacja:** 2026-07-24
 
 ## Unit 1 — Bezpieczny baseline repozytorium i CI
@@ -21,9 +21,9 @@
 
 ## Unit 2 — Supabase schema, Auth, Storage i RLS
 
-- [ ] Implementacja: migracje core catalog/source/benchmark/jobs/auth-RLS-storage, idempotentny seed oraz prywatne buckety `source-raw`, `source-clean`, `imports`.
-- [ ] Test: `tests/test_supabase_schema_contract.py` i `tests/test_rls_policy_contract.py` pokrywają anon/viewer/analyst/admin, unikalny aktywny job i współdzielone source ID.
-- [ ] Weryfikacja: czysta baza tworzy się z migracji bez błędów; seed jest idempotentny.
+- [x] Implementacja: migracje core catalog/source/benchmark/jobs/auth-RLS-storage, idempotentny seed oraz prywatne buckety `source-raw`, `source-clean`, `imports`.
+- [x] Test: `tests/test_supabase_schema_contract.py` i `tests/test_rls_policy_contract.py` pokrywają anon/viewer/analyst/admin, unikalny aktywny job i współdzielone source ID.
+- [ ] Weryfikacja: czysta baza tworzy się z migracji bez błędów; seed jest idempotentny. Bloker: brak lokalnego Supabase CLI/Docker/PostgreSQL; offline kontrakty i pełny gate są PASS.
 - [ ] Review: brak otwartych P1/P2.
 
 ## Unit 3 — Repozytoria Supabase i selektywna migracja
