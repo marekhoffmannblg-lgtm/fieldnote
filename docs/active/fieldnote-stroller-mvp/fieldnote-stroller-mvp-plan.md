@@ -28,7 +28,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 1 — Unit 2: Supabase schema, Auth, Storage i RLS
 
-- Status: `pending`
+- Status: `completed` (review PASS)
 - Zależności: Unit 1
 - Kryterium ukończenia: migracje, idempotentny seed oraz testy ról/RLS działają dla anon, viewer, analyst i admin.
 

@@ -320,3 +320,60 @@ Brak odchyleń funkcjonalnych. Nie rozpoczęto Unit 3.
 ## Status wykonania ostatniego P2 po re-review
 
 Executor zmienił wyłącznie `tests/test_supabase_runtime_contract.py`: po pierwszym udanym adminowym UPSERT `brands` wykonuje drugi identyczny request i przez adminowy GET PostgREST potwierdza dokładnie jedną pozycję `runtime-admin-catalog`. Odmowa zapisu dla analyst pozostaje. Wyniki: runtime integration 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); pełna offline bramka PASS; `git diff --check` PASS. Ten wpis nie jest re-review — gate pozostaje **WYMAGA POPRAWEK** do czasu ograniczonego review poprawki.
+
+---
+
+## Końcowy ograniczony re-review — `aa9ca91^..aa9ca91`
+
+### Kryterium i zakres
+
+Re-review obejmuje wyłącznie naprawę wykonawczej idempotencji adminowego UPSERT `brands`: drugi identyczny POST przez PostgREST oraz odczyt potwierdzający jeden rekord fixture. Nie obejmuje migracji, modeli danych ani Unit 3.
+
+### Skonsolidowane findings
+
+#### P1 — blocking
+
+Brak.
+
+#### P2 — important
+
+Brak.
+
+#### P3 — non-blocking
+
+Brak.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | PASS | 0 | 0 |
+
+`data_reviewer` i `ui_reviewer` nie były wymagane: diff nie zmienia migracji, modeli, persistence ani interfejsu.
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Kontrakty schema/RLS/runtime offline | PASS | 14 testów, 5 opt-in skipped |
+| `FIELDNOTE_SUPABASE_INTEGRATION=1 fieldnote-api/.venv/bin/python -m unittest tests/test_supabase_runtime_contract.py` | PASS | 5 testów |
+| `bash scripts/check_fieldnote.sh` | PASS | backend, checkery i frontend typecheck/test/build |
+| `git diff --check aa9ca91^ aa9ca91` | PASS | brak błędów whitespace |
+
+### Bezpieczeństwo
+
+Security review PASS. Dwa requesty admina i odczyt nadal przechodzą przez PostgREST/RLS; odmowa dla analyst pozostaje wykonawczo sprawdzona. Nie wykryto sekretów ani nowych uprawnień.
+
+### Odchylenia od planu
+
+Brak. Unit 3 nie został rozpoczęty.
+
+### Decyzja gate
+
+**GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 2 jest ukończony.
+
+### Rekomendowany następny krok
+
+Po wyraźnym poleceniu użytkownika: `$dev-docs-execute docs/active/fieldnote-stroller-mvp 3`.

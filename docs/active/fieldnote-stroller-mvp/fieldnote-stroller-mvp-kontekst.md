@@ -68,6 +68,8 @@
 - Weryfikacja re-review: kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), runtime Supabase 5 PASS, pełna offline bramka PASS i `git diff --check eaa580e^ eaa580e` PASS. Gate Unit 2 pozostaje **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3.
 - Naprawiono ostatni P2: test PostgREST wykonuje teraz odmowę `POST /brands` dla analyst oraz idempotentny UPSERT identycznego fixture przez admina. Wykonano tylko zmianę runtime contractu; nie zmieniano migracji ani nie rozpoczęto Unit 3.
 - Po naprawie runtime contract PASS (5 testów), kontrakty schema/RLS/runtime offline PASS (14 testów, 5 opt-in skipped), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje wyłącznie ograniczony re-review tej poprawki.
+- Końcowy ograniczony re-review `aa9ca91^..aa9ca91` przez correctness, security i tests: wszyscy PASS. Potwierdzono dwa identyczne UPSERT-y admina, pojedynczy rekord przez adminowy GET PostgREST oraz odmowę dla analyst. Data/UI review nie były wymagane, bo diff dotyczył wyłącznie testu runtime.
+- Weryfikacja końcowego re-review: runtime Supabase 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka PASS i `git diff --check aa9ca91^ aa9ca91` PASS. Gate Unit 2: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3.
 - Ograniczony re-review `39c5fdd^..39c5fdd` przez correctness, security i tests: correctness/security PASS; tests zgłosił P2. Pierwszy adminowy UPSERT katalogu jest pokryty, ale test nie wykonuje drugiego requestu ani nie sprawdza jednej trwałej pozycji fixture, więc nie dowodzi wykonawczo idempotencji.
 - Weryfikacja re-review: runtime Supabase 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka PASS i `git diff --check 39c5fdd^ 39c5fdd` PASS. Gate Unit 2 pozostaje **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3.
 - Naprawiono ostatni P2 wyłącznie w runtime contract: admin wykonuje drugi identyczny POST/UPSERT `brands`, a adminowy GET przez PostgREST potwierdza dokładnie jeden rekord `runtime-admin-catalog`. Odmowa dla analyst pozostaje.
@@ -75,15 +77,15 @@
 
 ## Blokery i ryzyka
 
-- Runtime Supabase działa; ostatni P2 jest naprawiony i oczekuje ograniczonego re-review.
+- Runtime Supabase działa; Unit 2 ma PASS i brak otwartych P1/P2.
 - Istniejące lokalne dane, outputy i środowiska nie mogą trafić do repo.
 - Live provider calls i koszty są poza automatyczną weryfikacją.
 
 ## Przekazanie
 
 - **Bieżący unit:** Unit 2 — Supabase schema, Auth, Storage i RLS
-- **Status:** partial — naprawiono ostatni P2; Unit 2 oczekuje ograniczonego re-review.
-- **Pliki w toku:** `tests/test_supabase_runtime_contract.py`, `review-unit-2.md` i aktywne dokumenty Unit 2.
+- **Status:** completed — review PASS, brak otwartych P1/P2.
+- **Pliki zamknięte:** migracje `202607230001`–`202607230005`, seedy oraz kontrakty schema/RLS/runtime i aktywne dokumenty Unit 2.
 - **Ostatnie testy:** runtime test 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); pełny offline gate PASS; `git diff --check` PASS.
-- **Bloker:** oczekujący ograniczony re-review ostatniej poprawki P2; nie rozpoczynać Unit 3.
-- **Następny krok:** ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 2` wyłącznie dla idempotencji testu katalogu.
+- **Bloker:** brak dla Unit 2. Unit 3 nie został rozpoczęty w tej sesji.
+- **Następny krok:** po wyraźnym poleceniu użytkownika `$dev-docs-execute docs/active/fieldnote-stroller-mvp 3`.
