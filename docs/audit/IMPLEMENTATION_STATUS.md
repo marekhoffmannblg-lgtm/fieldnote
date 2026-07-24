@@ -285,3 +285,229 @@ model ani terminalnego przebiegu wspólnego pipeline'u.
 - Źródło producenta oraz jego evidence są dostępne w lokalnych endpointach
   produktu NEBO; evidence ma poprawne `source_id` i excerpt.
 - `offline_tests_passed=true`
+
+## CYBEX ORFEO Single Live Run
+
+- `cybex_orfeo_live=FAIL`
+- `failure_stage=post_fetch_lifecycle`
+- `failure_reason=controlled_live_runner_stops_after_NormalizedDocument_and_does_not_yet_persist_SourceRecordV2_ProductSourceLinkV1_or_product_evidence`
+- `firecrawl_requests_attempted=1`, `firecrawl_requests_succeeded=1`
+- `openai_requests_attempted=0`, `openai_requests_succeeded=0`
+- `openai_skipped_reason=no_unresolved_candidates_reported_by_current_runner`
+- `manufacturer_source_id=manufacturer:cybex:52c8810b9c29e1cc`
+- `raw_snapshot_saved=true`, `clean_snapshot_saved=true`, `identity_match=true`
+- `deterministic_facts=1`, `ai_facts=0`, `quality_rejections=0`
+- Oficjalny rekord producenta został zapisany do legacy registry i do grupy
+  `cybex|orfeo` bez kolejnego requestu sieciowego. Nie zapisano jednak jeszcze
+  globalnego `SourceRecordV2`, `ProductSourceLinkV1` ani evidence widocznego
+  przez API produktu, więc run nie może zostać oznaczony jako produkcyjny PASS.
+- `product_source_link_created=false`
+- `evidence_available_in_api=false`
+- `offline_tests_passed=true`
+- `next_item=MANUFACTURER_PRODUCTION_HARDENING`
+
+## Manufacturer Post-Fetch Lifecycle Commit
+
+- `post_fetch_lifecycle_fixed=true`
+- Wznowiono wyłącznie z cache dla `CYBEX ORFEO` przez kontrolowany runner z
+  `--resume --no-fetch`; nie wykonano nowego pobrania Firecrawl ani requestu
+  OpenAI.
+- `cached_resume_used=true`
+- `firecrawl_requests_attempted=0`
+- `openai_requests_attempted=0`
+- `source_record_created=true` — istnieje dokładnie jeden globalny
+  `SourceRecordV2` `manufacturer:cybex:52c8810b9c29e1cc` ze statusem
+  `fetched`/`cleaned`, snapshotami oraz content family.
+- `product_source_link_created=true` — istnieje dokładnie jeden przypisany,
+  wybrany link `cybex__orfeo|manufacturer:cybex:52c8810b9c29e1cc` z rolą
+  `manufacturer`.
+- `evidence_records_created=1` — deterministyczny fakt `Waga: 6.3 kg` ma
+  `source_id`, excerpt, authority producenta i metodę `deterministic`.
+- `evidence_available_in_api=true`
+- `manufacturer_contribution_available=true`
+- `duplicate_sources_created=0`
+- `duplicate_links_created=0`
+- `orfeo_allegro_counters_unchanged=true` — `selected=10`, `fetched=8`,
+  `failed=2`, `attached=5`, `unattached=3`; producent jest liczony osobno.
+- `offline_tests_passed=true` — `scripts/check_fieldnote.sh`, w tym test
+  post-fetch lifecycle oraz typecheck i build frontendu.
+- `failure_stage=`
+- `failure_reason=`
+- `next_item=MANUFACTURER_PRODUCTION_HARDENING`
+
+## Manufacturer Production Hardening
+
+- `manufacturer_full_flow_automatic=true`
+- `post_fetch_commit_integrated=true` — kontrolowany runner kończy discovery,
+  cache/live fetch, clean, exact identity, normalizację, ekstrakcję,
+  quality gate, lifecycle commit, refresh metryk i weryfikację indeksu API w
+  jednym przebiegu. Brak `lifecycle_commit` lub `api_verification` blokuje
+  status sukcesu.
+- `terminal_stage_statuses_added=true` — manifest źródła zapisuje stabilne ID
+  i status każdego etapu: `pending`, `running`, `completed`, `skipped` albo
+  `failed`.
+- `cache_resume_hardened=true` — `--resume --no-fetch --no-openai` działa bez
+  zgód sieciowych i bez kluczy; cache nie zwiększa liczników providerów.
+- `refresh_content_hash_logic=true` — jawny `--force-refresh` z niezmienionym
+  hashem treści omija deterministyczną ekstrakcję, quality gate i lifecycle
+  commit, a jedynie potwierdza istniejący indeks API.
+- `openai_fallback_guarded=true` — brak nierozstrzygniętych kandydatów zapisuje
+  `openai_requested=false`, `openai_skipped_reason=no_unresolved_candidates`
+  oraz nie wykonuje requestu.
+- `research_manufacturer_integration=true` — Research przekazuje wybrane
+  `selected_manufacturer_source_ids`; po części Allegro uruchamia ten sam
+  kontrolowany lifecycle z lokalnego cache. Niepowodzenie opcjonalnego źródła
+  producenta daje ostrzeżenie/partial, nie usuwa wyniku marketplace.
+- `product_ui_manufacturer_integration=true` — Research pokazuje domenę,
+  exact match, cache, status pobrania i cleanera; widok produktu korzysta z
+  źródła, contribution oraz snapshotów z lifecycle.
+- `failure_handling_complete=true` — manifest runnera zawiera stage, code,
+  reason i retryable; identity mismatch i brak cache nie tworzą evidence.
+- `nebo_cached_smoke=PASS`
+- `orfeo_cached_smoke=PASS`
+- `duplicate_sources=0`
+- `duplicate_links=0`
+- `duplicate_evidence=0`
+- `firecrawl_requests_attempted=0`
+- `openai_requests_attempted=0`
+- `offline_tests_passed=true`
+- `frontend_typecheck=PASS`
+- `frontend_tests=PASS`
+- `frontend_build=PASS`
+- `remaining_issues=retryable błędy sieciowe live pozostają zależne od providerów; nie wykonywano ich w tym etapie zgodnie z limitem requestów.`
+- `next_item=MANUFACTURER_FINAL_CLOSURE`
+
+## Visual Source Snapshots
+
+- Wspólna warstwa `VisualSourceSnapshotV1`, `VisualBlockV1` i `MediaAssetV1`
+  działa dla producentów oraz Allegro; media pozostają wyłącznie kontekstem
+  wizualnym i nie tworzą automatycznie faktów benchmarku.
+- `scripts/backfill_visual_context.py` buduje artefakty offline z zapisanych
+  HTML. NEBO, ORFEO i Allegro `18405722631` mają status `partial`, ponieważ
+  historyczne pobrania nie zawierają pełnostronicowych screenshotów.
+- Istniejący fetcher Firecrawl rozszerzono o `images` i `screenshot` w tym
+  samym scrape request oraz flagi `--no-visuals`, `--visuals-from-cache` i
+  `--refresh-visuals`. Nie uruchamiano live requestów w tym etapie.
+- API udostępnia wersjonowane, paginowane endpointy visual, nie ujawnia
+  ścieżek absolutnych i blokuje traversal. Widok źródła w UI pokazuje media,
+  nagłówek/opis z tego samego bloku oraz uczciwy stan bez cropu.
+- `scripts/check_fieldnote.sh`: PASS. Nowe testy obejmują typ video NEBO,
+  scalenie klonów, blok ORFEO, ograniczenie Allegro, idempotencję, redakcję
+  JSON i bezpieczeństwo artefaktów.
+
+```text
+visual_contracts_added=true
+firecrawl_screenshot_format_added=true
+firecrawl_images_format_added=true
+visual_stage_integrated=true
+cache_html_backfill_added=true
+nebo_blocks_extracted=6
+orfeo_blocks_extracted=4
+allegro_blocks_extracted=2
+nebo_partial_backfill=PASS
+orfeo_partial_backfill=PASS
+allegro_partial_backfill=PASS
+nebo_live_visual=NOT_RUN
+allegro_live_visual=NOT_RUN
+full_page_screenshots_saved=0
+section_crops_saved=0
+media_assets_created=48
+duplicate_visual_snapshots=0
+duplicate_visual_blocks=0
+duplicate_media_assets=0
+firecrawl_requests_attempted=0
+openai_requests_attempted=0
+visual_api_added=true
+visual_ui_added=true
+absolute_paths_hidden=true
+path_traversal_blocked=true
+offline_tests_passed=true
+frontend_typecheck=PASS
+frontend_tests=PASS
+frontend_build=PASS
+remaining_issues=Kontrolowane live capture screenshotów nie zostało uruchomione; istniejące artefakty nie mają bounding boxów, więc cropy pozostają niedostępne zgodnie z kontraktem.
+next_item=MANUFACTURER_FINAL_CLOSURE
+Result: VISUAL_SOURCE_SNAPSHOTS_PASS
+```
+
+## AI Product Profile
+
+```text
+product_profile_contract_added=true
+dynamic_theme_discovery_added=true
+fixed_category_narrative_removed=true
+factual_and_communication_layers_separated=true
+visual_positioning_added=true
+negative_inference_from_missing_data_blocked=true
+single_ai_request_enforced=true
+second_template_check_request_added=false
+input_hash_cache_added=true
+profile_pipeline_stage_added=true
+profile_api_added=true
+profile_ui_added=true
+nebo_profile_dry_run=PASS
+orfeo_profile_dry_run=PASS
+nebo_textual_coverage=partial
+nebo_visual_coverage=partial
+orfeo_textual_coverage=partial
+orfeo_visual_coverage=partial
+openai_requests_attempted=0
+firecrawl_requests_attempted=0
+offline_tests_passed=true
+frontend_typecheck=PASS
+frontend_tests=PASS
+frontend_build=PASS
+remaining_issues=Kontrolowany request OpenAI dla ProductProfileV1 pozostaje nieuruchomiony; endpoint wymaga jawnego PRODUCT_PROFILE_AI_ENABLED=1 oraz OPENAI_API_KEY. Historyczne dowody NEBO i ORFEO są częściowe, dlatego oba dry-runy uczciwie raportują pokrycie partial.
+next_item=CONTROLLED_AI_PRODUCT_PROFILE_TEST
+Result: AI_PRODUCT_PROFILE_IMPLEMENTATION_PASS
+```
+
+## AI Product Profile Prompt and Parser Repair
+
+```text
+system_prompt_version=2
+strict_json_schema_added=true
+json_object_mode_removed=true
+empty_profile_fallback_removed=true
+provider_error_types_added=true
+semantic_validation_added=true
+empty_generated_profile_blocked=true
+canonical_product_profile_input_added=true
+input_counters_fixed=true
+visual_block_ids_fixed=true
+provider_response_diagnostic_added=true
+cache_key_includes_prompt_version=true
+cache_key_includes_schema_version=true
+same_hash_cache_test=PASS
+nebo_dry_run=PASS
+openai_requests_attempted=0
+firecrawl_requests_attempted=0
+offline_tests_passed=true
+remaining_issues=Historyczny profil NEBO z poprzedniego requestu nie spełnia nowej walidacji jakości i jest oznaczany jako stale; wymaga jednego przyszłego, jawnie zatwierdzonego retestu po stronie użytkownika.
+next_item=ONE_FINAL_NEBO_AI_RETEST
+Result: AI_PRODUCT_PROFILE_PROMPT_AND_PARSER_REPAIR_PASS
+```
+
+## AI Product Profile Quality Repair
+
+```text
+product_identity_added_to_input=true
+product_identity_validation_added=true
+wrong_product_type_blocked=true
+neutral_factual_highlights_enforced=true
+unsupported_factual_interpretation_blocked=true
+text_only_visual_language_enforced=true
+content_family_count_fixed=true
+canonical_input_hash_named=true
+transmission_payload_hash_named=true
+per_run_request_counters_added=true
+provider_diagnostic_in_review_package=true
+nebo_bad_profile_fixture_rejected=PASS
+nebo_good_profile_fixture_accepted=PASS
+nebo_dry_run=PASS
+openai_requests_attempted=0
+firecrawl_requests_attempted=0
+offline_tests_passed=true
+next_item=FINAL_NEBO_PROFILE_RETEST
+Result: AI_PRODUCT_PROFILE_QUALITY_REPAIR_PASS
+```
