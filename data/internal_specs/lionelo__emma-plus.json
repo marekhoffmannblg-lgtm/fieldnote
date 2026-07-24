@@ -1,0 +1,417 @@
+{
+  "attributes": [
+    {
+      "key": "product_type",
+      "label": "Typ produktu",
+      "raw_value": "Wózek spacerowy",
+      "source_column": "Typ produktu",
+      "unit": "",
+      "value": "Wózek spacerowy"
+    },
+    {
+      "key": "stroller_configuration",
+      "label": "Konfiguracja wózka",
+      "raw_value": "Spacerówka",
+      "source_column": "Konfiguracja wózka",
+      "unit": "",
+      "value": "Spacerówka"
+    },
+    {
+      "key": "harness_buckle",
+      "label": "Zapięcie pasów",
+      "raw_value": "Klasyczne",
+      "source_column": "Zapięcie pasów",
+      "unit": "",
+      "value": "Klasyczne"
+    },
+    {
+      "key": "safety_harness",
+      "label": "Pasy bezpieczeństwa",
+      "raw_value": "5-punktowe",
+      "source_column": "Pasy bezpieczeństwa",
+      "unit": "",
+      "value": "5-punktowe"
+    },
+    {
+      "key": "brake",
+      "label": "Hamulec",
+      "raw_value": "Tylny",
+      "source_column": "Hamulec",
+      "unit": "",
+      "value": "Tylny"
+    },
+    {
+      "key": "straight_wheel_lock",
+      "label": "Blokada kół do jazdy na wprost",
+      "raw_value": "Tak",
+      "source_column": "Blokada kół do jazdy na wprost",
+      "unit": "",
+      "value": "yes"
+    },
+    {
+      "key": "wheel_type",
+      "label": "Rodzaj kół",
+      "raw_value": "Piankowe",
+      "source_column": "Rodzaj kół",
+      "unit": "",
+      "value": "Piankowe"
+    },
+    {
+      "key": "wheel_material",
+      "label": "Materiał kół",
+      "raw_value": "EVA",
+      "source_column": "Materiał kół",
+      "unit": "",
+      "value": "EVA"
+    },
+    {
+      "key": "front_wheel_diameter",
+      "label": "Koła przód (cm)",
+      "raw_value": "17.78",
+      "source_column": "Koła przód (cm)",
+      "unit": "cm",
+      "value": "17.78"
+    },
+    {
+      "key": "rear_wheel_diameter",
+      "label": "Koła tył (cm)",
+      "raw_value": "20.32",
+      "source_column": "Koła tył (cm)",
+      "unit": "cm",
+      "value": "20.32"
+    },
+    {
+      "key": "suspension",
+      "label": "Amortyzacja",
+      "raw_value": "Przód",
+      "source_column": "Amortyzacja",
+      "unit": "",
+      "value": "Przód"
+    },
+    {
+      "key": "swivel_front_wheels",
+      "label": "Przednie koła obrotowe",
+      "raw_value": "-",
+      "source_column": "Przednie koła obrotowe",
+      "unit": "",
+      "value": "-"
+    },
+    {
+      "key": "parent_handle_adjustment",
+      "label": "Regulacja rączki dla rodzica",
+      "raw_value": "Nie",
+      "source_column": "Regulacja rączki dla rodzica",
+      "unit": "",
+      "value": "no"
+    },
+    {
+      "key": "one_hand_fold",
+      "label": "Składanie jedną ręką",
+      "raw_value": "-",
+      "source_column": "Składanie jedną ręką",
+      "unit": "",
+      "value": "-"
+    },
+    {
+      "key": "carrycot_child_carrying",
+      "label": "Możliwość przenoszenia dziecka w gondoli",
+      "raw_value": "N/D",
+      "source_column": "Możliwość przenoszenia dziecka w gondoli",
+      "unit": "",
+      "value": "not_applicable"
+    },
+    {
+      "key": "basket_max_load",
+      "label": "Maksymalne obciążenie kosza (kg)",
+      "raw_value": "3.0",
+      "source_column": "Maksymalne obciążenie kosza (kg)",
+      "unit": "kg",
+      "value": "3.0"
+    },
+    {
+      "key": "max_child_weight_stroller",
+      "label": "Maksymalna waga dziecka w spacerówce (kg)",
+      "raw_value": "15.0",
+      "source_column": "Maksymalna waga dziecka w spacerówce (kg)",
+      "unit": "kg",
+      "value": "15.0"
+    },
+    {
+      "key": "max_child_weight_carrycot",
+      "label": "Maksymalna waga dziecka w gondoli (kg)",
+      "raw_value": "N/D",
+      "source_column": "Maksymalna waga dziecka w gondoli (kg)",
+      "unit": "kg",
+      "value": "not_applicable"
+    },
+    {
+      "key": "child_age_range",
+      "label": "Wiek dziecka",
+      "raw_value": "6-36 miesięcy",
+      "source_column": "Wiek dziecka",
+      "unit": "",
+      "value": "6-36 miesięcy"
+    },
+    {
+      "key": "reversible_seat",
+      "label": "Możliwość montażu siedziska przód-tył",
+      "raw_value": "-",
+      "source_column": "Możliwość montażu siedziska przód-tył",
+      "unit": "",
+      "value": "-"
+    },
+    {
+      "key": "backrest_adjustment",
+      "label": "Regulacja oparcia",
+      "raw_value": "-",
+      "source_column": "Regulacja oparcia",
+      "unit": "",
+      "value": "-"
+    },
+    {
+      "key": "footrest_adjustment",
+      "label": "Regulacja podnóżka",
+      "raw_value": "2- stopniowa",
+      "source_column": "Regulacja podnóżka",
+      "unit": "",
+      "value": "2- stopniowa"
+    },
+    {
+      "key": "carrycot_ventilation",
+      "label": "Wentylacja gondoli",
+      "raw_value": "N/D",
+      "source_column": "Wentylacja gondoli",
+      "unit": "",
+      "value": "not_applicable"
+    },
+    {
+      "key": "upf50_filter",
+      "label": "Filtr UPF50+",
+      "raw_value": "-",
+      "source_column": "Filtr UPF50+",
+      "unit": "",
+      "value": "-"
+    },
+    {
+      "key": "removable_bumper_bar",
+      "label": "Odpinana barierka",
+      "raw_value": "Tak",
+      "source_column": "Odpinana barierka",
+      "unit": "",
+      "value": "yes"
+    },
+    {
+      "key": "frame_construction",
+      "label": "Konstrukcja stelaża",
+      "raw_value": "Stal",
+      "source_column": "Konstrukcja stelaża",
+      "unit": "",
+      "value": "Stal"
+    },
+    {
+      "key": "canopy_material",
+      "label": "Materiał budki",
+      "raw_value": "Poliester",
+      "source_column": "Materiał budki",
+      "unit": "",
+      "value": "Poliester"
+    },
+    {
+      "key": "carrycot_material",
+      "label": "Materiał gondoli",
+      "raw_value": "N/D",
+      "source_column": "Materiał gondoli",
+      "unit": "",
+      "value": "not_applicable"
+    },
+    {
+      "key": "product_width",
+      "label": "Szerokość (cm)",
+      "raw_value": "52.0",
+      "source_column": "Szerokość (cm)",
+      "unit": "cm",
+      "value": "52.0"
+    },
+    {
+      "key": "product_length",
+      "label": "Długość (cm)",
+      "raw_value": "103.0",
+      "source_column": "Długość (cm)",
+      "unit": "cm",
+      "value": "103.0"
+    },
+    {
+      "key": "product_height",
+      "label": "Wysokość (cm)",
+      "raw_value": "105.0",
+      "source_column": "Wysokość (cm)",
+      "unit": "cm",
+      "value": "105.0"
+    },
+    {
+      "key": "folded_width",
+      "label": "Szerokość po złożeniu (cm)",
+      "raw_value": "89.0",
+      "source_column": "Szerokość po złożeniu (cm)",
+      "unit": "cm",
+      "value": "89.0"
+    },
+    {
+      "key": "folded_length",
+      "label": "Długość po złożeniu (cm)",
+      "raw_value": "52.0",
+      "source_column": "Długość po złożeniu (cm)",
+      "unit": "cm",
+      "value": "52.0"
+    },
+    {
+      "key": "folded_height",
+      "label": "Wysokość po złożeniu (cm)",
+      "raw_value": "69.0",
+      "source_column": "Wysokość po złożeniu (cm)",
+      "unit": "cm",
+      "value": "69.0"
+    },
+    {
+      "key": "carrycot_length",
+      "label": "Długość gondoli (cm)",
+      "raw_value": "N/D",
+      "source_column": "Długość gondoli (cm)",
+      "unit": "cm",
+      "value": "not_applicable"
+    },
+    {
+      "key": "carrycot_height",
+      "label": "Wysokość gondoli (cm)",
+      "raw_value": "N/D",
+      "source_column": "Wysokość gondoli (cm)",
+      "unit": "cm",
+      "value": "not_applicable"
+    },
+    {
+      "key": "carrycot_width",
+      "label": "Szerokość gondoli (cm)",
+      "raw_value": "N/D",
+      "source_column": "Szerokość gondoli (cm)",
+      "unit": "cm",
+      "value": "not_applicable"
+    },
+    {
+      "key": "seat_width",
+      "label": "Szerokość siedziska (cm)",
+      "raw_value": "NA",
+      "source_column": "Szerokość siedziska (cm)",
+      "unit": "cm",
+      "value": "NA"
+    },
+    {
+      "key": "backrest_height",
+      "label": "Wysokość oparcia (cm)",
+      "raw_value": "NA",
+      "source_column": "Wysokość oparcia (cm)",
+      "unit": "cm",
+      "value": "NA"
+    },
+    {
+      "key": "backrest_width",
+      "label": "Szerokość oparcia (cm)",
+      "raw_value": "NA",
+      "source_column": "Szerokość oparcia (cm)",
+      "unit": "cm",
+      "value": "NA"
+    },
+    {
+      "key": "footrest_height",
+      "label": "Wysokość podnóżka (cm)",
+      "raw_value": "NA",
+      "source_column": "Wysokość podnóżka (cm)",
+      "unit": "cm",
+      "value": "NA"
+    },
+    {
+      "key": "footrest_width",
+      "label": "Szerokość podnóżka (cm)",
+      "raw_value": "NA",
+      "source_column": "Szerokość podnóżka (cm)",
+      "unit": "cm",
+      "value": "NA"
+    },
+    {
+      "key": "frame_weight",
+      "label": "Waga stelaża (kg)",
+      "raw_value": "-",
+      "source_column": "Waga stelaża (kg)",
+      "unit": "kg",
+      "value": "-"
+    },
+    {
+      "key": "frame_with_wheels_weight",
+      "label": "Waga stelaża z kołami (kg)",
+      "raw_value": "-",
+      "source_column": "Waga stelaża z kołami (kg)",
+      "unit": "kg",
+      "value": "-"
+    },
+    {
+      "key": "carrycot_weight",
+      "label": "Waga gondoli (kg)",
+      "raw_value": "N/D",
+      "source_column": "Waga gondoli (kg)",
+      "unit": "kg",
+      "value": "not_applicable"
+    },
+    {
+      "key": "seat_weight",
+      "label": "Waga siedziska (kg)",
+      "raw_value": "-",
+      "source_column": "Waga siedziska (kg)",
+      "unit": "kg",
+      "value": "-"
+    },
+    {
+      "key": "car_seat_weight",
+      "label": "Waga fotelika (kg)",
+      "raw_value": "N/D",
+      "source_column": "Waga fotelika (kg)",
+      "unit": "kg",
+      "value": "not_applicable"
+    },
+    {
+      "key": "included_items",
+      "label": "Zestaw",
+      "raw_value": "Torba dla rodzica; Tacka z uchwytem na kubek",
+      "source_column": "Zestaw",
+      "unit": "",
+      "value": "Torba dla rodzica; Tacka z uchwytem na kubek"
+    }
+  ],
+  "benchmark_group": "light_stroller",
+  "brand": "Lionelo",
+  "configuration": "",
+  "conflicts": [],
+  "generated_at": "2026-07-22T11:59:15Z",
+  "model": "Emma Plus",
+  "product_id": "product:lionelo:emma-plus:unknown",
+  "product_slug": "lionelo__emma-plus",
+  "schema_version": "internal_spec_v1",
+  "source_rows": [
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92
+  ],
+  "source_sheet": "WÓZKI",
+  "source_type": "internal_spec"
+}
