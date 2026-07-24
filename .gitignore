@@ -53,6 +53,9 @@ fieldnote-frontend/src/data/generated/*
 .codex/cache/
 .codex/rollout*.jsonl
 .codex-starter-backup/
+fieldnote-frontend/node_modules 2/
+archive/repository-cleanup/**/root-diagnostics/*.zip
+archive/repository-cleanup/**/output-diagnostics/*.zip
 __pycache__/
 .ruff_cache/
 dist/

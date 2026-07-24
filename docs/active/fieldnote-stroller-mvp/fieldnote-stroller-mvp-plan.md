@@ -20,6 +20,12 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 - Zależności: brak
 - Kryterium ukończenia: repo hygiene i pełna offline bramka przechodzą bez kluczy API; CI wykonuje bramkę i audyt zależności.
 
+### Faza 0 — Unit 1.5: Repository cleanup
+
+- Status: `completed` (bezpieczny zakres; oczekuje na review)
+- Zależności: Unit 1
+- Kryterium ukończenia: root ma udokumentowaną klasyfikację; usunięte są wyłącznie odtwarzalne cache/środowiska, a pakiety diagnostyczne są poza aktywnym kodem bez relokacji ścieżek runtime.
+
 ### Faza 1 — Unit 2: Supabase schema, Auth, Storage i RLS
 
 - Status: `pending`

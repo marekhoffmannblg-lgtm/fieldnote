@@ -11,6 +11,14 @@
 - [ ] Operator: właściciel tworzy prywatne repo GitHub i rotuje klucze, które mogły znaleźć się w archiwum lub lokalnym env.
 - [x] Review: PASS; brak otwartych P1/P2. Szczegóły w `review-unit-1.md`.
 
+## Unit 1.5 — Repository cleanup
+
+- [x] Audyt: root sklasyfikowany w `repository-cleanup-plan.md`; potwierdzone aktywne ścieżki Streamlit, FastAPI, React/Vite, pipeline i testów.
+- [x] Plan: zapisano strukturę docelową, listę keep/move/delete, ryzyka, ścieżki wymagające audytu i weryfikację.
+- [x] Bezpieczne działania: cache/lokalne środowiska usunięte, ZIP-y diagnostyczne oraz `project_files.txt` zarchiwizowane poza aktywnym kodem.
+- [x] Weryfikacja: targety cleanup nie istnieją; hygiene test nie znajduje artefaktów w indeksie.
+- [ ] Review: wymagany po zakończeniu bezpiecznych działań.
+
 ## Unit 2 — Supabase schema, Auth, Storage i RLS
 
 - [ ] Implementacja: migracje core catalog/source/benchmark/jobs/auth-RLS-storage, idempotentny seed oraz prywatne buckety `source-raw`, `source-clean`, `imports`.

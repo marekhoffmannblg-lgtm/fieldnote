@@ -50,6 +50,8 @@
 - Po naprawie: `python3 -m unittest tests/test_repository_hygiene.py` PASS (4 testy), `bash scripts/check_fieldnote.sh` PASS bez Firecrawl/OpenAI. Oczekuje ograniczony re-review wyłącznie tych zmian.
 - Ograniczony re-review `c75a0c8..a5454f4`: correctness i security PASS, test reviewer wykrył nowy P2. Po commicie staged fixture z literalnym `sk-...` jest skanowany jako sekret, więc `python3 -m unittest tests/test_repository_hygiene.py` FAIL (1/4). Poprzednie P2 są zamknięte; gate pozostaje **WYMAGA POPRAWEK** (0 P1, 1 P2, 0 P3).
 - Finalna naprawa P2 buduje fixture tokenu z fragmentów, więc śledzony plik testu nie zawiera sekretopodobnego literalu, a staged fixture nadal jest wykrywany w tymczasowym repo. `python3 -m unittest tests/test_repository_hygiene.py` PASS (4), `bash scripts/check_fieldnote.sh` PASS. Ograniczony re-review przez correctness_reviewer, security_reviewer i test_reviewer: PASS; gate **GOTOWE DO KONTYNUACJI** (0 P1, 0 P2, 0 P3).
+- Unit 1.5: zapisano `repository-cleanup-plan.md` po odczytowym audycie rootu. Usunięto wyłącznie odtwarzalne cache/local env (`.venv`, API venv, pnpm/Vite cache, oba node_modules, dist, pycache i `.DS_Store`), a 31 ZIP-ów diagnostycznych przeniesiono do `archive/repository-cleanup/2026-07-24/`. `project_files.txt` przeniesiono do tracked archive. Nie ruszono kodu ani kanonicznych ścieżek danych.
+- Przed cleanupem `bash scripts/check_fieldnote.sh` PASS. Po cleanupie `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_repository_hygiene.py` PASS (4); lokalne uruchomienie API/UI wymaga ponownej instalacji zależności.
 
 ## Blokery i ryzyka
 
@@ -59,9 +61,9 @@
 
 ## Przekazanie
 
-- **Bieżący unit:** Unit 1 — Utworzyć bezpieczny baseline repozytorium i CI
-- **Status:** completed; review PASS
-- **Pliki w toku:** `.gitignore`, trzy `.env.example`, `.github/`, `docs/SECURITY_BASELINE.md`, `scripts/check_fieldnote.sh`, `tests/test_repository_hygiene.py`, `docs/active/fieldnote-stroller-mvp/`
-- **Ostatnie testy:** hygiene test PASS; `scripts/check_fieldnote.sh` PASS
-- **Bloker:** brak techniczny; checklist operatora Unit 1 pozostaje ręczna
-- **Następny krok:** Unit 2 może zostać rozpoczęty wyłącznie w osobnym uruchomieniu `$dev-docs-execute docs/active/fieldnote-stroller-mvp 2`
+- **Bieżący unit:** Unit 1.5 — Repository cleanup
+- **Status:** completed; oczekuje na review bezpiecznego zakresu
+- **Pliki w toku:** `.gitignore`, `repository-cleanup-plan.md`, aktywne dokumenty zadania oraz `archive/repository-cleanup/2026-07-24/project_files.txt`
+- **Ostatnie testy:** pełny offline gate PASS przed cleanupem; hygiene test PASS po cleanupie
+- **Bloker:** brak techniczny; local API/UI wymaga reinstall po usunięciu env/cache
+- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 1.5` tylko dla bezpiecznego cleanupu
