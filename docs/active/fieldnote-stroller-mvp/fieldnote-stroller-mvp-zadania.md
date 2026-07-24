@@ -24,7 +24,7 @@
 - [x] Implementacja: migracje core catalog/source/benchmark/jobs/auth-RLS-storage, idempotentny seed oraz prywatne buckety `source-raw`, `source-clean`, `imports`.
 - [x] Test: kontrakty schema/RLS oraz opt-in `tests/test_supabase_runtime_contract.py` pokrywają anon/viewer/analyst/admin przez PostgREST, API Storage, spoofing aktora, spójność evidence także po update linku, unikalny aktywny job, współdzielone source ID i stabilne UUID obu seedów.
 - [x] Weryfikacja: `supabase db reset` PASS; kontrakty schema/RLS/runtime PASS (14 testów, 5 opt-in skipped), runtime z integracją PASS (5), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS.
-- [ ] Review: trzy P2 z ograniczonego re-review są naprawione; oczekuje ograniczony re-review i brak P1/P2. Szczegóły w `review-unit-2.md`.
+- [ ] Review: naprawiono ostatni P2 z ograniczonego re-review; oczekuje ponowny ograniczony re-review i brak P1/P2. Szczegóły w `review-unit-2.md`.
 
 ## Unit 3 — Repozytoria Supabase i selektywna migracja
 
@@ -107,3 +107,4 @@
 - [x] P2: zablokowano zmianę `product_id`/`source_id` użytego `product_source_link`; runtime regresja odrzuca update linku.
 - [x] P2: dodano wykonawcze requesty PostgREST/API dla anon, viewer, analyst i admin na tabelach RLS (obok helperów/Storage).
 - [x] P2: seed runtime test porównuje stabilne UUID dev i E2E po drugim uruchomieniu.
+- [x] P2: dodano wykonawczy zapis katalogu przez PostgREST jako admin oraz odmowę analogicznej akcji dla analyst.

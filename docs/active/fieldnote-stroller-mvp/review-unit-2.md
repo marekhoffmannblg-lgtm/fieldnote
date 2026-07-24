@@ -175,3 +175,78 @@ Nie obejmuje Unit 3 ani innych fragmentów aplikacji.
 Executor wdrożył wyłącznie wskazane naprawy: blokadę rewrite provenance linku używanego przez evidence, requesty PostgREST dla anon/viewer/analyst/admin oraz porównanie stabilnych UUID po drugim uruchomieniu obu seedów. Dodane granty dla `authenticated` pozwalają PostgREST dotrzeć do tabel, przy zachowaniu RLS jako granicy autoryzacji; `anon` nie otrzymał grantów tabel.
 
 Wyniki executora: `supabase db reset --local --yes` PASS, runtime contract 5 PASS, kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped), pełna offline bramka `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Ten wpis nie jest re-review: decyzja gate pozostaje **WYMAGA POPRAWEK** do czasu ograniczonego review tych napraw.
+
+---
+
+## Ograniczony re-review — `eaa580e^..eaa580e`
+
+### Kryteria i zakres
+
+Re-review obejmuje wyłącznie trzy naprawy P2 z poprzedniego re-review i ich regresje:
+
+1. zmiana `product_id` lub `source_id` linku używanego przez evidence musi być odrzucona;
+2. PostgREST musi wykonawczo sprawdzać anon, viewer, analyst oraz admin dla tabel RLS;
+3. oba seedy muszą zachować UUID marek i produktów po drugim uruchomieniu.
+
+Zakres kodu: `202607230002_sources_provenance.sql`, `202607230005_auth_roles_rls_storage.sql` oraz trzy kontrakty Supabase. Nie obejmuje Unit 3.
+
+### Skonsolidowane findings
+
+#### P1 — blocking
+
+Brak.
+
+#### P2 — important
+
+##### P2 — Wykonawczy test RLS pomija adminowy zapis katalogu
+
+- **File:** `tests/test_supabase_runtime_contract.py:259-293`
+- **Evidence:** requesty PostgREST pokrywają anon, viewer, analyst oraz `POST /profiles` dla admina, lecz nie wykonują operacji na tabeli katalogu chronionej odrębną polityką `admin_write` (`brands`, `products` i pokrewne).
+- **Impact:** regresja polityki `admin_write` może zablokować administratorowi zarządzanie katalogiem, podczas gdy obecny test nadal przechodzi.
+- **Scenario:** `admin_write` na `public.products` zostaje usunięte lub jego warunek przestaje działać; admin nadal utworzy profil, więc runtime contract zwróci PASS.
+- **Recommendation:** dodać deterministyczny POST/UPSERT katalogowego rekordu przez PostgREST z JWT administratora oraz odmowę analogicznego zapisu dla roli nie-admin.
+- **Missing test:** admin tworzy lub aktualizuje fixture `brand`/`product` przez REST; analyst otrzymuje 401/403 dla tej samej akcji.
+
+#### P3 — non-blocking
+
+Brak.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | P2 | 1 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | P2 | 1 (duplikat correctness) | 0 |
+| data_reviewer | PASS | 0 | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Kontrakty schema/RLS/runtime offline | PASS | 14 testów, 5 opt-in skipped |
+| `FIELDNOTE_SUPABASE_INTEGRATION=1 fieldnote-api/.venv/bin/python -m unittest tests/test_supabase_runtime_contract.py` | PASS | 5 testów |
+| `bash scripts/check_fieldnote.sh` | PASS | backend, checkery i frontend typecheck/test/build |
+| `git diff --check eaa580e^ eaa580e` | PASS | brak błędów whitespace |
+
+### Bezpieczeństwo
+
+Security review PASS. Granty tabel i sekwencji dla `authenticated` umożliwiają PostgREST dojście do RLS; `anon` nie ma grantów tabel, a polityki nadal są granicą autoryzacji. Nie wykryto sekretów ani eskalacji uprawnień w zakresie diffu.
+
+### Odchylenia od planu
+
+Brak odchyleń funkcjonalnych. Nie rozpoczęto Unit 3.
+
+### Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Dwa pozostałe P2 z poprzedniego re-review są zamknięte; Unit 2 nie jest jeszcze ukończony.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 2` — napraw wyłącznie P2: wykonawczy test PostgREST adminowego zapisu katalogu (wraz z odmową dla nie-admina); potem ponów ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 2`.
+
+---
+
+## Status wykonania ostatniego P2
+
+Executor zmienił wyłącznie `tests/test_supabase_runtime_contract.py`: JWT analyst otrzymuje odmowę zapisu `brands` przez PostgREST, a JWT admin wykonuje idempotentny UPSERT tego samego fixture po `brand_key`. Wyniki: runtime integration 5 PASS; kontrakty schema/RLS/runtime 14 PASS (5 opt-in skipped); pełna offline bramka PASS; `git diff --check` PASS. Ten wpis nie jest re-review — gate pozostaje **WYMAGA POPRAWEK** do czasu ograniczonego review poprawki.

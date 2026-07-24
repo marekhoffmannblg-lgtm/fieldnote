@@ -276,6 +276,16 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             "POST", f"{rest_url}/sources", analyst, api_key, {"source_id": "runtime-analyst-write"}
         )
         self.assertIn(analyst_write[0], {200, 201}, analyst_write[1])
+        analyst_catalog_write = rest_request(
+            "POST", f"{rest_url}/brands?on_conflict=brand_key", analyst, api_key,
+            {"brand_key": "runtime-admin-catalog", "display_name": "Runtime Admin Catalog"},
+        )
+        self.assertIn(analyst_catalog_write[0], {401, 403}, analyst_catalog_write[1])
+        admin_catalog_write = rest_request(
+            "POST", f"{rest_url}/brands?on_conflict=brand_key", admin, api_key,
+            {"brand_key": "runtime-admin-catalog", "display_name": "Runtime Admin Catalog"},
+        )
+        self.assertIn(admin_catalog_write[0], {200, 201}, admin_catalog_write[1])
         viewer_profile_manage = rest_request(
             "POST", f"{rest_url}/profiles", viewer, api_key,
             {"id": "00000000-0000-0000-0000-000000000104", "role": "viewer", "must_change_password": True},
