@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import { apiRequest, setAccessTokenProvider } from "../api/client";
 import { authConfigurationError, supabase } from "./supabase";
 import { screenForAuth, type AuthIdentity, type AuthScreen, type FieldnoteRole } from "./guards";
+import { changeInitialPassword } from "./passwordChange";
 
 interface ApiProfile {
   user_id: string;
@@ -107,10 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     changeInitialPassword: async (password) => {
       if (!supabase) throw new Error(authConfigurationError || "Supabase Auth nie jest skonfigurowany.");
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw new Error(error.message);
-      await apiRequest("/auth/change-password", { method: "POST" });
-      await refreshProfile();
+      await changeInitialPassword(password, apiRequest, refreshProfile);
     },
     signOut: async () => {
       if (supabase) await supabase.auth.signOut();
