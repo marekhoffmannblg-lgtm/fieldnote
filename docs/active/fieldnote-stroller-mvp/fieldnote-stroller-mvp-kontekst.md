@@ -145,6 +145,34 @@
 - Weryfikacja: backend 32 PASS, frontend 20 PASS, typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
 - Status: poprawki P1/P2 zakończone; Unit 5 oczekuje ograniczonego re-review. Unit 6 nie rozpoczęto.
 
+### Unit 5 — ograniczony re-review trzech P2 runtime queue contract
+
+- Zakres: `19019ff..8fa7fd4`, wyłącznie rozszerzenie lokalnego testu
+  PostgreSQL/PostgREST oraz dokumentacja Unit 5. Correctness i security review
+  wykonały niezależne subagenty; test/data wykonano jako single-agent fallback,
+  bo limit wątków nie pozwolił uruchomić kolejnych agentów.
+- Zamknięte: asercja wszystkich odpowiedzi wyścigu, stale/current fencing
+  `fieldnote_start_research_job` oraz udany nowy job po terminalizacji
+  anulowanego lease.
+- Przyjęto 1 P2: runtime contract nie próbuje utworzyć duplikatu dla produktu,
+  gdy pierwszy job jest aktywny, więc nie dowodzi wykonawczo odmowy unique
+  active-product indexu przed recovery.
+- Weryfikacja: runtime Supabase 6 PASS, focused backend 32 PASS, pełna
+  `bash scripts/check_fieldnote.sh` PASS, `git diff --check 19019ff..8fa7fd4`
+  PASS. Gate Unit 5: **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3; Unit 6 nie rozpoczęto.
+
+### Unit 5 — naprawa P2 aktywnego duplikatu produktu
+
+- Zmieniono wyłącznie `tests/test_supabase_runtime_contract.py`: po leasowaniu
+  joba test wykonawczo próbuje utworzyć drugi job tego samego produktu i wymaga
+  błędu indeksu `research_jobs_one_active_per_product`. Istniejący udany insert
+  po cancel recovery pozostaje pozytywną asercją zwolnienia blokady.
+- Weryfikacja: focused opt-in runtime test PASS, pełny runtime Supabase 6 PASS,
+  focused backend 32 PASS, pełny `bash scripts/check_fieldnote.sh` PASS oraz
+  `git diff --check` PASS. Nie użyto płatnych API ani nie rozpoczęto Unit 6.
+- Status: implementacja P2 zakończona; Unit 5 oczekuje ograniczonego re-review
+  wyłącznie tej regresji.
+
 ### Unit 5 — ograniczony re-review runtime PostgreSQL/RLS
 
 - Zakres: wyłącznie otwarty P2 wymagający wykonawczego lokalnego testu kolejki,

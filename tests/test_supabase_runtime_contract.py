@@ -425,6 +425,17 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
                 "p_worker_id": "cancel-worker", "p_lease_seconds": 10, "p_max_active": 2,
             }))
             cancelled_row = next(item for item in cancelled_claim if item.get("job_id") == cancelled_job)
+            self.assertEqual(cancelled_row.get("status"), "leased")
+            duplicate_job = f"runtime-duplicate-{suffix}"
+            duplicate_attempt = query(
+                "insert into public.research_jobs (job_id, product_id, requested_by, payload) "
+                f"values ('{duplicate_job}', '{product_ids[3]}', '{requested_by}', '{{\"limits\":{{\"max_retries\":2}}}}'::jsonb)",
+                expect_success=False,
+            )
+            self.assertIn(
+                "research_jobs_one_active_per_product",
+                f"{duplicate_attempt.stderr}\n{duplicate_attempt.stdout}",
+            )
             rows(rpc("fieldnote_request_research_job_cancel", {"p_job_id": cancelled_job}))
             query(f"update public.research_jobs set lease_expires_at = now() - interval '1 second' where job_id = '{cancelled_job}'")
             rows(rpc("fieldnote_claim_research_job", {"p_worker_id": "cancel-recovery", "p_lease_seconds": 10, "p_max_active": 2}))

@@ -49,7 +49,7 @@
 - [x] Implementacja: migracja queue z RPC `SKIP LOCKED`/lease/heartbeat, `JobService`, worker, router `/api/jobs`, adapter legacy CLI i cancellation control file; UI enqueue/poll/cancel czyta trwałe joby.
 - [x] Test: `tests/test_postgres_job_queue.py`, `tests/test_worker_leases.py`, `tests/test_job_cost_limits.py`, `fieldnote-frontend/tests/run-status.test.mjs` oraz kontrakt historii durable jobów.
 - [x] Weryfikacja: pełny offline gate potwierdza ograniczenie do dwóch slotów w RPC, fencing lease, odrzucenie duplikatu aktywnego produktu, odzyskanie wygasłego lease w kontrakcie SQL, cancel przed wykonaniem i `partial` po limicie.
-- [ ] Review: `WYMAGA POPRAWEK` — 0 P1, 3 P2, 0 P3; szczegóły w `review-unit-5.md`.
+- [ ] Review: `WYMAGA POPRAWEK` — 0 P1, 1 P2, 0 P3; szczegóły w `review-unit-5.md`.
 
 ## Unit 6 — Przyrostowe commitowanie i przeliczanie
 
@@ -144,4 +144,5 @@
 - [x] P2: wyścig o pojedynczy queued job asercją obejmuje wszystkie odpowiedzi claimantów i wymusza dokładnie jeden lease.
 - [x] P2: stale token jest wykonawczo odrzucony przez `fieldnote_start_research_job`, a bieżący token może przejść do `running`.
 - [x] P2: po terminalizacji wygasłego anulowanego joba test tworzy kolejny job dla tego samego produktu, dowodząc zwolnienia blokady.
-- [ ] Review: implementacja poprawek zakończona; oczekuje ograniczony re-review trzech P2. Unit 6 nie rozpoczęto.
+- [x] P2: runtime PostgreSQL odrzuca drugi aktywny job tego samego produktu przed cancel recovery, a po terminalizacji przyjmuje nowy job.
+- [ ] Review: implementacja poprawki zakończona; oczekuje ograniczony re-review P2. Unit 6 nie rozpoczęto.

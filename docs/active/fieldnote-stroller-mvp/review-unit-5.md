@@ -444,3 +444,98 @@ trzy P2 z tego re-review, potem ponów ograniczony `$dev-docs-review` Unit 5.
   joba tego samego produktu po cancel recovery.
 - Implementacja nie rozpoczyna Unit 6. Po wykonaniu wymagane są focused tests,
   pełna bramka offline i ograniczony re-review wyłącznie tych poprawek.
+
+## Ograniczony re-review trzech P2 runtime queue contract
+
+- **Data:** 2026-07-28
+- **Zakres diffu:** `19019ff..8fa7fd4`
+- **Tryb:** `re-review`; test i data review wykonano w trybie `single-agent fallback`,
+  ponieważ limit wątków uniemożliwił uruchomienie kolejnych agentów.
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`, test/data single-agent fallback
+- **Gate:** `WYMAGA POPRAWEK`
+
+### Kryteria akceptacji unitu
+
+- Trwałe joby używają lease, maksymalnie dwa różne produkty są aktywne, a jeden
+  produkt nie ma dwóch aktywnych jobów.
+- Re-review obejmuje wyłącznie wykonawcze regresje PostgreSQL/PostgREST dla
+  wyścigu claimów, stale-token fencing startu oraz cancel recovery.
+
+### Zgodność z planem i zakresem
+
+Diff `19019ff..8fa7fd4` zmienia wyłącznie test runtime i trwałą dokumentację.
+Trzy wcześniejsze P2 są zamknięte: wyścig liczy wszystkie odpowiedzi, stale
+token jest odrzucony przez start, a po cancel recovery nowy job tego produktu
+może zostać utworzony. Unit 6 nie był analizowany ani rozpoczęty.
+
+### Skonsolidowane findings
+
+#### P2 — Runtime contract nie dowodzi odmowy duplikatu aktywnego produktu
+
+- **File:** `tests/test_supabase_runtime_contract.py:421`
+- **Evidence:** test tworzy replacement job dopiero po terminalizacji
+  `cancelled_job` (linie 421–440). Nie próbuje utworzyć drugiego joba dla
+  `product_ids[3]`, gdy pierwszy pozostaje `queued`, `leased` albo `running`.
+- **Impact:** usunięty lub błędnie zdefiniowany częściowy unique index może
+  dopuścić dwa płatne research jobs tego samego produktu mimo zielonego runtime
+  contractu.
+- **Scenario:** regresja zmienia predykat indeksu tak, że dwa aktywne joby dla
+  jednego produktu są dozwolone; test nadal przechodzi, bo sprawdza wyłącznie
+  poprawne zwolnienie blokady po terminalizacji.
+- **Recommendation:** przed cancel recovery spróbować przez lokalny PostgreSQL
+  utworzyć drugi job dla `product_ids[3]` i wymagać błędu unique constraint;
+  zachować istniejący udany insert po recovery jako asercję zwolnienia blokady.
+- **Missing test:** jeden active job produktu odrzuca drugi insert, a ten sam
+  insert przechodzi dopiero po terminalizacji wygasłego anulowanego joba.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | P2 | 1 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | single-agent fallback: P2 | 1 | 0 |
+| data_reviewer | single-agent fallback: P2 | 1 | 0 |
+
+To jeden finding zgłoszony przez correctness i zweryfikowany w fallbacku;
+został scalony jako P2.
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Lokalny runtime PostgreSQL/PostgREST | PASS | `FIELDNOTE_SUPABASE_INTEGRATION=1 ... test_supabase_runtime_contract.py`: 6 testów |
+| Focused backend queue/API | PASS | 32 testy |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` |
+| Spójność diffu | PASS | `git diff --check 19019ff..8fa7fd4` |
+
+### Bezpieczeństwo
+
+Security reviewer potwierdził, że test nadal odrzuca bezpośrednie DML anon i
+analyst na obu tabelach kolejki, a service-role key jest pobierany wyłącznie z
+lokalnego środowiska i nie trafia do repozytorium.
+
+### Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Unit 5 nie ma PASS; Unit 6 pozostaje
+zablokowany.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 5` — napraw wyłącznie
+P2: dodaj wykonawczą asercję odmowy duplikatu aktywnego produktu przed cancel
+recovery, zachowaj asercję pozytywnego enqueue po recovery, potem wykonaj
+ograniczony `$dev-docs-review` Unit 5.
+
+## Wykonanie naprawy P2 aktywnego duplikatu produktu
+
+- Zakres: wyłącznie `tests/test_supabase_runtime_contract.py` oraz dokumentacja
+  Unit 5.
+- Po pobraniu `cancelled_job` przez worker test próbuje drugi `INSERT` dla tego
+  samego `product_id` i wymaga błędu indeksu
+  `research_jobs_one_active_per_product`. Po terminalizacji cancel recovery
+  istniejąca asercja nadal potwierdza udany nowy `INSERT` tego produktu.
+- Weryfikacja wykonawcy: focused opt-in runtime PASS, runtime Supabase 6 PASS,
+  focused backend 32 PASS, `bash scripts/check_fieldnote.sh` PASS i
+  `git diff --check` PASS. Unit 6 nie został rozpoczęty; wymagany jest
+  ograniczony re-review tej jednej poprawki.
