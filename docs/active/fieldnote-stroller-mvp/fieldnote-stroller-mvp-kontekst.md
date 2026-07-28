@@ -2,7 +2,7 @@
 
 - **Branch:** `main` (preflight Unit 2: czyste drzewo i synchronizacja z `origin/main`)
 - **Ostatni commit przed Unit 2:** `807e81bd9176e274925ce3d1feac67fdb3dc9447 — data: add lionelo internal specification fixtures`
-- **Ostatnia aktualizacja:** 2026-07-24
+- **Ostatnia aktualizacja:** 2026-07-28
 
 ## Źródła
 
@@ -111,12 +111,16 @@
 - Ograniczony re-review P1 Unit 4 (`cd9ba46^..cd9ba46`) przez correctness_reviewer, security_reviewer, test_reviewer i ui_reviewer: correctness, security i UI PASS; test reviewer wykazał P2 potwierdzony przez inspekcję. `passwordChange.ts` odrzuca tylko truthy `must_change_password`, więc `{}` albo `{must_change_password: null}` wywołuje `refreshProfile()` mimo braku jawnego potwierdzenia. Gate **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Frontend PASS (12), typecheck PASS, pełny `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check cd9ba46^..cd9ba46` PASS. Unit 5 nie został rozpoczęty.
 - Naprawiono wyłącznie P2 Unit 4: helper wymaga dokładnie `must_change_password === false` przed odświeżeniem profilu. Regresje dowodzą odrzucenia `{}`, `null` i `true` bez wywołania odświeżenia. Frontend PASS (15), typecheck/build PASS (istniejące ostrzeżenie chunk >500 kB), pełny `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje ograniczony re-review wyłącznie P2; Unit 5 nie został rozpoczęty.
 - Końcowy ograniczony re-review P2 Unit 4 (`efd5ab5^..efd5ab5`) przez correctness_reviewer, security_reviewer, test_reviewer i ui_reviewer: wszyscy PASS. Helper fail-closed akceptuje wyłącznie literalne `must_change_password=false`; focused test helpera PASS (4), frontend PASS (15), pełny `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check efd5ab5^..efd5ab5` PASS. Gate Unit 4: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 5 nie został rozpoczęty.
+- Unit 5 dodał trwałą kolejkę PostgreSQL: migracja `202607280001_durable_research_queue.sql` przechowuje payload, usage, koszt, anulowanie, heartbeat i fenced lease. Transakcyjny RPC z advisory lockiem, `FOR UPDATE SKIP LOCKED` i limitem dwóch aktywnych slotów odzyskuje wygasłe lease; worker komunikuje się tylko przez service-role RPC.
+- FastAPI zapisuje job natychmiast przez `/api/jobs/research`, a worker uruchamia istniejący CLI poza requestem. Statusy, zdarzenia i usage są odczytywane z PostgreSQL; manifesty legacy pozostały wyłącznie artefaktem diagnostycznym. Przekroczenie limitu stron/tokenów/kosztu albo timeout kończy job jako `partial`; anulowanie jest sprawdzane przed etapami i przed ich zakończeniem.
+- UI kreatora oraz historii jobów korzysta z `/api/jobs` do enqueue, pollingu, listy i anulowania; lease `leased` pozostaje aktywny i możliwy do anulowania. Żaden sekret service-role nie trafia do frontendu.
+- Testy Unit 5: focused backend 32 PASS, frontend 17 PASS, `pnpm run typecheck` PASS, `pnpm run build` PASS (istniejące nieblokujące ostrzeżenie Vite o chunku >500 kB), `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS. Bramka offline obejmuje teraz testy kolejki.
 
 ## Przekazanie
 
-- **Bieżący unit:** Unit 4 — Logowanie, role i administracja kontami.
-- **Status:** Unit 4 completed — review PASS, brak otwartych P1/P2. Unit 5 nie został rozpoczęty.
-- **Pliki w toku:** brak; dokumentacja zamykająca review Unit 4 jest niezacommitowana.
-- **Ostatnie testy:** focused helper PASS (4), frontend PASS (15), typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check efd5ab5^..efd5ab5` PASS.
-- **Bloker:** brak dla Unit 4; decyzję o rozpoczęciu Unit 5 podejmuje użytkownik.
-- **Następny krok:** commit dokumentacji zamykającej Unit 4 albo `$dev-docs-execute docs/active/fieldnote-stroller-mvp 5` wyłącznie po takim poleceniu.
+- **Bieżący unit:** Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami.
+- **Status:** implementacja i weryfikacja ukończone; review Unit 5 jeszcze nie wykonano.
+- **Pliki w toku:** zmiany Unit 5 oraz niniejsza dokumentacja, do jednego commitu.
+- **Ostatnie testy:** focused backend PASS (32), frontend PASS (17), typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
+- **Bloker:** brak implementacyjnego blokera; niezależny review jest wymagany przed rozpoczęciem Unit 6.
+- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 5`.

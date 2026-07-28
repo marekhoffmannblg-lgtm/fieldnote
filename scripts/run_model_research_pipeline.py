@@ -22,6 +22,7 @@ from firecrawl_offer_export import export_firecrawl_offer_urls
 from prepare_firecrawl_offer_queue import QUEUE_COLUMNS, prepare_queue
 from catalog_registry import ensure_catalog_product, ensure_group_directory, product_for_group_key
 from category_registry import CategoryValidationError, validate_category_assignment
+from run_context import RunCancelledError, raise_if_cancelled
 from p0_runtime import (
     FileLock,
     LockUnavailableError,
@@ -209,6 +210,10 @@ def run_stage(
     allow_failure: bool = False,
     history: ResearchRun | None = None,
 ) -> tuple[str, int]:
+    # Durable worker mirrors its PostgreSQL cancellation flag to this temporary
+    # control file. Checks occur before stages and before their commit-capable
+    # child commands, while legacy CLI calls omit the option entirely.
+    raise_if_cancelled(getattr(run_stage, "cancel_check_file", None))
     suffix = f" ({detail})" if detail else ""
     print(f"[{number}/9] {label}{suffix}", flush=True)
     record = history.start_stage(number, label) if history else None
@@ -253,6 +258,7 @@ def run_stage(
         history.finish_stage(record, status, detail or ("completed" if result.returncode == 0 else f"exit code {result.returncode}"))
     if result.returncode and not allow_failure:
         raise RuntimeError(f"Etap {number}/9 nie powiódł się: {label}")
+    raise_if_cancelled(getattr(run_stage, "cancel_check_file", None))
     return result.stdout, result.returncode
 
 
@@ -600,6 +606,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fixture-scenario", choices=FIXTURE_SCENARIOS, help="Uruchamia izolowany scenariusz demonstracyjny bez API i bez modyfikacji produkcyjnych danych.")
     parser.add_argument("--fixture-root", help="Katalog fixture używany wyłącznie razem z --fixture-scenario.")
     parser.add_argument("--run-context", help="Immutable context utworzony przez lokalne API dla jednego uruchomienia.")
+    parser.add_argument("--cancel-check-file", help="Tymczasowy sygnał anulowania workera; nie jest źródłem stanu runu.")
     return parser.parse_args()
 
 
@@ -703,6 +710,7 @@ def run_fixture_scenario(args: argparse.Namespace) -> int:
 
 def main() -> int:
     args = parse_args()
+    run_stage.cancel_check_file = args.cancel_check_file
     immutable_context = load_run_context(args.run_context)
     if args.fixture_scenario:
         return run_fixture_scenario(args)
@@ -1055,6 +1063,11 @@ def main() -> int:
             offers_in_run=offers_in_run, offers_cleaned=offers_cleaned,
             registry_records_updated=registry_records_updated, groups_updated=groups_updated,
         )
+        return 0
+    except RunCancelledError as exc:
+        history.update_latest_stage("cancelled", exc)
+        history.complete("cancelled", error_stage=current_stage, error_message=exc)
+        print("pipeline_status=cancelled")
         return 0
     except (RuntimeError, OSError, ValueError) as exc:
         coverage = coverage or coverage_for_group(group_key)

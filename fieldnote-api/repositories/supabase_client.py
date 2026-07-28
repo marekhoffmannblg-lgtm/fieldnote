@@ -13,6 +13,15 @@ class SupabaseConfigurationError(RuntimeError):
     pass
 
 
+class SupabaseRequestError(RuntimeError):
+    """A deliberately small error envelope for PostgREST failures."""
+
+    def __init__(self, table: str, status_code: int) -> None:
+        super().__init__(f"Supabase {table} request failed: {status_code}")
+        self.table = table
+        self.status_code = status_code
+
+
 class SupabaseClient:
     def __init__(self, url: str, service_key: str) -> None:
         if not url or not service_key:
@@ -34,7 +43,7 @@ class SupabaseClient:
             with urlopen(request, timeout=10) as response:
                 value = json.loads(response.read().decode() or "[]")
         except HTTPError as error:
-            raise RuntimeError(f"Supabase {table} request failed: {error.code}") from error
+            raise SupabaseRequestError(table, error.code) from error
         return value if isinstance(value, list) else []
 
     def select(self, table: str, **query: str) -> list[dict[str, Any]]:
@@ -42,6 +51,10 @@ class SupabaseClient:
 
     def upsert(self, table: str, payload: dict[str, Any], conflict: str) -> list[dict[str, Any]]:
         return self.request("POST", table, query={"on_conflict": conflict}, payload=payload)
+
+    def rpc(self, function: str, payload: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Call a SQL function through PostgREST; transactions stay in Postgres."""
+        return self.request("POST", f"rpc/{function}", payload=payload or {})
 
     def auth_admin(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         body = json.dumps(payload).encode() if payload is not None else None

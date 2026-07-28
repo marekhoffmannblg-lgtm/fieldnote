@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_RUNS_ROOT = PROJECT_ROOT / "output" / "runs"
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 RUN_TYPES = {"research", "refresh", "reanalysis", "migration"}
-RUN_STATUSES = {"queued", "running", "succeeded", "failed", "timed_out", "cancelled", "interrupted"}
+RUN_STATUSES = {"queued", "running", "partial", "succeeded", "failed", "timed_out", "cancelled", "interrupted"}
 
 
 def utc_now() -> str:
@@ -37,7 +37,7 @@ def safe_run_id(run_id: str) -> str:
 
 def canonical_status(value: Any) -> str:
     raw = str(value or "").strip().lower()
-    aliases = {"success": "succeeded", "partial": "succeeded", "preview": "succeeded", "error": "failed"}
+    aliases = {"success": "succeeded", "preview": "succeeded", "error": "failed"}
     value = aliases.get(raw, raw)
     return value if value in RUN_STATUSES else "failed"
 

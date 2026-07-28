@@ -106,6 +106,7 @@ from contracts import (  # noqa: E402
 from repositories.snapshot_repository import SnapshotRepository  # noqa: E402
 from repositories.catalog_repository import CatalogRepository  # noqa: E402
 from repositories.supabase_client import SupabaseClient  # noqa: E402
+from repositories.job_repository import JobRepository  # noqa: E402
 from routers.health import health_payload  # noqa: E402
 from routers.auth import router as auth_router  # noqa: E402
 from routers.admin_users import router as admin_users_router  # noqa: E402
@@ -115,6 +116,8 @@ from auth.roles import Principal  # noqa: E402
 from services.product_service import ProductService  # noqa: E402
 from services.run_service import index_runs  # noqa: E402
 from services.source_service import paginate  # noqa: E402
+from services.job_service import JobService  # noqa: E402
+from routers.jobs import router as jobs_router  # noqa: E402
 RUN_COORDINATOR = RunCoordinator(runs_root=RUNS_ROOT, output_root=PROJECT_ROOT / "output")
 DATA_MODE = os.environ.get("FIELDNOTE_DATA_MODE", "legacy_readonly")
 if DATA_MODE not in {"legacy_readonly", "supabase"}:
@@ -159,6 +162,10 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(admin_users_router)
+app.include_router(jobs_router)
+if DATA_MODE == "supabase":
+    _job_client = SupabaseClient.from_env()
+    app.state.job_service = JobService(JobRepository(_job_client), CatalogRepository(_job_client))
 
 @app.middleware("http")
 async def supabase_api_guard(request: Request, call_next: Any) -> Any:

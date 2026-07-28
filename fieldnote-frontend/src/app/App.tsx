@@ -3,7 +3,7 @@ import catalogData from "../data/generated/catalog.json";
 import { apiRequest } from "../api/client";
 import type { EvidenceItemV1, ProductMetricsV1, SourceContributionV1 } from "../api/contracts";
 import { parseFieldnoteRoute, routeForPage, type FieldnotePage } from "../routes/navigation";
-import { isRunFailure, isRunPartial, isRunSuccess, shouldAutoReloadAfterRun } from "./runStatus";
+import { canCancelRun, getRunCostProgress, isRunActive, isRunFailure, isRunPartial, isRunSuccess, shouldAutoReloadAfterRun } from "./runStatus";
 import { groupsForCategory, isValidCategorySelection, type CategoryOption } from "./categorySelection";
 import { canSelectPreviewOffer } from "./offerSelection";
 import { canCompareSelection, toggleComparisonSelection } from "./comparisonSelection";
@@ -456,7 +456,7 @@ interface ApiRun {
   run_id: string;
   brand: string;
   model: string;
-  status: "queued" | "running" | "succeeded" | "success" | "partial" | "failed" | "timed_out" | "cancelled" | "interrupted";
+  status: "queued" | "leased" | "running" | "succeeded" | "success" | "partial" | "failed" | "timed_out" | "cancelled" | "interrupted";
   current_step: string;
   progress: number;
   started_at: string | null;
@@ -481,6 +481,8 @@ interface ApiRun {
   product_profile_stage?: string;
   product_profile_status?: "generated" | "cached" | "insufficient_profile_evidence" | "failed" | "skipped" | string;
   product_profile_warning?: string;
+  cost_limit?: number | null;
+  cost_used?: number | null;
 }
 
 interface RefreshSummary {
@@ -1268,12 +1270,12 @@ function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSour
   };
 
   useEffect(() => {
-    if (!refreshRun || !["queued", "running"].includes(refreshRun.status)) return;
+    if (!refreshRun || !isRunActive(refreshRun)) return;
     const timer = window.setInterval(async () => {
       try {
         const latest = await apiRequest<ApiRun>(`/runs/${refreshRun.run_id}`);
         setRefreshRun(latest);
-        if (!["queued", "running"].includes(latest.status)) {
+        if (!isRunActive(latest)) {
           if (shouldAutoReloadAfterRun(latest)) {
             window.setTimeout(() => window.location.reload(), 250);
           } else if (isRunFailure(latest)) {
@@ -1288,7 +1290,7 @@ function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSour
   }, [refreshRun?.run_id, refreshRun?.status]);
 
   useEffect(() => {
-    if (!refreshRun || ["queued", "running"].includes(refreshRun.status)) return;
+    if (!refreshRun || isRunActive(refreshRun)) return;
     if (shouldAutoReloadAfterRun(refreshRun)) {
       const timer = window.setTimeout(() => window.location.reload(), 250);
       return () => window.clearTimeout(timer);
@@ -1297,6 +1299,17 @@ function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSour
       setRefreshError(refreshRun.error || "Proces zakończył się błędem. Dane produktu nie zostały automatycznie odświeżone.");
     }
   }, [refreshRun]);
+
+  const analysisRunLabel = (run: ApiRun) => isRunPartial(run)
+    ? "Analiza częściowa"
+    : isRunSuccess(run)
+      ? "Analiza zakończona"
+      : isRunFailure(run)
+        ? "Analiza zatrzymana"
+        : "Analiza w toku";
+  const refreshRunFailed = refreshRun ? isRunFailure(refreshRun) : false;
+  const refreshRunPartial = refreshRun ? isRunPartial(refreshRun) : false;
+  const refreshRunSucceeded = refreshRun ? isRunSuccess(refreshRun) : false;
 
   const fieldStatus = (field: ProductField) => {
     if (field.status === "confirmed") return { label: "Potwierdzone", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
@@ -1343,7 +1356,7 @@ function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSour
         </div>
       </div>
 
-      {activeTab === "history" ? <div className="flex-1 overflow-auto px-6 py-5 space-y-4"><section className="max-w-3xl bg-card border border-border rounded-lg p-4"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground" />Historia produktu</h2><button onClick={() => void loadHistory()} className="text-xs text-primary hover:underline">Odśwież listę</button></div>{analysisRuns.length > 0 && <div className="mt-4"><p className="text-xs font-medium text-foreground">Uruchomienia analizy</p><div className="mt-2 space-y-2">{analysisRuns.map((run) => <div key={run.run_id} className="rounded border border-border bg-muted/20 p-3 text-xs"><p className="font-medium text-foreground">{run.pipeline_status === "partial" || run.status === "partial" ? "Analiza częściowa" : run.pipeline_status === "success" || (!run.pipeline_status && ["success", "succeeded"].includes(run.status)) ? "Analiza zakończona" : ["failed", "timed_out", "cancelled", "interrupted"].includes(run.status) ? "Analiza zatrzymana" : "Analiza w toku"}</p><p className="mt-1 text-muted-foreground">{run.started_at ? new Date(run.started_at).toLocaleString("pl-PL") : "—"} · użyte źródła: {run.analysis?.used_sources?.length ?? 0}</p></div>)}</div></div>}</section></div> : activeTab === "profile" ? <ProductProfilePanel product={p} refreshToken={productRefreshToken} /> : activeTab === "benchmark" ? <div className="flex-1 overflow-auto px-6 py-5"><ProductBenchmarkPanel product={p} initialSelection={comparisonSelection} /></div> : (
+      {activeTab === "history" ? <div className="flex-1 overflow-auto px-6 py-5 space-y-4"><section className="max-w-3xl bg-card border border-border rounded-lg p-4"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold text-foreground flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground" />Historia produktu</h2><button onClick={() => void loadHistory()} className="text-xs text-primary hover:underline">Odśwież listę</button></div>{analysisRuns.length > 0 && <div className="mt-4"><p className="text-xs font-medium text-foreground">Uruchomienia analizy</p><div className="mt-2 space-y-2">{analysisRuns.map((run) => <div key={run.run_id} className="rounded border border-border bg-muted/20 p-3 text-xs"><p className="font-medium text-foreground">{analysisRunLabel(run)}</p><p className="mt-1 text-muted-foreground">{run.started_at ? new Date(run.started_at).toLocaleString("pl-PL") : "—"} · użyte źródła: {run.analysis?.used_sources?.length ?? 0}</p></div>)}</div></div>}</section></div> : activeTab === "profile" ? <ProductProfilePanel product={p} refreshToken={productRefreshToken} /> : activeTab === "benchmark" ? <div className="flex-1 overflow-auto px-6 py-5"><ProductBenchmarkPanel product={p} initialSelection={comparisonSelection} /></div> : (
       <div className="flex-1 px-6 py-5 grid grid-cols-3 gap-5 min-h-0">
         <div className="col-span-2 flex flex-col gap-4">
           <section className="bg-card border border-border rounded-lg p-4">
@@ -1380,7 +1393,7 @@ function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSour
         </div>
       </div>
       )}
-      {refreshRun && <div className={`fixed right-5 bottom-5 z-40 w-[min(420px,calc(100vw-2.5rem))] rounded-lg border bg-card p-4 shadow-lg ${["failed", "timed_out", "cancelled", "interrupted"].includes(refreshRun.status) ? "border-red-200" : refreshRun.pipeline_status === "partial" ? "border-amber-200" : ["success", "succeeded"].includes(refreshRun.status) ? "border-emerald-200" : "border-border"}`}><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-foreground">{refreshRun.analysis ? "Analiza zapisanych danych" : "Odświeżanie danych"}</p><span className="text-[11px] text-muted-foreground">{refreshRun.progress}%</span></div><p className="mt-1 text-xs text-muted-foreground">{refreshRun.current_step}</p>{refreshRun.logs_tail[refreshRun.logs_tail.length - 1] && <p className="mt-2 rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">Ostatni log: {refreshRun.logs_tail[refreshRun.logs_tail.length - 1]}</p>}<div className="mt-3 h-1.5 overflow-hidden rounded bg-muted"><div className="h-full rounded bg-primary transition-all" style={{ width: `${refreshRun.progress}%` }} /></div>{["success", "succeeded"].includes(refreshRun.status) && <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{refreshRun.analysis ? <><span>Użyte źródła: {refreshRun.analysis.used_sources?.length ?? 0}</span><span>Zmienione pola: {refreshRun.analysis.fields_changed ?? 0}</span><span>Coverage: {refreshRun.analysis.coverage_before ?? "—"}% → {refreshRun.analysis.coverage_after ?? "—"}%</span></> : <><span>Nowe źródła: {refreshRun.refresh?.new_sources ?? 0}</span><span>Niedostępne: {refreshRun.refresh?.unavailable_sources ?? 0}</span><span>Zmienione pola: {refreshRun.refresh?.fields_changed ?? 0}</span><span>Coverage: {refreshRun.refresh?.coverage_before ?? "—"}% → {refreshRun.refresh?.coverage_after ?? "—"}%</span></>}<span>Profil: {refreshRun.product_profile_status || "—"}</span></div>}{refreshRun.product_profile_warning && <p className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">Profil produktu: {refreshRun.product_profile_warning}</p>}{["failed", "timed_out", "cancelled", "interrupted"].includes(refreshRun.status) && <><p className="mt-3 text-xs text-red-700">{refreshRun.error}</p><details className="mt-3 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Dziennik techniczny</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{refreshRun.logs_tail.join("\n")}</pre></details></>}<button onClick={() => setRefreshRun(null)} className="mt-3 text-[11px] text-primary hover:underline">Zamknij</button></div>}
+      {refreshRun && <div className={`fixed right-5 bottom-5 z-40 w-[min(420px,calc(100vw-2.5rem))] rounded-lg border bg-card p-4 shadow-lg ${refreshRunFailed ? "border-red-200" : refreshRunPartial ? "border-amber-200" : refreshRunSucceeded ? "border-emerald-200" : "border-border"}`}><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-foreground">{refreshRun.analysis ? "Analiza zapisanych danych" : "Odświeżanie danych"}</p><span className="text-[11px] text-muted-foreground">{refreshRun.progress}%</span></div><p className="mt-1 text-xs text-muted-foreground">{refreshRun.current_step}</p>{refreshRun.logs_tail[refreshRun.logs_tail.length - 1] && <p className="mt-2 rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">Ostatni log: {refreshRun.logs_tail[refreshRun.logs_tail.length - 1]}</p>}<div className="mt-3 h-1.5 overflow-hidden rounded bg-muted"><div className="h-full rounded bg-primary transition-all" style={{ width: `${refreshRun.progress}%` }} /></div>{refreshRunSucceeded && <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">{refreshRun.analysis ? <><span>Użyte źródła: {refreshRun.analysis.used_sources?.length ?? 0}</span><span>Zmienione pola: {refreshRun.analysis.fields_changed ?? 0}</span><span>Coverage: {refreshRun.analysis.coverage_before ?? "—"}% → {refreshRun.analysis.coverage_after ?? "—"}%</span></> : <><span>Nowe źródła: {refreshRun.refresh?.new_sources ?? 0}</span><span>Niedostępne: {refreshRun.refresh?.unavailable_sources ?? 0}</span><span>Zmienione pola: {refreshRun.refresh?.fields_changed ?? 0}</span><span>Coverage: {refreshRun.refresh?.coverage_before ?? "—"}% → {refreshRun.refresh?.coverage_after ?? "—"}%</span></>}<span>Profil: {refreshRun.product_profile_status || "—"}</span></div>}{refreshRun.product_profile_warning && <p className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">Profil produktu: {refreshRun.product_profile_warning}</p>}{refreshRunFailed && <><p className="mt-3 text-xs text-red-700">{refreshRun.error}</p><details className="mt-3 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Dziennik techniczny</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{refreshRun.logs_tail.join("\n")}</pre></details></>}<button onClick={() => setRefreshRun(null)} className="mt-3 text-[11px] text-primary hover:underline">Zamknij</button></div>}
       {refreshModalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"><div role="dialog" aria-modal="true" className="w-full max-w-lg rounded-xl border border-border bg-card p-5 shadow-xl"><h2 className="text-base font-semibold text-foreground">Odśwież dane: {p.brand} {p.name}</h2><p className="mt-1 text-xs text-muted-foreground">Przed każdą zmianą system zapisze wersję historyczną stanu modelu i dowodów.</p><div className="mt-4 space-y-2"><label className={`block cursor-pointer rounded-lg border p-3 ${refreshMode === "incremental" ? "border-primary bg-accent" : "border-border"}`}><input className="mr-2 accent-primary" type="radio" checked={refreshMode === "incremental"} onChange={() => setRefreshMode("incremental")} /><span className="text-xs font-medium text-foreground">Odśwież tylko nowe i zmienione źródła</span><p className="mt-1 pl-5 text-[11px] text-muted-foreground">Zalecane. Sprawdza zapisane źródła oraz lokalny listing, bez analizy niezmienionych danych.</p></label><label className={`block cursor-pointer rounded-lg border p-3 ${refreshMode === "full_reanalysis" ? "border-primary bg-accent" : "border-border"}`}><input className="mr-2 accent-primary" type="radio" checked={refreshMode === "full_reanalysis"} onChange={() => setRefreshMode("full_reanalysis")} /><span className="text-xs font-medium text-foreground">Pełna ponowna analiza</span><p className="mt-1 pl-5 text-[11px] text-muted-foreground">Ponownie analizuje wszystkie lokalne snapshoty. Wymaga lokalnego klucza OpenAI.</p></label></div>{refreshError && <p className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">{refreshError}</p>}<div className="mt-5 flex justify-end gap-2"><button onClick={() => setRefreshModalOpen(false)} className="px-3 py-2 text-xs font-medium border border-border rounded hover:bg-muted">Anuluj</button><button onClick={() => void startRefresh()} className="px-3 py-2 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90">Uruchom odświeżanie</button></div></div></div>}
     </div>
   );
@@ -1552,8 +1565,8 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
   const [catalogSaving, setCatalogSaving] = useState(false);
   const [runLoading, setRunLoading] = useState(false);
   const [run, setRun] = useState<ApiRun | null>(null);
-  const runFailed = ["failed", "timed_out", "cancelled", "interrupted"].includes(run?.status || "");
-  const runPartial = run?.pipeline_status === "partial" || run?.status === "partial";
+  const runFailed = run ? isRunFailure(run) : false;
+  const runPartial = run ? isRunPartial(run) : false;
   const [requestError, setRequestError] = useState("");
   const activePreviewKeyRef = useRef("");
   const previousPreviewSlugRef = useRef(previousProductSlug);
@@ -1719,13 +1732,12 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
     setRunLoading(true);
     setRequestError("");
     try {
-      const created = await apiRequest<ApiRun>("/research/run", {
+      const productSlug = preview?.preview_diagnostics.current_product_slug || existingProduct?.slug;
+      if (!productSlug) throw new Error("Nie udało się ustalić produktu zapisanego w katalogu.");
+      const created = await apiRequest<ApiRun>("/jobs/research", {
         method: "POST",
         body: JSON.stringify({
-          brand: brand.trim(),
-          model: model.trim(),
-          category_key: categoryKey,
-          benchmark_group: benchmarkGroup,
+          product_slug: productSlug,
           selected_offer_ids: [...selectedOfferIds],
           selected_manufacturer_source_ids: [...selectedManufacturerSourceIds],
           include_manufacturer_sources: includeManufacturerSources,
@@ -1745,7 +1757,7 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
     setRunLoading(true);
     setRequestError("");
     try {
-      const created = await apiRequest<ApiRun>(`/runs/${run.run_id}/retry`, { method: "POST" });
+      const created = await apiRequest<ApiRun>(`/jobs/${run.run_id}/retry`, { method: "POST" });
       setRun(created);
       setStep(3);
     } catch (error) {
@@ -1774,12 +1786,12 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
   };
 
   useEffect(() => {
-    if (!run || !["queued", "running"].includes(run.status)) return;
+    if (!run || !isRunActive(run)) return;
     const timer = window.setInterval(async () => {
       try {
-        const latest = await apiRequest<ApiRun>(`/runs/${run.run_id}`);
+        const latest = await apiRequest<ApiRun>(`/jobs/${run.run_id}`);
         setRun(latest);
-        if (!["queued", "running"].includes(latest.status)) setStep(4);
+        if (!isRunActive(latest)) setStep(4);
       } catch (error) {
         setRequestError(error instanceof Error ? error.message : "Utracono połączenie z lokalnym API.");
       }
@@ -2004,7 +2016,7 @@ function PageResearch({ previousProductSlug = "" }: { previousProductSlug?: stri
                   style={{ width: `${run?.progress || 0}%` }}
                 />
               </div>
-              <p className="mt-4 text-xs text-muted-foreground">Status: {run?.status === "queued" ? "oczekuje" : run?.status === "running" ? "w toku" : run?.status || "—"}</p>
+              <p className="mt-4 text-xs text-muted-foreground">Status: {run?.status === "queued" ? "oczekuje" : run?.status === "leased" ? "przydzielono workerowi" : run?.status === "running" ? "w toku" : run?.status || "—"}</p>
               <details className="mt-4 rounded border border-border bg-muted/30 p-3"><summary className="cursor-pointer text-xs font-medium text-foreground">Dziennik techniczny</summary><pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{run?.logs_tail.join("\n") || "Brak wpisów."}</pre></details>
             </div>
           </div>
@@ -2059,7 +2071,7 @@ function RunLog({ runId }: { runId: string }) {
   const [error, setError] = useState("");
   useEffect(() => {
     let cancelled = false;
-    apiRequest<ApiRun>(`/runs/${runId}`).then((run) => {
+    apiRequest<ApiRun>(`/jobs/${runId}`).then((run) => {
       if (!cancelled) setLogs(run.logs_tail || []);
     }).catch((err) => {
       if (!cancelled) setError(err instanceof Error ? err.message : "Nie udało się wczytać logu.");
@@ -2080,28 +2092,34 @@ function PageUruchomienia() {
   const loadRuns = async () => {
     setLoading(true); setError("");
     try {
-      const response = await apiRequest<{ total: number; runs: ApiRun[] }>("/runs?limit=50&sort=created_at_desc");
+      const response = await apiRequest<{ total: number; runs: ApiRun[] }>("/jobs?limit=50");
       setRuns(response.runs || []); setTotal(response.total || 0);
     } catch (err) { setError(err instanceof Error ? err.message : "Nie udało się wczytać historii uruchomień."); }
     finally { setLoading(false); }
   };
   useEffect(() => { void loadRuns(); }, []);
+  useEffect(() => {
+    if (!runs.some((run) => isRunActive(run))) return;
+    const timer = window.setInterval(() => { void loadRuns(); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [runs]);
   const retry = async (runId: string) => {
     setWorking(runId); setError("");
-    try { await apiRequest<ApiRun>(`/runs/${runId}/retry`, { method: "POST" }); await loadRuns(); }
+    try { await apiRequest<ApiRun>(`/jobs/${runId}/retry`, { method: "POST" }); await loadRuns(); }
     catch (err) { setError(err instanceof Error ? err.message : "Nie udało się ponowić uruchomienia."); }
     finally { setWorking(null); }
   };
   const cancel = async (runId: string) => {
     setWorking(runId); setError("");
-    try { await apiRequest<ApiRun>(`/runs/${runId}/cancel`, { method: "POST" }); await loadRuns(); }
+    try { await apiRequest<ApiRun>(`/jobs/${runId}/cancel`, { method: "POST" }); await loadRuns(); }
     catch (err) { setError(err instanceof Error ? err.message : "Nie udało się anulować uruchomienia."); }
     finally { setWorking(null); }
   };
   const failed = (run: ApiRun) => isRunFailure(run);
   const partial = (run: ApiRun) => isRunPartial(run);
   const succeeded = (run: ApiRun) => isRunSuccess(run);
-  const statusLabel = (run: ApiRun) => succeeded(run) ? "Sukces" : partial(run) ? "Częściowo" : run.status === "running" ? "W toku" : run.status === "queued" ? "W kolejce" : run.status === "timed_out" ? "Przekroczony czas" : run.status === "cancelled" ? "Anulowano" : run.status === "interrupted" ? "Przerwano" : "Błąd";
+  const costProgress = (run: ApiRun) => getRunCostProgress(run);
+  const statusLabel = (run: ApiRun) => succeeded(run) ? "Sukces" : partial(run) ? "Częściowo" : run.status === "running" ? "W toku" : run.status === "leased" ? "Przydzielono workerowi" : run.status === "queued" ? "W kolejce" : run.status === "timed_out" ? "Przekroczony czas" : run.status === "cancelled" ? "Anulowano" : run.status === "interrupted" ? "Przerwano" : "Błąd";
   const duration = (run: ApiRun) => {
     if (!run.started_at || !run.finished_at) return "—";
     const seconds = Math.max(0, Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000));
@@ -2173,17 +2191,18 @@ function PageUruchomienia() {
                             {working === run.run_id ? "Ponawiam…" : "Ponów"}
                           </button>
                         )}
-                        {run.status === "running" && <button onClick={() => void cancel(run.run_id)} disabled={working === run.run_id} className="px-2 py-0.5 text-[11px] border border-border rounded hover:bg-muted">Anuluj</button>}
+                        {canCancelRun(run) && <button onClick={() => void cancel(run.run_id)} disabled={working === run.run_id} className="px-2 py-0.5 text-[11px] border border-border rounded hover:bg-muted">Anuluj</button>}
                       </div>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground">Etap: {run.current_step || "—"} · Postęp: {run.progress}% · Coverage: {run.coverage_before ?? "—"}% → {run.coverage_after ?? "—"}%</p>
+                    {costProgress(run) && <p className="mt-1 text-[11px] text-muted-foreground">Koszt: {costProgress(run)?.used.toFixed(2)} / {costProgress(run)?.limit.toFixed(2)} ({costProgress(run)?.percentage}%)</p>}
                     {run.retry_of && <p className="mt-1 text-[11px] text-muted-foreground">Ponowienie runu: {run.retry_of}</p>}
                     {run.error && (
                       <div className="mt-2 p-2 bg-red-50 border border-red-100 rounded text-[11px] text-red-700 font-mono">
                         {run.error}
                       </div>
                     )}
-                    {(failed(run) || partial(run) || run.status === "running") && <button onClick={() => setExpandedLog(expandedLog === run.run_id ? null : run.run_id)} className="mt-2 text-[11px] text-primary hover:underline">{expandedLog === run.run_id ? "Ukryj log" : "Pokaż log"}</button>}
+                    {(failed(run) || partial(run) || isRunActive(run)) && <button onClick={() => setExpandedLog(expandedLog === run.run_id ? null : run.run_id)} className="mt-2 text-[11px] text-primary hover:underline">{expandedLog === run.run_id ? "Ukryj log" : "Pokaż log"}</button>}
                     {expandedLog === run.run_id && <RunLog runId={run.run_id} />}
                   </div>
                 </div>

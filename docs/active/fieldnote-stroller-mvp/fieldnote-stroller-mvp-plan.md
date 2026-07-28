@@ -1,7 +1,7 @@
 # FIELDNOTE Stroller MVP — plan wykonawczy
 
 - **Branch:** `main` (brudne drzewo robocze; branch nie został zmieniony)
-- **Ostatnia aktualizacja:** 2026-07-24
+- **Ostatnia aktualizacja:** 2026-07-28
 
 ## Źródła
 
@@ -46,7 +46,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 2 — Unit 5: Kolejka PostgreSQL i worker z dwoma slotami
 
-- Status: `pending`
+- Status: `completed` (implementacja i weryfikacja; oczekuje na review)
 - Zależności: Unit 3, Unit 4
 - Kryterium ukończenia: trwałe joby, lease, maksymalnie dwa różne produkty i brak podwójnego uruchomienia tego samego produktu.
 
@@ -95,4 +95,4 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ## Odchylenia od planu technicznego
 
-- Brak. Zadanie jest wyłącznie zainicjowane; nie wykonano Implementation Unit.
+- Unit 5 zachowuje legacy endpointy i manifesty jako kompatybilny interfejs diagnostyczny. Nowy ekran researchu oraz lista uruchomień korzystają z `/api/jobs`; źródłem prawdy dla tych jobów jest PostgreSQL. Przyrostowe przeliczanie pozostało wyłącznie w Unit 6.

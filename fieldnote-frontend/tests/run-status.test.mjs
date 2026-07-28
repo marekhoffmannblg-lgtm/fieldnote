@@ -39,6 +39,35 @@ test("terminal run classification never treats partial as success", async () => 
     assert.equal(module.isRunSuccess({ status: "succeeded", pipeline_status: "success" }), true);
     assert.equal(module.isRunPartial({ status: "partial", pipeline_status: "partial" }), true);
     assert.equal(module.isRunSuccess({ status: "partial", pipeline_status: "partial" }), false);
+    assert.equal(module.isRunSuccess({ status: "succeeded", pipeline_status: "partial" }), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("leased runs remain active for polling and can be cancelled", async () => {
+  const { module, cleanup } = await loadRunStatusModule();
+  try {
+    for (const status of ["queued", "leased", "running"]) {
+      assert.equal(module.isRunActive({ status }), true);
+      assert.equal(module.canCancelRun({ status }), true);
+    }
+    for (const status of ["partial", "succeeded", "failed", "cancelled"]) {
+      assert.equal(module.isRunActive({ status }), false);
+      assert.equal(module.canCancelRun({ status }), false);
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
+test("cost progress is bounded and omitted without a positive budget", async () => {
+  const { module, cleanup } = await loadRunStatusModule();
+  try {
+    assert.deepEqual(module.getRunCostProgress({ cost_used: 3.5, cost_limit: 10 }), { used: 3.5, limit: 10, percentage: 35 });
+    assert.deepEqual(module.getRunCostProgress({ cost_used: 12, cost_limit: 10 }), { used: 12, limit: 10, percentage: 100 });
+    assert.equal(module.getRunCostProgress({ cost_used: 1, cost_limit: null }), null);
+    assert.equal(module.getRunCostProgress({ cost_used: 1, cost_limit: 0 }), null);
   } finally {
     await cleanup();
   }

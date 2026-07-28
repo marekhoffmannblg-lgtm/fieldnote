@@ -1,7 +1,7 @@
 # FIELDNOTE Stroller MVP — zadania
 
 - **Branch:** `main` (czyste i zsynchronizowane z `origin/main` przed Unit 2)
-- **Ostatnia aktualizacja:** 2026-07-24
+- **Ostatnia aktualizacja:** 2026-07-28
 
 ## Unit 1 — Bezpieczny baseline repozytorium i CI
 
@@ -46,10 +46,10 @@
 
 ## Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami
 
-- [ ] Implementacja: job/pipeline services, router, worker, lease oraz koszty i anulowanie w PostgreSQL.
-- [ ] Test: `tests/test_postgres_job_queue.py`, `tests/test_worker_leases.py`, `tests/test_job_cost_limits.py`, `fieldnote-frontend/tests/run-status.test.mjs`.
-- [ ] Weryfikacja: dwa sloty bez podwójnego jobu; status odtwarzalny po restarcie API/workera.
-- [ ] Review: brak otwartych P1/P2.
+- [x] Implementacja: migracja queue z RPC `SKIP LOCKED`/lease/heartbeat, `JobService`, worker, router `/api/jobs`, adapter legacy CLI i cancellation control file; UI enqueue/poll/cancel czyta trwałe joby.
+- [x] Test: `tests/test_postgres_job_queue.py`, `tests/test_worker_leases.py`, `tests/test_job_cost_limits.py`, `fieldnote-frontend/tests/run-status.test.mjs` oraz kontrakt historii durable jobów.
+- [x] Weryfikacja: pełny offline gate potwierdza ograniczenie do dwóch slotów w RPC, fencing lease, odrzucenie duplikatu aktywnego produktu, odzyskanie wygasłego lease w kontrakcie SQL, cancel przed wykonaniem i `partial` po limicie.
+- [ ] Review: oczekuje na niezależny review; nie stwierdzono jeszcze PASS ani braku P1/P2.
 
 ## Unit 6 — Przyrostowe commitowanie i przeliczanie
 

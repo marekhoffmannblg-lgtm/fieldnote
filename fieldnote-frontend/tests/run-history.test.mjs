@@ -4,12 +4,13 @@ import { readFile } from "node:fs/promises";
 
 const appPath = new URL("../src/app/App.tsx", import.meta.url);
 
-test("run history UI reads actual API endpoints instead of static records", async () => {
+test("run history UI reads durable job endpoints instead of static records", async () => {
   const source = await readFile(appPath, "utf8");
   assert.equal(source.includes("const RUNS ="), false);
-  assert.match(source, /\/runs\?limit=50/);
-  assert.match(source, /\/runs\/\$\{runId\}\/retry/);
-  assert.match(source, /\/runs\/\$\{runId\}\/cancel/);
+  assert.match(source, /\/jobs\?limit=50/);
+  assert.match(source, /\/jobs\/\$\{runId\}\/retry/);
+  assert.match(source, /\/jobs\/\$\{runId\}\/cancel/);
+  assert.match(source, /"\/jobs\/research"/);
 });
 
 test("history UI includes empty state and lifecycle counter fields", async () => {

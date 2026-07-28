@@ -17,8 +17,8 @@ stage "Python syntax and imports"
 stage "Backend unit tests: lifecycle, quality and provenance"
 "${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_fieldnote_p*.py'
 
-stage "Backend integration tests: versioned local API"
-"${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_fieldnote_api_contracts.py'
+stage "Backend integration tests: API contract and durable research queue"
+"${PYTHON_BIN}" -m unittest "${ROOT}/tests/test_fieldnote_api_contracts.py" "${ROOT}/tests/test_postgres_job_queue.py" "${ROOT}/tests/test_worker_leases.py" "${ROOT}/tests/test_job_cost_limits.py"
 
 stage "Category foundation: registry, migration and benchmark partition"
 "${PYTHON_BIN}" -m unittest discover -s "${ROOT}/tests" -p 'test_category_foundation.py'
