@@ -13,7 +13,7 @@ export async function changeInitialPassword(
     method: "POST",
     body: JSON.stringify({ password }),
   });
-  if (response.must_change_password) {
+  if (response?.must_change_password !== false) {
     throw new Error("Zmiana hasła nie została potwierdzona przez usługę.");
   }
   await refreshProfile();

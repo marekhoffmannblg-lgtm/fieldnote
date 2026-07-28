@@ -38,11 +38,11 @@
 - [x] Implementacja: FastAPI dependencies/role/auth/admin-users oraz frontendowa sesja Supabase, guardy i ekrany logowania/zmiany hasła/użytkowników.
 - [x] Test: `tests/test_auth_roles.py`, `fieldnote-frontend/tests/auth-guards.test.mjs`; 401/403 i role viewer/analyst/admin.
 - [x] Weryfikacja: backend/frontend testy i pełny offline gate przechodzą; browser flow wymaga ręcznego skonfigurowania Supabase.
-- [ ] Review: ograniczony re-review oczekuje po naprawie P1; szczegóły w `review-unit-4.md`.
+- [ ] Review: ograniczony re-review oczekuje po naprawie P2; szczegóły w `review-unit-4.md`.
 - [x] Zależność: oficjalny `@supabase/supabase-js` (v2.110.8) dodany przez `pnpm`; nie używać własnego klienta sesji.
 - [x] Naprawa po review: wszystkie trasy API w trybie Supabase poza health/auth wymagają sesji; zmiana hasła jest serwerowo powiązana ze zdjęciem flagi; dodano focused regresje auth.
 - [x] Naprawa po re-review: centralna polityka odrzuca mutacje viewer; `TestClient` wykonawczo pokrywa anon, viewer, analyst, admin i wymuszoną zmianę hasła.
-- [ ] Re-review: wykonany dla `475e04c^..475e04c`; naprawa P1 oczekuje ograniczonego re-review. Unit 4 nie jest jeszcze oznaczony PASS.
+- [ ] Re-review: `cd9ba46^..cd9ba46` zamknął P1, a P2 ma zaimplementowaną poprawkę oczekującą re-review; Unit 4 nie jest jeszcze oznaczony PASS.
 
 ## Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami
 
@@ -134,3 +134,4 @@
 - [x] P1: endpoint zmiany hasła aktualizuje hasło przez serwerowy Auth Admin przed zdjęciem `must_change_password`.
 - [x] P2: macierz HTTP `TestClient` wykonawczo sprawdza anon, viewer, analyst, admin, wymaganie zmiany hasła i odmowę mutacji viewer.
 - [x] P1: flow frontendowy wymuszonej zmiany hasła przekazuje nowe hasło do `POST /api/auth/change-password`; po potwierdzeniu backendu odświeża profil bez pozostawienia użytkownika na ekranie zmiany hasła.
+- [x] P2: klient zmiany hasła akceptuje wyłącznie literalne `must_change_password: false`; odpowiedź brakująca, `null` lub `true` nie może odświeżać profilu ani sygnalizować sukcesu.

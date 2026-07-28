@@ -44,3 +44,27 @@ test("initial password change sends the password to the API and refreshes the cl
     await cleanup();
   }
 });
+
+for (const response of [{}, null, { must_change_password: true }]) {
+  test(`initial password change rejects unconfirmed response ${JSON.stringify(response)}`, async () => {
+    const { module, cleanup } = await loadPasswordChange();
+    try {
+      let refreshCount = 0;
+
+      await assert.rejects(
+        module.changeInitialPassword(
+          "new-password-123",
+          async () => response,
+          async () => {
+            refreshCount += 1;
+          },
+        ),
+        { message: "Zmiana hasła nie została potwierdzona przez usługę." },
+      );
+
+      assert.equal(refreshCount, 0);
+    } finally {
+      await cleanup();
+    }
+  });
+}
