@@ -93,6 +93,14 @@ class JobService:
     def list(self, *, product_id: str | None = None, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         return self.jobs.list(product_id=product_id, limit=min(max(limit, 1), 200), offset=max(offset, 0))
 
+    def count(self, *, product_id: str | None = None) -> int:
+        counter = getattr(self.jobs, "count", None)
+        if callable(counter):
+            return max(0, int(counter(product_id=product_id)))
+        # Compatibility for isolated legacy fakes. The durable repository
+        # always takes the RPC path above, so production totals are unpaged.
+        return len(self.jobs.list(product_id=product_id, limit=200, offset=0))
+
     def cancel(self, job_id: str) -> dict[str, Any]:
         value = self.jobs.request_cancel(job_id)
         if not value:

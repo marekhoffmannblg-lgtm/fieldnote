@@ -35,11 +35,12 @@ class ResearchWorker:
 
     def _run(self, job: dict, token: str) -> bool:
         job_id = str(job["job_id"])
-        alive, lease_lost = threading.Event(), threading.Event(); alive.set()
+        stop_heartbeat, lease_lost = threading.Event(), threading.Event()
         control = Path(tempfile.mkstemp(prefix="fieldnote-job-control-", suffix=".json")[1])
 
         def heartbeat() -> None:
-            while alive.wait(max(1, self.lease_seconds // 3)) is False:
+            interval = max(1, self.lease_seconds // 3)
+            while not stop_heartbeat.wait(interval):
                 current = self.jobs.heartbeat(job_id, token, self.lease_seconds)
                 if not current:
                     lease_lost.set(); self._write_control(control, True); return
@@ -54,7 +55,7 @@ class ResearchWorker:
             final = self._final_status(job, result)
             return bool(self.jobs.complete(job_id, token, final, result.result, result.usage, cost_number(result.usage.get("cost_used", 0))))
         finally:
-            alive.clear(); thread.join(timeout=2); control.unlink(missing_ok=True)
+            stop_heartbeat.set(); thread.join(timeout=2); control.unlink(missing_ok=True)
 
     @staticmethod
     def _write_control(path: Path, cancelled: bool) -> None:
@@ -67,7 +68,11 @@ class ResearchWorker:
         payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
         limits = payload.get("limits") if isinstance(payload.get("limits"), dict) else {}
         usage = result.usage
-        exceeded = (int(usage.get("pages", 0) or 0) > int(limits.get("max_pages", 10)) or int(usage.get("ai_tokens", 0) or 0) > int(limits.get("max_ai_tokens", 20_000)) or (job.get("cost_limit") is not None and cost_number(usage.get("cost_used", 0)) > cost_number(job.get("cost_limit"))))
+        pages = usage.get("pages")
+        tokens = usage.get("ai_tokens")
+        exceeded = (pages is not None and int(pages) > int(limits.get("max_pages", 10))) or (tokens is not None and int(tokens) > int(limits.get("max_ai_tokens", 20_000))) or (job.get("cost_limit") is not None and usage.get("cost_used") is not None and cost_number(usage.get("cost_used")) > cost_number(job.get("cost_limit")))
+        if usage.get("usage_complete") is False and result.status == "succeeded":
+            return "partial"
         return "partial" if exceeded else result.status if result.status in {"partial", "succeeded", "failed"} else "failed"
 
 

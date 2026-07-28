@@ -483,6 +483,7 @@ interface ApiRun {
   product_profile_warning?: string;
   cost_limit?: number | null;
   cost_used?: number | null;
+  usage?: { sources_selected?: number; sources_fetched?: number; sources_failed?: number; sources_attached?: number; coverage_before?: number | null; coverage_after?: number | null; cost_used?: number | null };
 }
 
 interface RefreshSummary {
@@ -2086,32 +2087,45 @@ function PageUruchomienia() {
   const [runs, setRuns] = useState<ApiRun[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [working, setWorking] = useState<string | null>(null);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
-  const loadRuns = async () => {
-    setLoading(true); setError("");
+  const requestSequence = useRef(0);
+  const loadRuns = async ({ append = false, background = false } : { append?: boolean; background?: boolean } = {}) => {
+    const sequence = ++requestSequence.current;
+    if (!append && !background) setLoading(true);
+    if (append) setLoadingMore(true);
+    setError("");
     try {
-      const response = await apiRequest<{ total: number; runs: ApiRun[] }>("/jobs?limit=50");
-      setRuns(response.runs || []); setTotal(response.total || 0);
-    } catch (err) { setError(err instanceof Error ? err.message : "Nie udało się wczytać historii uruchomień."); }
-    finally { setLoading(false); }
+      const offset = append ? runs.length : 0;
+      const response = await apiRequest<{ total?: number; limit?: number; offset?: number; runs?: ApiRun[] }>(`/jobs?limit=50&offset=${offset}`);
+      if (sequence !== requestSequence.current) return;
+      const nextRuns = response.runs || [];
+      setRuns((current) => append ? [...current, ...nextRuns.filter((next) => !current.some((existing) => existing.run_id === next.run_id))] : nextRuns);
+      setTotal(Number.isFinite(response.total) ? Math.max(0, response.total as number) : nextRuns.length);
+    } catch (err) {
+      if (sequence === requestSequence.current) setError(err instanceof Error ? err.message : "Nie udało się wczytać historii uruchomień.");
+    } finally {
+      if (!append && !background) setLoading(false);
+      if (append) setLoadingMore(false);
+    }
   };
   useEffect(() => { void loadRuns(); }, []);
   useEffect(() => {
     if (!runs.some((run) => isRunActive(run))) return;
-    const timer = window.setInterval(() => { void loadRuns(); }, 2000);
+    const timer = window.setInterval(() => { void loadRuns({ background: true }); }, 2000);
     return () => window.clearInterval(timer);
   }, [runs]);
   const retry = async (runId: string) => {
     setWorking(runId); setError("");
-    try { await apiRequest<ApiRun>(`/jobs/${runId}/retry`, { method: "POST" }); await loadRuns(); }
+    try { await apiRequest<ApiRun>(`/jobs/${runId}/retry`, { method: "POST" }); await loadRuns({ background: true }); }
     catch (err) { setError(err instanceof Error ? err.message : "Nie udało się ponowić uruchomienia."); }
     finally { setWorking(null); }
   };
   const cancel = async (runId: string) => {
     setWorking(runId); setError("");
-    try { await apiRequest<ApiRun>(`/jobs/${runId}/cancel`, { method: "POST" }); await loadRuns(); }
+    try { await apiRequest<ApiRun>(`/jobs/${runId}/cancel`, { method: "POST" }); await loadRuns({ background: true }); }
     catch (err) { setError(err instanceof Error ? err.message : "Nie udało się anulować uruchomienia."); }
     finally { setWorking(null); }
   };
@@ -2119,6 +2133,8 @@ function PageUruchomienia() {
   const partial = (run: ApiRun) => isRunPartial(run);
   const succeeded = (run: ApiRun) => isRunSuccess(run);
   const costProgress = (run: ApiRun) => getRunCostProgress(run);
+  const sourceCount = (run: ApiRun, key: "sources_selected" | "sources_fetched" | "sources_failed" | "sources_attached") => run[key] ?? run.usage?.[key] ?? null;
+  const coverage = (run: ApiRun, key: "coverage_before" | "coverage_after") => run[key] ?? run.usage?.[key] ?? null;
   const statusLabel = (run: ApiRun) => succeeded(run) ? "Sukces" : partial(run) ? "Częściowo" : run.status === "running" ? "W toku" : run.status === "leased" ? "Przydzielono workerowi" : run.status === "queued" ? "W kolejce" : run.status === "timed_out" ? "Przekroczony czas" : run.status === "cancelled" ? "Anulowano" : run.status === "interrupted" ? "Przerwano" : "Błąd";
   const duration = (run: ApiRun) => {
     if (!run.started_at || !run.finished_at) return "—";
@@ -2149,12 +2165,13 @@ function PageUruchomienia() {
       <div className="flex-1 overflow-auto">
         {/* Timeline */}
         <div className="px-6 py-4">
+          {error && runs.length > 0 && <div role="status" className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Nie udało się odświeżyć historii. Wyświetlam ostatnie zapisane dane. <button className="ml-1 font-medium underline" onClick={() => void loadRuns({ background: true })}>Spróbuj ponownie</button></div>}
           <div className="relative">
             {/* vertical line */}
             <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
 
             <div className="flex flex-col gap-0">
-              {loading ? <p className="py-4 text-xs text-muted-foreground">Wczytywanie historii uruchomień…</p> : error ? <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</div> : runs.length === 0 ? <p className="py-4 text-xs text-muted-foreground">Brak zapisanych uruchomień.</p> : runs.map((run) => (
+              {loading && runs.length === 0 ? <p className="py-4 text-xs text-muted-foreground">Wczytywanie historii uruchomień…</p> : error && runs.length === 0 ? <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700"><p>{error}</p><button className="mt-2 font-medium underline" onClick={() => void loadRuns()}>Spróbuj ponownie</button></div> : runs.length === 0 ? <p className="py-4 text-xs text-muted-foreground">Brak zapisanych uruchomień.</p> : runs.map((run) => (
                 <div key={run.run_id} className="flex gap-4 relative pb-4">
                   {/* dot */}
                   <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 z-10 border-2 ${succeeded(run) ? "bg-white border-emerald-400" : failed(run) ? "bg-white border-red-300" : partial(run) ? "bg-white border-amber-300" : "bg-white border-blue-300"}`}>
@@ -2174,7 +2191,7 @@ function PageUruchomienia() {
                           <span>·</span>
                           <span>{duration(run)}</span>
                           <span>·</span>
-                          <span>{run.sources_selected ?? 0} źródeł</span>
+                          <span>{sourceCount(run, "sources_selected") ?? "—"} wybranych źródeł</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -2194,7 +2211,8 @@ function PageUruchomienia() {
                         {canCancelRun(run) && <button onClick={() => void cancel(run.run_id)} disabled={working === run.run_id} className="px-2 py-0.5 text-[11px] border border-border rounded hover:bg-muted">Anuluj</button>}
                       </div>
                     </div>
-                    <p className="mt-2 text-[11px] text-muted-foreground">Etap: {run.current_step || "—"} · Postęp: {run.progress}% · Coverage: {run.coverage_before ?? "—"}% → {run.coverage_after ?? "—"}%</p>
+                    <p className="mt-2 text-[11px] text-muted-foreground">Etap: {run.current_step || "—"} · Postęp: {Number.isFinite(run.progress) ? run.progress : 0}% · Coverage: {coverage(run, "coverage_before") ?? "—"}% → {coverage(run, "coverage_after") ?? "—"}%</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">Źródła: {sourceCount(run, "sources_selected") ?? "—"} wybrane · {sourceCount(run, "sources_fetched") ?? "—"} pobrane · {sourceCount(run, "sources_failed") ?? "—"} błędne · {sourceCount(run, "sources_attached") ?? "—"} przypięte</p>
                     {costProgress(run) && <p className="mt-1 text-[11px] text-muted-foreground">Koszt: {costProgress(run)?.used.toFixed(2)} / {costProgress(run)?.limit.toFixed(2)} ({costProgress(run)?.percentage}%)</p>}
                     {run.retry_of && <p className="mt-1 text-[11px] text-muted-foreground">Ponowienie runu: {run.retry_of}</p>}
                     {run.error && (
@@ -2208,6 +2226,7 @@ function PageUruchomienia() {
                 </div>
               ))}
             </div>
+            {runs.length > 0 && runs.length < total && <button onClick={() => void loadRuns({ append: true })} disabled={loadingMore} className="mt-3 w-full rounded border border-border px-3 py-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50">{loadingMore ? "Wczytywanie…" : `Wczytaj starsze (${runs.length} z ${total})`}</button>}
           </div>
         </div>
       </div>

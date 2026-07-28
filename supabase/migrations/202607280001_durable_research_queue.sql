@@ -14,6 +14,14 @@ create index if not exists research_jobs_claim_order_idx
 create index if not exists research_jobs_expired_lease_idx
   on public.research_jobs (lease_expires_at) where status in ('leased', 'running');
 
+-- Queue state is server-owned.  The browser may inspect jobs/events, but all
+-- mutations go through the FastAPI/service-role RPCs below.  The broad grants
+-- and analyst_write policy from the auth migration must not leave a DML path.
+revoke insert, update, delete on table public.research_jobs, public.research_job_events from authenticated;
+grant select on table public.research_jobs, public.research_job_events to authenticated;
+drop policy if exists analyst_write on public.research_jobs;
+drop policy if exists analyst_write on public.research_job_events;
+
 create or replace function public.fieldnote_claim_research_job(
   p_worker_id text,
   p_lease_seconds integer default 60,
@@ -30,10 +38,50 @@ begin
   -- One short transaction-wide lock makes the count-and-claim slot limit real
   -- across processes, while SKIP LOCKED keeps product jobs independently claimable.
   perform pg_advisory_xact_lock(hashtext('fieldnote_research_job_slots'));
-  update public.research_jobs
+  -- Recover only leases that are actually expired.  A cancellation is
+  -- terminal even when the worker died, and a job cannot be requeued forever:
+  -- attempt_count includes the current claim, so max_retries=1 permits the
+  -- initial attempt plus one recovery attempt.
+  with expired as (
+    select j.id,
+           j.cancel_requested_at is not null as was_cancelled,
+           j.attempt_count,
+           case
+             when (j.payload #>> '{limits,max_retries}') ~ '^[0-9]+$'
+               then greatest(1, least((j.payload #>> '{limits,max_retries}')::integer, 100))
+             else 1
+           end as max_retries
+      from public.research_jobs j
+     where j.status in ('leased', 'running')
+       and j.lease_expires_at <= clock_timestamp()
+     for update skip locked
+  ), terminalized as (
+    update public.research_jobs j
+       set status = case
+                      when e.was_cancelled then 'cancelled'::public.research_job_status
+                      else 'failed'::public.research_job_status
+                    end,
+           result = case when e.was_cancelled then jsonb_build_object('reason', 'cancelled_lease_expired')
+                         else jsonb_build_object('reason', 'max_retries_exhausted') end,
+           completed_at = clock_timestamp(), lease_owner = null,
+           lease_token = null, lease_expires_at = null,
+           last_heartbeat_at = null
+      from expired e
+     where j.id = e.id and (e.was_cancelled or e.attempt_count > e.max_retries)
+     returning j.id, j.status, j.result
+  )
+  insert into public.research_job_events(job_id, event_type, payload)
+  select id, status::text, result from terminalized;
+
+  update public.research_jobs j
      set status = 'queued', lease_owner = null, lease_token = null,
          lease_expires_at = null, last_heartbeat_at = null
-   where status in ('leased', 'running') and lease_expires_at <= clock_timestamp();
+   where j.status in ('leased', 'running') and j.lease_expires_at <= clock_timestamp()
+     and j.cancel_requested_at is null
+     and j.attempt_count <= case
+       when (j.payload #>> '{limits,max_retries}') ~ '^[0-9]+$'
+         then greatest(1, least((j.payload #>> '{limits,max_retries}')::integer, 100))
+       else 1 end;
   select count(*) into active_count from public.research_jobs
    where status in ('leased', 'running') and lease_expires_at > clock_timestamp();
   if active_count >= slots then return; end if;
@@ -115,3 +163,15 @@ grant execute on function public.fieldnote_start_research_job(text, uuid) to ser
 grant execute on function public.fieldnote_heartbeat_research_job(text, uuid, integer) to service_role;
 grant execute on function public.fieldnote_request_research_job_cancel(text) to service_role;
 grant execute on function public.fieldnote_complete_research_job(text, uuid, public.research_job_status, jsonb, jsonb, numeric) to service_role;
+
+create or replace function public.fieldnote_count_research_jobs(p_product_id text default null)
+returns bigint
+language sql security definer set search_path = public as $$
+  select count(*)::bigint from public.research_jobs
+   where p_product_id is null or product_id = p_product_id;
+$$;
+revoke all on function public.fieldnote_count_research_jobs(text) from public;
+grant execute on function public.fieldnote_count_research_jobs(text) to service_role;
+
+-- API reads event history by public job_id through the repository; service
+-- role remains the only actor able to write queue events.

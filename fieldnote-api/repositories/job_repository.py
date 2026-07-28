@@ -29,6 +29,19 @@ class JobRepository:
             query["product_id"] = f"eq.{product_id}"
         return self.client.select("research_jobs", **query)
 
+    def count(self, *, product_id: str | None = None) -> int:
+        """Return the durable total without applying the list page limit."""
+        payload = {"p_product_id": product_id} if product_id else {}
+        rows = self.client.rpc("fieldnote_count_research_jobs", payload)
+        if not rows:
+            return 0
+        value = rows[0]
+        raw = value.get("count", value.get("fieldnote_count_research_jobs", 0)) if isinstance(value, dict) else 0
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError):
+            return 0
+
     def claim(self, worker_id: str, lease_seconds: int, max_active: int = 2) -> dict[str, Any]:
         rows = self.client.rpc("fieldnote_claim_research_job", {"p_worker_id": worker_id, "p_lease_seconds": lease_seconds, "p_max_active": max_active})
         return rows[0] if rows else {}
@@ -50,4 +63,11 @@ class JobRepository:
         return rows[0] if rows else {}
 
     def events(self, job_id: str) -> list[dict[str, Any]]:
-        return self.client.select("research_job_events", select="*", job_id=f"eq.{job_id}", order="created_at.asc")
+        # events.job_id is the internal UUID FK, while the API exposes the
+        # public text job_id. Resolve the UUID before querying to preserve the
+        # durable event history in job detail responses.
+        job = self.get(job_id)
+        internal_id = str(job.get("id", "")).strip()
+        if not internal_id:
+            return []
+        return self.client.select("research_job_events", select="*", job_id=f"eq.{internal_id}", order="created_at.asc")

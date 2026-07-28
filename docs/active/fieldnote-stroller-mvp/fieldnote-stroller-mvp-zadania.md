@@ -49,7 +49,7 @@
 - [x] Implementacja: migracja queue z RPC `SKIP LOCKED`/lease/heartbeat, `JobService`, worker, router `/api/jobs`, adapter legacy CLI i cancellation control file; UI enqueue/poll/cancel czyta trwałe joby.
 - [x] Test: `tests/test_postgres_job_queue.py`, `tests/test_worker_leases.py`, `tests/test_job_cost_limits.py`, `fieldnote-frontend/tests/run-status.test.mjs` oraz kontrakt historii durable jobów.
 - [x] Weryfikacja: pełny offline gate potwierdza ograniczenie do dwóch slotów w RPC, fencing lease, odrzucenie duplikatu aktywnego produktu, odzyskanie wygasłego lease w kontrakcie SQL, cancel przed wykonaniem i `partial` po limicie.
-- [ ] Review: oczekuje na niezależny review; nie stwierdzono jeszcze PASS ani braku P1/P2.
+- [ ] Review: `BLOKUJE` — 5 P1, 6 P2, 0 P3; szczegóły w `review-unit-5.md`.
 
 ## Unit 6 — Przyrostowe commitowanie i przeliczanie
 
@@ -135,3 +135,10 @@
 - [x] P2: macierz HTTP `TestClient` wykonawczo sprawdza anon, viewer, analyst, admin, wymaganie zmiany hasła i odmowę mutacji viewer.
 - [x] P1: flow frontendowy wymuszonej zmiany hasła przekazuje nowe hasło do `POST /api/auth/change-password`; po potwierdzeniu backendu odświeża profil bez pozostawienia użytkownika na ekranie zmiany hasła.
 - [x] P2: klient zmiany hasła akceptuje wyłącznie literalne `must_change_password: false`; odpowiedź brakująca, `null` lub `true` nie może odświeżać profilu ani sygnalizować sukcesu.
+
+### Unit 5
+
+- [x] P1/P2: wdrożono poprawki z review Unit 5 (RLS kolejki, heartbeat/fencing, immutable context, limity/cancel, recovery, event mapping, total/pagination, polling i DTO).
+- [ ] P2: wykonawczy lokalny test PostgreSQL concurrency/RLS pozostaje do domknięcia w re-review (offline kontrakt pozostaje zielony).
+- [x] Weryfikacja: backend 32 testy PASS, frontend 20 testów PASS, typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
+- [ ] Review: oczekuje ograniczony re-review Unit 5; Unit 6 nie rozpoczęto.

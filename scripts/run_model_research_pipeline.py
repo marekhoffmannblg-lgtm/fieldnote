@@ -953,6 +953,11 @@ def main() -> int:
             "fetched_offer_ids": sorted(fetched_offer_ids),
             "failed_offer_ids": sorted(failed_offer_ids),
             "retry_offer_ids": sorted(retry_offer_ids),
+            "selected_manufacturer_source_ids": [
+                str(value) for value in immutable_context.get("selected_manufacturer_source_ids", [])
+                if str(value).strip()
+            ] if immutable_context else [],
+            "include_manufacturer_sources": bool(immutable_context.get("include_manufacturer_sources")) if immutable_context else False,
         }
         context_path = write_run_context(run_context)
 

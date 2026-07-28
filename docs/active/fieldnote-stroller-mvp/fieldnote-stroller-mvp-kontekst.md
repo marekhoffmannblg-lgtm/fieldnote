@@ -115,12 +115,21 @@
 - FastAPI zapisuje job natychmiast przez `/api/jobs/research`, a worker uruchamia istniejący CLI poza requestem. Statusy, zdarzenia i usage są odczytywane z PostgreSQL; manifesty legacy pozostały wyłącznie artefaktem diagnostycznym. Przekroczenie limitu stron/tokenów/kosztu albo timeout kończy job jako `partial`; anulowanie jest sprawdzane przed etapami i przed ich zakończeniem.
 - UI kreatora oraz historii jobów korzysta z `/api/jobs` do enqueue, pollingu, listy i anulowania; lease `leased` pozostaje aktywny i możliwy do anulowania. Żaden sekret service-role nie trafia do frontendu.
 - Testy Unit 5: focused backend 32 PASS, frontend 17 PASS, `pnpm run typecheck` PASS, `pnpm run build` PASS (istniejące nieblokujące ostrzeżenie Vite o chunku >500 kB), `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS. Bramka offline obejmuje teraz testy kolejki.
+- Pełny review Unit 5 (`e04145b^..e04145b`) objął correctness, security, tests, UI i data. Powtórzono focused backend (32 PASS), frontend (17 PASS), typecheck, pełny `bash scripts/check_fieldnote.sh` i `git diff --check` — wszystkie automatyczne komendy PASS.
+- Gate Unit 5: **BLOKUJE** — 5 P1, 6 P2, 0 P3. P1: bezpośredni DML analysta omija control plane kolejki; heartbeat nigdy nie wykonuje pierwszego odnowienia; selekcja źródeł nie trafia do CLI; limity/usage/retry nie ograniczają płatnego wykonania; cancel/timeout nie chroni przed późniejszym commitem. P2 obejmują brak runtime testu PostgreSQL, recovery anulowanego lease, błędne ID eventów, fałszywy total, migający/racy polling i niepełny DTO.
+- Raport: `docs/active/fieldnote-stroller-mvp/review-unit-5.md`. Kod nie został zmieniony podczas review; Unit 6 nie został rozpoczęty.
 
 ## Przekazanie
 
 - **Bieżący unit:** Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami.
-- **Status:** implementacja i weryfikacja ukończone; review Unit 5 jeszcze nie wykonano.
-- **Pliki w toku:** zmiany Unit 5 oraz niniejsza dokumentacja, do jednego commitu.
-- **Ostatnie testy:** focused backend PASS (32), frontend PASS (17), typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
-- **Bloker:** brak implementacyjnego blokera; niezależny review jest wymagany przed rozpoczęciem Unit 6.
-- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 5`.
+- **Status:** review Unit 5 BLOKUJE — 5 P1, 6 P2, 0 P3; Unit 5 nie ma PASS.
+- **Pliki w toku:** wyłącznie niezacommitowana dokumentacja review Unit 5; kod aplikacji pozostał bez zmian.
+- **Ostatnie testy:** focused backend PASS (32), frontend PASS (17), typecheck PASS, pełny `bash scripts/check_fieldnote.sh` PASS, `git diff --check e04145b^ e04145b` PASS.
+- **Bloker:** zaakceptowane P1/P2 z `review-unit-5.md`; brak wykonawczego runtime contractu PostgreSQL/RLS.
+- **Następny krok:** `$dev-docs-execute docs/active/fieldnote-stroller-mvp 5` — napraw wyłącznie zaakceptowane P1/P2; nie rozpoczynaj Unit 6.
+
+### Unit 5 — wykonanie napraw review
+
+- Naprawiono zaakceptowane P1/P2: service-role-only DML kolejki, heartbeat/fencing, immutable context selekcji, limity i retry, process-group cancel/timeout, recovery anulowanych lease, mapowanie eventów, total/paginację oraz odporne UI i DTO.
+- Weryfikacja: backend 32 PASS, frontend 20 PASS, typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
+- Status: poprawki P1/P2 zakończone z wyjątkiem wykonawczego lokalnego testu PostgreSQL concurrency/RLS; Unit 5 oczekuje ograniczonego re-review. Unit 6 nie rozpoczęto.

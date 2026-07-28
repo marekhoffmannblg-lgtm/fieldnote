@@ -55,6 +55,11 @@ def public_job(job: dict[str, Any], *, include_events: bool = False) -> dict[str
         "cost_used": job.get("cost_used"),
         "logs_tail": [str(result.get("output_tail", ""))] if result.get("output_tail") else [],
         "usage": usage, "snapshot_updated": bool(result.get("snapshot_updated", False)),
+        "error": result.get("error") or job.get("error") or "",
+        "retry_of": payload.get("retry_of") or result.get("retry_of"),
+        "sources_selected": result.get("sources_selected", usage.get("sources_selected")),
+        "coverage_before": result.get("coverage_before"),
+        "coverage_after": result.get("coverage_after"),
     }
     if include_events:
         response["events"] = job.get("events", [])
@@ -76,7 +81,8 @@ def create_research_job(body: CreateResearchJobRequest, principal: Principal = D
 def list_jobs(limit: int = 50, offset: int = 0, service: JobService = Depends(get_service)) -> dict[str, Any]:
     jobs = service.list(limit=limit, offset=offset)
     runs = [public_job(job) for job in jobs]
-    return {"items": runs, "runs": runs, "total": len(runs), "limit": min(max(limit, 1), 200), "offset": max(offset, 0)}
+    safe_limit, safe_offset = min(max(limit, 1), 200), max(offset, 0)
+    return {"items": runs, "runs": runs, "total": service.count(), "limit": safe_limit, "offset": safe_offset}
 
 
 @router.get("/{job_id}")
