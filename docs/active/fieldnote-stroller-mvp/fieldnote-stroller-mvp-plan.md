@@ -40,7 +40,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 1 — Unit 4: Logowanie, role i administracja kontami
 
-- Status: `pending`
+- Status: `completed` (review PASS)
 - Zależności: Unit 2, Unit 3
 - Kryterium ukończenia: JWT, macierz ról oraz wymuszona zmiana pierwszego hasła chronią API i UI.
 

@@ -38,11 +38,11 @@
 - [x] Implementacja: FastAPI dependencies/role/auth/admin-users oraz frontendowa sesja Supabase, guardy i ekrany logowania/zmiany hasła/użytkowników.
 - [x] Test: `tests/test_auth_roles.py`, `fieldnote-frontend/tests/auth-guards.test.mjs`; 401/403 i role viewer/analyst/admin.
 - [x] Weryfikacja: backend/frontend testy i pełny offline gate przechodzą; browser flow wymaga ręcznego skonfigurowania Supabase.
-- [ ] Review: ograniczony re-review oczekuje po naprawie P2; szczegóły w `review-unit-4.md`.
+- [x] Review: PASS po ograniczonym re-review; brak otwartych P1/P2. Szczegóły w `review-unit-4.md`.
 - [x] Zależność: oficjalny `@supabase/supabase-js` (v2.110.8) dodany przez `pnpm`; nie używać własnego klienta sesji.
 - [x] Naprawa po review: wszystkie trasy API w trybie Supabase poza health/auth wymagają sesji; zmiana hasła jest serwerowo powiązana ze zdjęciem flagi; dodano focused regresje auth.
 - [x] Naprawa po re-review: centralna polityka odrzuca mutacje viewer; `TestClient` wykonawczo pokrywa anon, viewer, analyst, admin i wymuszoną zmianę hasła.
-- [ ] Re-review: `cd9ba46^..cd9ba46` zamknął P1, a P2 ma zaimplementowaną poprawkę oczekującą re-review; Unit 4 nie jest jeszcze oznaczony PASS.
+- [x] Re-review: `efd5ab5^..efd5ab5` zamknął ostatni P2; Unit 4 ma PASS i brak otwartych P1/P2.
 
 ## Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami
 

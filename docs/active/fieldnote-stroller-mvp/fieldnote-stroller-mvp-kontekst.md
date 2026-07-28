@@ -110,12 +110,13 @@
 - Naprawiono wyłącznie P1 Unit 4: frontend nie wywołuje już `supabase.auth.updateUser()`; wysyła `{password}` do serwerowego `POST /api/auth/change-password`, który zachowuje kolejność zmiany hasła i zdjęcia flagi. Nowy deterministyczny test sprawdza payload oraz odświeżenie profilu z `mustChangePassword=true` do `false`. Focused API PASS (27), frontend PASS (12), typecheck PASS, build PASS (istniejące ostrzeżenie chunk >500 kB), pełny `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje ograniczony re-review wyłącznie P1; Unit 5 nie został rozpoczęty.
 - Ograniczony re-review P1 Unit 4 (`cd9ba46^..cd9ba46`) przez correctness_reviewer, security_reviewer, test_reviewer i ui_reviewer: correctness, security i UI PASS; test reviewer wykazał P2 potwierdzony przez inspekcję. `passwordChange.ts` odrzuca tylko truthy `must_change_password`, więc `{}` albo `{must_change_password: null}` wywołuje `refreshProfile()` mimo braku jawnego potwierdzenia. Gate **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Frontend PASS (12), typecheck PASS, pełny `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check cd9ba46^..cd9ba46` PASS. Unit 5 nie został rozpoczęty.
 - Naprawiono wyłącznie P2 Unit 4: helper wymaga dokładnie `must_change_password === false` przed odświeżeniem profilu. Regresje dowodzą odrzucenia `{}`, `null` i `true` bez wywołania odświeżenia. Frontend PASS (15), typecheck/build PASS (istniejące ostrzeżenie chunk >500 kB), pełny `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje ograniczony re-review wyłącznie P2; Unit 5 nie został rozpoczęty.
+- Końcowy ograniczony re-review P2 Unit 4 (`efd5ab5^..efd5ab5`) przez correctness_reviewer, security_reviewer, test_reviewer i ui_reviewer: wszyscy PASS. Helper fail-closed akceptuje wyłącznie literalne `must_change_password=false`; focused test helpera PASS (4), frontend PASS (15), pełny `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check efd5ab5^..efd5ab5` PASS. Gate Unit 4: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 5 nie został rozpoczęty.
 
 ## Przekazanie
 
 - **Bieżący unit:** Unit 4 — Logowanie, role i administracja kontami.
-- **Status:** P1 i P2 Unit 4 są zaimplementowane i zweryfikowane; Unit 4 oczekuje ograniczonego re-review P2. Nie rozpoczęto Unit 5.
-- **Pliki w toku:** `fieldnote-frontend/src/auth/passwordChange.ts`, `fieldnote-frontend/tests/auth-password-change.test.mjs` oraz dokumentacja Unit 4.
-- **Ostatnie testy:** frontend PASS (15), typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
-- **Bloker:** niezależny ograniczony re-review P2.
-- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 4` — wyłącznie P2 literalnego potwierdzenia, bez Unit 5.
+- **Status:** Unit 4 completed — review PASS, brak otwartych P1/P2. Unit 5 nie został rozpoczęty.
+- **Pliki w toku:** brak; dokumentacja zamykająca review Unit 4 jest niezacommitowana.
+- **Ostatnie testy:** focused helper PASS (4), frontend PASS (15), typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check efd5ab5^..efd5ab5` PASS.
+- **Bloker:** brak dla Unit 4; decyzję o rozpoczęciu Unit 5 podejmuje użytkownik.
+- **Następny krok:** commit dokumentacji zamykającej Unit 4 albo `$dev-docs-execute docs/active/fieldnote-stroller-mvp 5` wyłącznie po takim poleceniu.
