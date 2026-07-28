@@ -27,8 +27,8 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
@@ -110,6 +110,7 @@ from routers.health import health_payload  # noqa: E402
 from routers.auth import router as auth_router  # noqa: E402
 from routers.admin_users import router as admin_users_router  # noqa: E402
 from auth.dependencies import require_data_write  # noqa: E402
+from auth.dependencies import get_gateway  # noqa: E402
 from auth.roles import Principal  # noqa: E402
 from services.product_service import ProductService  # noqa: E402
 from services.run_service import index_runs  # noqa: E402
@@ -158,6 +159,22 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(admin_users_router)
+
+@app.middleware("http")
+async def supabase_api_guard(request: Request, call_next: Any) -> Any:
+    if DATA_MODE != "supabase" or not request.url.path.startswith("/api/") or request.url.path in {"/api/health"} or request.url.path.startswith("/api/auth/"):
+        return await call_next(request)
+    authorization = request.headers.get("authorization", "")
+    if not authorization.lower().startswith("bearer "):
+        return JSONResponse(status_code=401, content={"detail": "Wymagane logowanie."})
+    try:
+        principal = get_gateway().principal(authorization.split(" ", 1)[1])
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    if principal.must_change_password:
+        return JSONResponse(status_code=403, content={"detail": {"code": "INITIAL_PASSWORD_CHANGE_REQUIRED"}})
+    request.state.principal = principal
+    return await call_next(request)
 
 
 @app.get("/api/categories")

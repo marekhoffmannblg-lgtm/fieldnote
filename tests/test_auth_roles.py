@@ -13,7 +13,7 @@ class FakeClient:
     def __init__(self): self.created = None; self.profile = None
     def auth_admin(self, method, path, payload): self.created = (method, path, payload); return {"id": "user-1"}
     def upsert(self, table, payload, conflict): self.profile = (table, payload, conflict); return []
-    def select(self, *_args, **_kwargs): return []
+    def select(self, *_args, **_kwargs): return [{"role": "analyst"}]
 
 class AuthRoleTests(unittest.TestCase):
     def test_viewer_is_denied_analyst_action(self):
@@ -27,5 +27,9 @@ class AuthRoleTests(unittest.TestCase):
         self.assertEqual(client.created[1], "users")
         self.assertEqual(client.profile, ("profiles", {"id": "user-1", "role": "analyst", "must_change_password": True}, "id"))
         self.assertTrue(user["must_change_password"])
+    def test_password_is_changed_before_profile_flag_is_cleared(self):
+        client = FakeClient(); UserService(client).change_password("user-1", "safe-new-password")
+        self.assertEqual(client.created, ("PUT", "users/user-1", {"password": "safe-new-password"}))
+        self.assertFalse(client.profile[1]["must_change_password"])
 
 if __name__ == "__main__": unittest.main()

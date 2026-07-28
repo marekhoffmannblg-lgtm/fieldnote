@@ -104,6 +104,7 @@
 - Live provider calls i koszty są poza automatyczną weryfikacją.
 - Unit 4: rozpoznano istniejące API/UI i kontrakty RLS. `npm install` nie działał (`Cannot read properties of null (reading 'matches')`), ale zależność została następnie poprawnie dodana przez `pnpm add @supabase/supabase-js` (v2.110.8). Implementacja auth API/UI i testów pozostaje do wykonania w tym samym Unicie; nie wprowadzono obejścia sesji.
 - Unit 4: dodano introspekcję Bearer przez Supabase Auth, profile role/must-change, admin users, frontendowy provider/guard i ekrany auth/users. Focused backend 25 PASS, frontend 11 PASS/typecheck/build PASS, pełny `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS. Unit 5 nie został rozpoczęty.
+- Naprawa findings Unit 4: middleware wymusza sesję dla wszystkich `/api/*` w trybie Supabase z wyjątkiem health i auth; `change-password` aktualizuje hasło przez serwerowy Auth Admin przed zdjęciem flagi; focused backend 26 PASS, pełny `bash scripts/check_fieldnote.sh` PASS i `git diff --check` PASS. Oczekuje ograniczony re-review Unit 4; Unit 5 nie został rozpoczęty.
 
 ## Przekazanie
 

@@ -40,6 +40,7 @@
 - [x] Weryfikacja: backend/frontend testy i pełny offline gate przechodzą; browser flow wymaga ręcznego skonfigurowania Supabase.
 - [ ] Review: brak otwartych P1/P2.
 - [x] Zależność: oficjalny `@supabase/supabase-js` (v2.110.8) dodany przez `pnpm`; nie używać własnego klienta sesji.
+- [x] Naprawa po review: wszystkie trasy API w trybie Supabase poza health/auth wymagają sesji; zmiana hasła jest serwerowo powiązana ze zdjęciem flagi; dodano focused regresje auth.
 
 ## Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami
 

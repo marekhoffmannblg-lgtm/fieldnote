@@ -4,7 +4,7 @@ import os
 from typing import Any, Callable
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from auth.roles import Principal, Role
 from repositories.supabase_client import SupabaseClient, SupabaseConfigurationError
@@ -32,9 +32,11 @@ class SupabaseAuthGateway:
         return Principal(str(user["id"]), str(user.get("email", "")), profile["role"], bool(profile.get("must_change_password", True)))
 
 def get_gateway() -> SupabaseAuthGateway: return SupabaseAuthGateway.from_env()
-def current_principal(credentials: HTTPAuthorizationCredentials | None = Depends(bearer), gateway: SupabaseAuthGateway = Depends(get_gateway)) -> Principal:
+def current_principal(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> Principal:
+    cached = getattr(request.state, "principal", None)
+    if isinstance(cached, Principal): return cached
     if credentials is None or credentials.scheme.lower() != "bearer": raise HTTPException(status_code=401, detail="Wymagane logowanie.")
-    return gateway.principal(credentials.credentials)
+    return get_gateway().principal(credentials.credentials)
 def require_roles(*roles: Role) -> Callable[[Principal], Principal]:
     def dependency(principal: Principal = Depends(current_principal)) -> Principal:
         if principal.must_change_password: raise HTTPException(status_code=403, detail={"code": "INITIAL_PASSWORD_CHANGE_REQUIRED"})

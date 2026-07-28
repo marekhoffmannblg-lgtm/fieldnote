@@ -12,3 +12,10 @@ class UserService:
         self.client.upsert("profiles", {"id": user_id, "role": role, "must_change_password": True}, "id")
         return {"id": user_id, "email": email, "role": role, "must_change_password": True}
     def list_users(self) -> list[dict[str, Any]]: return self.client.select("profiles", select="id,role,must_change_password")
+    def change_password(self, user_id: str, password: str) -> None:
+        self.client.auth_admin("PUT", f"users/{user_id}", {"password": password})
+        rows = self.client.select("profiles", select="role", id=f"eq.{user_id}")
+        if not rows: raise RuntimeError("User profile is missing.")
+        self.client.upsert("profiles", {"id": user_id, "role": rows[0]["role"], "must_change_password": False}, "id")
+    def set_role(self, user_id: str, role: Role) -> None:
+        self.client.upsert("profiles", {"id": user_id, "role": role}, "id")

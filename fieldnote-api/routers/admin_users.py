@@ -10,8 +10,12 @@ class CreateUserRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     temporary_password: str = Field(min_length=12)
     role: Role = "viewer"
+class SetRoleRequest(BaseModel): role: Role
 def get_users() -> UserService: return UserService(SupabaseClient.from_env())
 @router.get("")
 def list_users(_: Principal = Depends(require_roles("admin")), service: UserService = Depends(get_users)) -> dict[str, object]: return {"items": service.list_users()}
 @router.post("")
 def create_user(request: CreateUserRequest, _: Principal = Depends(require_roles("admin")), service: UserService = Depends(get_users)) -> dict[str, object]: return service.create_user(request.email, request.temporary_password, request.role)
+@router.patch("/{user_id}/role")
+def set_role(user_id: str, request: SetRoleRequest, _: Principal = Depends(require_roles("admin")), service: UserService = Depends(get_users)) -> dict[str, bool]:
+    service.set_role(user_id, request.role); return {"updated": True}
