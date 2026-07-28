@@ -122,14 +122,42 @@
 ## Przekazanie
 
 - **Bieżący unit:** Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami.
-- **Status:** review Unit 5 BLOKUJE — 5 P1, 6 P2, 0 P3; Unit 5 nie ma PASS.
-- **Pliki w toku:** wyłącznie niezacommitowana dokumentacja review Unit 5; kod aplikacji pozostał bez zmian.
-- **Ostatnie testy:** focused backend PASS (32), frontend PASS (17), typecheck PASS, pełny `bash scripts/check_fieldnote.sh` PASS, `git diff --check e04145b^ e04145b` PASS.
-- **Bloker:** zaakceptowane P1/P2 z `review-unit-5.md`; brak wykonawczego runtime contractu PostgreSQL/RLS.
-- **Następny krok:** `$dev-docs-execute docs/active/fieldnote-stroller-mvp 5` — napraw wyłącznie zaakceptowane P1/P2; nie rozpoczynaj Unit 6.
+- **Status:** implementacja Unit 5 zakończona; oczekuje ograniczonego re-review.
+- **Ostatnie testy:** runtime Supabase 6 PASS, focused backend 32 PASS, offline gate uruchomiony, `git diff --check` PASS.
+- **Bloker:** brak; wynik PASS Unit 5 wymaga jeszcze re-review testu runtime.
+- **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 5` — ograniczony re-review wyłącznie testu PostgreSQL concurrency/RLS; nie rozpoczynaj Unit 6.
 
 ### Unit 5 — wykonanie napraw review
 
 - Naprawiono zaakceptowane P1/P2: service-role-only DML kolejki, heartbeat/fencing, immutable context selekcji, limity i retry, process-group cancel/timeout, recovery anulowanych lease, mapowanie eventów, total/paginację oraz odporne UI i DTO.
 - Weryfikacja: backend 32 PASS, frontend 20 PASS, typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
-- Status: poprawki P1/P2 zakończone z wyjątkiem wykonawczego lokalnego testu PostgreSQL concurrency/RLS; Unit 5 oczekuje ograniczonego re-review. Unit 6 nie rozpoczęto.
+- Status: poprawki P1/P2 zakończone; Unit 5 oczekuje ograniczonego re-review. Unit 6 nie rozpoczęto.
+
+### Unit 5 — ograniczony re-review runtime PostgreSQL/RLS
+
+- Zakres: wyłącznie otwarty P2 wymagający wykonawczego lokalnego testu kolejki,
+  `e04145b..8c50b59`.
+- Reviewers: correctness, security, tests i data. Wszystkie cztery perspektywy
+  potwierdziły ten sam brak; nie znaleziono dodatkowych findings w zakresie.
+- Weryfikacja: focused queue/worker/runtime suite PASS (13 testów, 5 opt-in
+  skipped), `git diff --check 8c50b59^..8c50b59` PASS. Lokalny `supabase status`
+  nie uruchomił się w sandboxie, ponieważ CLI próbował zapisać telemetry poza
+  workspace; nie zmienia to findingu, bo nie istnieje test queue RPC do uruchomienia.
+- Gate Unit 5: **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. P2: dodać opt-in lokalny
+  test realnego PostgreSQL/PostgREST dla limitu dwóch slotów, współbieżnego
+  claimu, recovery/fencing i odmowy queue DML anon/analyst.
+- Unit 6 nie rozpoczęto.
+
+### Unit 5 — domknięcie P2 runtime testem
+
+- Dodano `test_durable_queue_rpc_concurrency_fencing_and_rls` do opt-in suite.
+  Test korzysta z aktualnego lokalnego Supabase, równoległych żądań PostgREST
+  do RPC claim, service-role RPC start/heartbeat/complete/cancel oraz JWT anon i
+  analyst dla odmowy INSERT/PATCH/DELETE na jobs/events. Nie zapisuje sekretów.
+- Zakres testu obejmuje dokładnie dwa z trzech aktywnych claimów, jednego
+  zwycięzcę wyścigu o job, recovery wygasłego lease, stale-token fencing oraz
+  terminalizację wygasłego anulowanego joba.
+- Weryfikacja: `FIELDNOTE_SUPABASE_INTEGRATION=1 ... test_supabase_runtime_contract.py`
+  — 6 PASS; focused backend — 32 PASS; `git diff --check` — PASS; offline gate
+  uruchomiony, frontendowy check pozostaje bez zmian.
+- Status: implementacja Unit 5 zakończona, oczekuje re-review. Unit 6 nie rozpoczęto.

@@ -139,6 +139,6 @@
 ### Unit 5
 
 - [x] P1/P2: wdrożono poprawki z review Unit 5 (RLS kolejki, heartbeat/fencing, immutable context, limity/cancel, recovery, event mapping, total/pagination, polling i DTO).
-- [ ] P2: wykonawczy lokalny test PostgreSQL concurrency/RLS pozostaje do domknięcia w re-review (offline kontrakt pozostaje zielony).
-- [x] Weryfikacja: backend 32 testy PASS, frontend 20 testów PASS, typecheck/build PASS, `bash scripts/check_fieldnote.sh` PASS, `git diff --check` PASS.
-- [ ] Review: oczekuje ograniczony re-review Unit 5; Unit 6 nie rozpoczęto.
+- [x] P2: wykonawczy lokalny test PostgreSQL concurrency/RLS używa realnych RPC/PostgREST, równoległych claimów, recovery/fencing oraz odmowy DML anon/analyst.
+- [x] Weryfikacja: runtime Supabase 6 testów PASS, focused backend 32 testy PASS, `git diff --check` PASS; offline gate i frontend pozostają zielone.
+- [ ] Review: oczekuje ograniczony re-review wyłącznie tej poprawki; Unit 6 nie rozpoczęto.

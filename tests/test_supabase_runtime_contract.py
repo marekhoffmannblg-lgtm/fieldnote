@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from pathlib import Path
@@ -311,3 +312,134 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             {"id": "00000000-0000-0000-0000-000000000104", "role": "viewer", "must_change_password": True},
         )
         self.assertIn(admin_profile_manage[0], {200, 201}, admin_profile_manage[1])
+
+    def test_durable_queue_rpc_concurrency_fencing_and_rls(self) -> None:
+        """Exercise the real queue RPCs through the local PostgREST boundary."""
+        environment = local_supabase_env()
+        rest_url = environment["API_URL"] + "/rest/v1"
+        service_key = environment["SERVICE_ROLE_KEY"]
+        anon_key = environment["ANON_KEY"]
+        analyst = jwt_for("00000000-0000-0000-0000-000000000102", environment["JWT_SECRET"])
+        requested_by = "00000000-0000-0000-0000-000000000103"
+        suffix = hashlib.sha256(os.urandom(16)).hexdigest()[:12]
+        product_ids = [f"product:runtime:queue-{suffix}-{index}" for index in range(4)]
+        job_ids = [f"runtime-queue-{suffix}-{index}" for index in range(4)]
+
+        def rpc(name: str, payload: dict[str, object]) -> tuple[int, str]:
+            return rest_request("POST", f"{rest_url}/rpc/{name}", service_key, service_key, payload)
+
+        def rows(result: tuple[int, str]) -> list[dict[str, object]]:
+            self.assertEqual(result[0], 200, result[1])
+            value = json.loads(result[1] or "[]")
+            return value if isinstance(value, list) else []
+
+        try:
+            query(
+                "insert into public.brands (brand_key, display_name) values "
+                f"('runtime-queue-{suffix}', 'Runtime Queue {suffix}') on conflict (brand_key) do nothing;"
+            )
+            for product_id in product_ids:
+                query(
+                    "insert into public.products (product_id, brand_id, brand, model, product_slug, group_key) "
+                    f"select '{product_id}', id, 'Runtime Queue', '{product_id.rsplit('-', 1)[-1]}', "
+                    f"'{product_id.replace(':', '-')}', 'runtime|queue-{suffix}-{product_id.rsplit('-', 1)[-1]}' from public.brands where brand_key = 'runtime-queue-{suffix}' "
+                    "on conflict (product_id) do nothing;"
+                )
+            for job_id, product_id in zip(job_ids, product_ids):
+                query(
+                    "insert into public.research_jobs (job_id, product_id, requested_by, payload) "
+                    f"values ('{job_id}', '{product_id}', '{requested_by}', '{{\"limits\":{{\"max_retries\":2}}}}'::jsonb) "
+                    "on conflict (job_id) do nothing;"
+                )
+
+            # Four independent HTTP requests contend for three queued jobs;
+            # the database advisory lock and active-slot count must admit two.
+            def claim(worker: str) -> tuple[int, str]:
+                return rpc(
+                    "fieldnote_claim_research_job",
+                    {"p_worker_id": worker, "p_lease_seconds": 10, "p_max_active": 2},
+                )
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                claim_results = list(pool.map(claim, [f"runtime-worker-{index}" for index in range(4)]))
+            claimed = [item for result in claim_results for item in rows(result)]
+            self.assertEqual(len(claimed), 2)
+            self.assertEqual(len({item["job_id"] for item in claimed}), 2)
+            self.assertEqual({item["status"] for item in claimed}, {"leased"})
+
+            # Finish the first two claims so a single queued job can be raced.
+            for item in claimed:
+                rows(rpc("fieldnote_complete_research_job", {
+                    "p_job_id": item["job_id"], "p_lease_token": item["lease_token"],
+                    "p_status": "succeeded", "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+                }))
+
+            # A single queued row has exactly one winner even under contention.
+            race_job = job_ids[2]
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                race_results = list(pool.map(
+                    lambda worker: rpc("fieldnote_claim_research_job", {
+                        "p_worker_id": worker, "p_lease_seconds": 10, "p_max_active": 1,
+                    }), ["race-a", "race-b", "race-c"]
+                ))
+            race_claims = [item for result in race_results for item in rows(result) if item.get("job_id") == race_job]
+            self.assertEqual(len(race_claims), 1)
+
+            # Expiry/reclaim fences the previous token from heartbeat and completion.
+            old_token = race_claims[0]["lease_token"]
+            query(f"update public.research_jobs set lease_expires_at = now() - interval '1 second' where job_id = '{race_job}'")
+            reclaimed = rows(rpc("fieldnote_claim_research_job", {"p_worker_id": "reclaimer", "p_lease_seconds": 10, "p_max_active": 2}))
+            reclaimed_row = next(item for item in reclaimed if item.get("job_id") == race_job)
+            self.assertNotEqual(old_token, reclaimed_row["lease_token"])
+            stale_heartbeat = rpc("fieldnote_heartbeat_research_job", {
+                "p_job_id": race_job, "p_lease_token": old_token, "p_lease_seconds": 10,
+            })
+            self.assertEqual(stale_heartbeat[0], 200)
+            self.assertEqual(json.loads(stale_heartbeat[1] or "[]"), [])
+            stale_complete = rpc("fieldnote_complete_research_job", {
+                "p_job_id": race_job, "p_lease_token": old_token, "p_status": "succeeded",
+                "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+            })
+            self.assertEqual(stale_complete[0], 200)
+            self.assertEqual(json.loads(stale_complete[1] or "[]"), [])
+            rows(rpc("fieldnote_complete_research_job", {
+                "p_job_id": race_job, "p_lease_token": reclaimed_row["lease_token"],
+                "p_status": "succeeded", "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+            }))
+
+            # A cancelled lease that expires must become terminal, not an
+            # unreachable queued row that keeps the product unique index busy.
+            cancelled_job = job_ids[3]
+            cancelled_claim = rows(rpc("fieldnote_claim_research_job", {
+                "p_worker_id": "cancel-worker", "p_lease_seconds": 10, "p_max_active": 2,
+            }))
+            cancelled_row = next(item for item in cancelled_claim if item.get("job_id") == cancelled_job)
+            rows(rpc("fieldnote_request_research_job_cancel", {"p_job_id": cancelled_job}))
+            query(f"update public.research_jobs set lease_expires_at = now() - interval '1 second' where job_id = '{cancelled_job}'")
+            rows(rpc("fieldnote_claim_research_job", {"p_worker_id": "cancel-recovery", "p_lease_seconds": 10, "p_max_active": 2}))
+            query(
+                "do $$ begin "
+                f"if not exists (select 1 from public.research_jobs where job_id = '{cancelled_job}' and status = 'cancelled' and completed_at is not null) "
+                "then raise exception 'expired cancelled job was not terminalized'; end if; end $$;"
+            )
+
+            # Queue tables are server-owned: browser roles cannot mutate either table.
+            for token in (None, analyst):
+                for method, query_suffix, body in (
+                    ("POST", "", {"job_id": f"runtime-denied-{suffix}", "product_id": product_ids[3], "requested_by": requested_by}),
+                    ("PATCH", f"?job_id=eq.{job_ids[0]}", {"result": {"spoof": True}}),
+                    ("DELETE", f"?job_id=eq.{job_ids[0]}", None),
+                ):
+                    denied_job = rest_request(method, f"{rest_url}/research_jobs{query_suffix}", token, anon_key, body)
+                    self.assertIn(denied_job[0], {401, 403}, denied_job[1])
+                for method, query_suffix, body in (
+                    ("POST", "", {"job_id": claimed[0]["id"], "event_type": "spoof"}),
+                    ("PATCH", f"?id=eq.0", {"event_type": "spoof"}),
+                    ("DELETE", f"?id=eq.0", None),
+                ):
+                    denied_event = rest_request(method, f"{rest_url}/research_job_events{query_suffix}", token, anon_key, body)
+                    self.assertIn(denied_event[0], {401, 403}, denied_event[1])
+        finally:
+            query(f"delete from public.research_jobs where job_id like 'runtime-%-{suffix}%'")
+            query(f"delete from public.products where product_id like 'product:runtime:queue-{suffix}-%'")
+            query(f"delete from public.brands where brand_key = 'runtime-queue-{suffix}'")

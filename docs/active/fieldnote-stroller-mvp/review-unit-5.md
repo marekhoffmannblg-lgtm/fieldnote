@@ -284,3 +284,76 @@ Weryfikacja: focused backend 32 PASS, frontend 20 PASS, typecheck/build PASS,
 `bash scripts/check_fieldnote.sh` PASS oraz `git diff --check` PASS.
 Ten dokument pozostaje raportem pierwotnego review; wynik PASS wymaga jeszcze
 ograniczonego re-review tych poprawek. Unit 6 nie rozpoczęto.
+
+## Ograniczony re-review — lokalny PostgreSQL concurrency/RLS
+
+- **Data:** 2026-07-28
+- **Zakres diffu:** `e04145b..8c50b59`, ograniczony wyłącznie do poprzedniego
+  P2 „wykonawczy lokalny test PostgreSQL concurrency/RLS”.
+- **Tryb:** re-review
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `WYMAGA POPRAWEK`
+
+### Skonsolidowane findings
+
+#### P2 — Brakuje wykonawczego lokalnego kontraktu kolejki PostgreSQL/RLS
+
+- **File:** `tests/test_postgres_job_queue.py:35`,
+  `tests/test_worker_leases.py:31`, `tests/test_supabase_runtime_contract.py:259`
+- **Evidence:** commit `8c50b59` nie zmienia żadnego testu kolejki. Pierwsze dwa
+  pliki używają odpowiednio inspekcji tekstu migracji i kolejki in-memory;
+  opt-in suite lokalnego Supabase nie wywołuje `research_jobs`,
+  `research_job_events` ani RPC `fieldnote_*research_job`.
+- **Impact:** błąd transakcji/RLS może dopuścić trzeci lease, podwójny claim,
+  zapis starym tokenem albo bezpośredni DML analysta mimo zielonej bramki offline.
+- **Scenario:** trzy współbieżne claimy lokalnego PostgreSQL mogą objąć trzy
+  joby albo stary token może sfinalizować odzyskany job; obecne fakes pozostaną
+  zielone.
+- **Recommendation:** dodać opt-in test dla `supabase start` z niezależnymi
+  połączeniami/RPC i PostgREST JWT. Nie umieszczać kluczy w repozytorium.
+- **Missing test:** trzy różne joby dają dokładnie dwa lease, współbieżny claim
+  jednego joba ma jednego zwycięzcę, wygasły lease jest odzyskiwany, stary token
+  nie heartbeatuje ani nie finalizuje po odzyskaniu, a anon/analyst nie wykonują
+  DML jobs/events przy działającym service-role RPC.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | P2 | 1 | 0 |
+| security_reviewer | P2 | 1 | 0 |
+| test_reviewer | P2 | 1 | 0 |
+| data_reviewer | P2 | 1 | 0 |
+
+Uwagi są tym samym findingiem i zostały scalone.
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused queue/worker + runtime suite | PASS z pominięciem runtime | 13 testów, w tym 5 `skip` bez `FIELDNOTE_SUPABASE_INTEGRATION=1` |
+| Spójność diffu | PASS | `git diff --check 8c50b59^..8c50b59` |
+| Lokalny runtime PostgreSQL | NIE WYKONANO | `supabase status --output env` nie uruchomił się w sandboxie przez próbę zapisu telemetry do `~/.supabase`; niezależnie repo nie zawiera testu kolejki do uruchomienia |
+
+### Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Unit 5 nie ma PASS i Unit 6 nie może
+zostać rozpoczęty.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 5` — dodać wyłącznie
+wykonawczy opt-in lokalny test PostgreSQL concurrency/RLS opisany w P2, następnie
+uruchomić ograniczony `$dev-docs-review docs/active/fieldnote-stroller-mvp 5`.
+
+## Stan po wykonaniu P2 (execute Unit 5)
+
+Dodano `tests/test_supabase_runtime_contract.py::test_durable_queue_rpc_concurrency_fencing_and_rls`.
+Test korzysta z aktualnego lokalnego Supabase i obejmuje równoległe claimy,
+limit dwóch slotów, jednego zwycięzcę wyścigu, recovery/fencing, terminalizację
+wygasłego anulowanego joba oraz odmowę INSERT/PATCH/DELETE anon i analyst na
+`research_jobs` i `research_job_events`.
+
+Weryfikacja: opt-in runtime suite 6 PASS, focused backend 32 PASS,
+`git diff --check` PASS, offline gate uruchomiony. Wynik PASS Unit 5 wymaga
+jeszcze ograniczonego re-review tej poprawki. Unit 6 nie rozpoczęto.
