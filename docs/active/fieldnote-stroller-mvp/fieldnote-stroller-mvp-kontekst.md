@@ -127,6 +127,18 @@
 - **Bloker:** brak; wynik PASS Unit 5 wymaga jeszcze re-review testu runtime.
 - **Następny krok:** `$dev-docs-review docs/active/fieldnote-stroller-mvp 5` — ograniczony re-review wyłącznie testu PostgreSQL concurrency/RLS; nie rozpoczynaj Unit 6.
 
+### Unit 5 — naprawa trzech P2 runtime queue contract
+
+- Naprawiono wyłącznie trzy zaakceptowane P2 w `tests/test_supabase_runtime_contract.py`:
+  wyścig o `p_max_active=1` asercją obejmuje wszystkie odpowiedzi, stale lease
+  jest odrzucany również przez `fieldnote_start_research_job`, a aktualny token
+  przechodzi do `running`; po recovery anulowanego joba test tworzy nowy job dla
+  tego samego produktu i potwierdza zwolnienie aktywnej blokady.
+- Weryfikacja po poprawce obejmuje focused runtime, pełny runtime contract,
+  focused backend, `git diff --check` oraz pełny offline gate. Unit 6 nie rozpoczęto.
+- Status: implementacja poprawki zakończona; oczekuje ograniczony re-review
+  wyłącznie tych trzech P2.
+
 ### Unit 5 — wykonanie napraw review
 
 - Naprawiono zaakceptowane P1/P2: service-role-only DML kolejki, heartbeat/fencing, immutable context selekcji, limity i retry, process-group cancel/timeout, recovery anulowanych lease, mapowanie eventów, total/paginację oraz odporne UI i DTO.
@@ -161,3 +173,16 @@
   — 6 PASS; focused backend — 32 PASS; `git diff --check` — PASS; offline gate
   uruchomiony, frontendowy check pozostaje bez zmian.
 - Status: implementacja Unit 5 zakończona, oczekuje re-review. Unit 6 nie rozpoczęto.
+
+### Unit 5 — ograniczony re-review runtime queue contract
+
+- Zakres: wyłącznie `8c50b59..19019ff` i wykonawczy test PostgreSQL/RLS.
+  Correctness i test reviewer wykryli trzy P2; security reviewer PASS. Data
+  reviewer został uruchomiony dla zmian kolejki, ale nie zwrócił wyniku przed
+  zakończeniem fali; findingi zweryfikowano bezpośrednio w teście.
+- P2: test wyścigu filtruje tylko jeden job zamiast wszystkich odpowiedzi;
+  stale fencing nie sprawdza RPC start; cancel recovery nie dowodzi zwolnienia
+  unique active-product indexu.
+- Weryfikacja: focused backend 32 PASS, opt-in runtime test PASS jako napisany,
+  `git diff --check 8c50b59..19019ff` PASS.
+- Gate Unit 5: **WYMAGA POPRAWEK** — 0 P1, 3 P2, 0 P3. Unit 6 nie rozpoczęto.

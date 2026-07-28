@@ -357,3 +357,90 @@ wygasłego anulowanego joba oraz odmowę INSERT/PATCH/DELETE anon i analyst na
 Weryfikacja: opt-in runtime suite 6 PASS, focused backend 32 PASS,
 `git diff --check` PASS, offline gate uruchomiony. Wynik PASS Unit 5 wymaga
 jeszcze ograniczonego re-review tej poprawki. Unit 6 nie rozpoczęto.
+
+## Ograniczony re-review P2 runtime queue contract
+
+- **Data:** 2026-07-28
+- **Zakres diffu:** `8c50b59..19019ff`
+- **Tryb:** re-review
+- **Reviewers:** `correctness_reviewer, security_reviewer, test_reviewer, data_reviewer`
+- **Gate:** `WYMAGA POPRAWEK`
+
+### Skonsolidowane findings
+
+#### P2 — Wyścig nie asercją wszystkich claimantów
+
+- **File:** `tests/test_supabase_runtime_contract.py:377`
+- **Evidence:** po pierwszych dwóch claimach pozostają dwa queued joby, lecz
+  asercja filtruje odpowiedzi wyłącznie po `race_job`; ewentualny claim drugiego
+  joba jest pomijany.
+- **Impact:** test może przejść przy regresji, która dla `p_max_active=1`
+  dopuszcza dwa lease.
+- **Scenario:** RPC ignoruje limit jednego slotu; dwa requesty dostają różne
+  joby, ale tylko jeden odpowiada filtrowanemu `race_job`.
+- **Recommendation:** pozostawić przed wyścigiem dokładnie jeden queued job i
+  asercją objąć dokładnie jedną niepustą odpowiedź wszystkich claimantów.
+- **Missing test:** trzy claimy o jeden job z `p_max_active=1` dają jeden lease
+  i dwie puste odpowiedzi.
+
+#### P2 — Fencing nie obejmuje przejścia start
+
+- **File:** `tests/test_supabase_runtime_contract.py:390`
+- **Evidence:** test sprawdza stale `heartbeat` i `complete`, lecz nie wywołuje
+  `fieldnote_start_research_job` starym tokenem po reclaim.
+- **Impact:** regresja usuwająca predykat tokenu z RPC start może pozostawić
+  dawnemu workerowi możliwość zmiany odzyskanego joba na `running`.
+- **Scenario:** po reclaim stary worker wykonuje start z poprzednim tokenem i
+  zmienia status joba.
+- **Recommendation:** asercją wymusić pustą odpowiedź stale start oraz udany
+  start aktualnym tokenem.
+- **Missing test:** stale start zwraca `[]`, current-token start zwraca job.
+
+#### P2 — Brak dowodu zwolnienia aktywnej blokady produktu po cancel recovery
+
+- **File:** `tests/test_supabase_runtime_contract.py:411`
+- **Evidence:** test sprawdza status `cancelled`, ale nie tworzy nowego joba dla
+  tego samego `product_id`.
+- **Impact:** zmiana predykatu unique active-product indexu może nadal blokować
+  kolejny research produktu mimo zielonego testu.
+- **Scenario:** indeks omyłkowo obejmuje `cancelled`; nowy job produktu zostaje
+  odrzucony dopiero w produkcji.
+- **Recommendation:** po recovery utworzyć nowy queued job dla tego produktu i
+  potwierdzić sukces.
+- **Missing test:** cancelled expired job zwalnia indeks i pozwala enqueue.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | P2 | 1 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | P2 | 2 | 0 |
+| data_reviewer | interrupted; main-agent verification | 0 | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused backend | PASS | 32 testy |
+| Opt-in runtime queue | PASS jako napisany | lokalny Supabase, 1 test PASS |
+| Spójność diffu | PASS | `git diff --check 8c50b59..19019ff` |
+
+### Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 3 P2, 0 P3. Unit 5 nie ma PASS i Unit 6 nie może
+zostać rozpoczęty.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 5` — napraw wyłącznie
+trzy P2 z tego re-review, potem ponów ograniczony `$dev-docs-review` Unit 5.
+
+## Wykonanie poprawek trzech P2
+
+- Zakres: wyłącznie trzy findings z re-review `8c50b59..19019ff`.
+- Test runtime rozszerzono o pełną asercję odpowiedzi w wyścigu claimów,
+  stale/current fencing dla `fieldnote_start_research_job` oraz enqueue nowego
+  joba tego samego produktu po cancel recovery.
+- Implementacja nie rozpoczyna Unit 6. Po wykonaniu wymagane są focused tests,
+  pełna bramka offline i ograniczony re-review wyłącznie tych poprawek.

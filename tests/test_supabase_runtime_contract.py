@@ -382,8 +382,9 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
                         "p_worker_id": worker, "p_lease_seconds": 10, "p_max_active": 1,
                     }), ["race-a", "race-b", "race-c"]
                 ))
-            race_claims = [item for result in race_results for item in rows(result) if item.get("job_id") == race_job]
+            race_claims = [item for result in race_results for item in rows(result)]
             self.assertEqual(len(race_claims), 1)
+            self.assertEqual(race_claims[0].get("job_id"), race_job)
 
             # Expiry/reclaim fences the previous token from heartbeat and completion.
             old_token = race_claims[0]["lease_token"]
@@ -396,6 +397,16 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             })
             self.assertEqual(stale_heartbeat[0], 200)
             self.assertEqual(json.loads(stale_heartbeat[1] or "[]"), [])
+            stale_start = rpc("fieldnote_start_research_job", {
+                "p_job_id": race_job, "p_lease_token": old_token,
+            })
+            self.assertEqual(stale_start[0], 200)
+            self.assertEqual(json.loads(stale_start[1] or "[]"), [])
+            current_start = rows(rpc("fieldnote_start_research_job", {
+                "p_job_id": race_job, "p_lease_token": reclaimed_row["lease_token"],
+            }))
+            self.assertEqual(len(current_start), 1)
+            self.assertEqual(current_start[0].get("status"), "running")
             stale_complete = rpc("fieldnote_complete_research_job", {
                 "p_job_id": race_job, "p_lease_token": old_token, "p_status": "succeeded",
                 "p_result": {}, "p_usage": {}, "p_cost_used": 0,
@@ -421,6 +432,11 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
                 "do $$ begin "
                 f"if not exists (select 1 from public.research_jobs where job_id = '{cancelled_job}' and status = 'cancelled' and completed_at is not null) "
                 "then raise exception 'expired cancelled job was not terminalized'; end if; end $$;"
+            )
+            replacement_job = f"runtime-replacement-{suffix}"
+            query(
+                "insert into public.research_jobs (job_id, product_id, requested_by, payload) "
+                f"values ('{replacement_job}', '{product_ids[3]}', '{requested_by}', '{{\"limits\":{{\"max_retries\":2}}}}'::jsonb)"
             )
 
             # Queue tables are server-owned: browser roles cannot mutate either table.
