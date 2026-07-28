@@ -173,6 +173,8 @@ async def supabase_api_guard(request: Request, call_next: Any) -> Any:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     if principal.must_change_password:
         return JSONResponse(status_code=403, content={"detail": {"code": "INITIAL_PASSWORD_CHANGE_REQUIRED"}})
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and principal.role not in {"analyst", "admin"}:
+        return JSONResponse(status_code=403, content={"detail": "Brak uprawnień."})
     request.state.principal = principal
     return await call_next(request)
 

@@ -41,6 +41,8 @@
 - [ ] Review: brak otwartych P1/P2.
 - [x] Zależność: oficjalny `@supabase/supabase-js` (v2.110.8) dodany przez `pnpm`; nie używać własnego klienta sesji.
 - [x] Naprawa po review: wszystkie trasy API w trybie Supabase poza health/auth wymagają sesji; zmiana hasła jest serwerowo powiązana ze zdjęciem flagi; dodano focused regresje auth.
+- [x] Naprawa po re-review: centralna polityka odrzuca mutacje viewer; `TestClient` wykonawczo pokrywa anon, viewer, analyst, admin i wymuszoną zmianę hasła.
+- [ ] Review: ograniczony re-review poprawek P1/P2 oczekuje; Unit 4 nie jest jeszcze oznaczony PASS.
 
 ## Unit 5 — Kolejka PostgreSQL i worker z dwoma slotami
 
@@ -125,3 +127,9 @@
 - [x] P2: CLI audit nie ufa `expected_lionelo_product_ids` z wejściowego fixture; zawsze weryfikuje kanoniczny zbiór specs.
 - [x] P2: migracja waliduje kanoniczny zbiór Lionelo przed pierwszym upsertem; fixture niezgodny z `data/internal_specs` nie może wykonać zapisu.
 - [x] P2: test CLI z niekanonicznym fixturem potwierdza kod 2 przed utworzeniem `SupabaseClient` i repozytoriów.
+
+### Unit 4
+
+- [x] P1: wszystkie metody mutujące API w trybie Supabase wymagają roli analyst lub admin; viewer zachowuje tylko odczyt.
+- [x] P1: endpoint zmiany hasła aktualizuje hasło przez serwerowy Auth Admin przed zdjęciem `must_change_password`.
+- [x] P2: macierz HTTP `TestClient` wykonawczo sprawdza anon, viewer, analyst, admin, wymaganie zmiany hasła i odmowę mutacji viewer.

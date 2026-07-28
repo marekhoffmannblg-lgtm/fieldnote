@@ -3,11 +3,14 @@ import sys
 import unittest
 from pathlib import Path
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
 from auth.dependencies import require_roles
 from auth.roles import Principal
 from services.user_service import UserService
+import app as api
+from unittest.mock import patch
 
 class FakeClient:
     def __init__(self): self.created = None; self.profile = None
@@ -31,5 +34,22 @@ class AuthRoleTests(unittest.TestCase):
         client = FakeClient(); UserService(client).change_password("user-1", "safe-new-password")
         self.assertEqual(client.created, ("PUT", "users/user-1", {"password": "safe-new-password"}))
         self.assertFalse(client.profile[1]["must_change_password"])
+    def test_http_matrix_covers_anon_roles_and_initial_password_gate(self):
+        principals = {
+            "viewer": Principal("v", "v@test", "viewer", False),
+            "analyst": Principal("a", "a@test", "analyst", False),
+            "admin": Principal("d", "d@test", "admin", False),
+            "initial": Principal("i", "i@test", "viewer", True),
+        }
+        class Gateway:
+            def principal(self, token): return principals[token]
+        with patch.object(api, "DATA_MODE", "supabase"), patch.object(api, "get_gateway", return_value=Gateway()):
+            client = TestClient(api.app)
+            self.assertEqual(client.get("/api/health").status_code, 200)
+            self.assertEqual(client.get("/api/categories").status_code, 401)
+            for token in ("viewer", "analyst", "admin"):
+                self.assertEqual(client.get("/api/categories", headers={"Authorization": f"Bearer {token}"}).status_code, 200)
+            self.assertEqual(client.get("/api/categories", headers={"Authorization": "Bearer initial"}).status_code, 403)
+            self.assertEqual(client.post("/api/research/preview", headers={"Authorization": "Bearer viewer"}, json={}).status_code, 403)
 
 if __name__ == "__main__": unittest.main()
