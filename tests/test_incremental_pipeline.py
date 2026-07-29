@@ -3,7 +3,10 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
+from contextlib import nullcontext
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
@@ -11,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from services.benchmark_rebuild_service import BenchmarkRebuildService, benchmark_group_scope, product_scope, semantic_hash  # noqa: E402
 from build_model_benchmark import merge_scoped_rows as merge_benchmark_rows  # noqa: E402
 from report_model_coverage import merge_scoped_rows as merge_coverage_rows  # noqa: E402
+import run_model_research_pipeline as research_pipeline  # noqa: E402
 from run_model_research_pipeline import derived_stage_commands, source_price_median  # noqa: E402
 
 
@@ -64,6 +68,62 @@ class IncrementalPipelineTests(unittest.TestCase):
             source_price_median({"sources": [{"price": "999,00 zł"}, {"gross_price": "1 199.00 PLN"}, {"price": "0"}]}),
             1099.0,
         )
+
+    def test_scoped_commit_payload_preserves_source_price_before_projection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model_dir = root / "output" / "model_groups" / "orfeo"
+            model_dir.mkdir(parents=True)
+            (model_dir / "group.json").write_text(
+                '{"group_key":"lionelo|orfeo","benchmark_group":"compact","sources":[{"source_id":"s1","price":100},{"source_id":"s2","price":105}]}',
+                encoding="utf-8",
+            )
+            (model_dir / "model_state.json").write_text('{"group_key":"lionelo|orfeo","fields":{}}', encoding="utf-8")
+            with patch.object(research_pipeline, "ROOT", root):
+                payload = research_pipeline.scoped_commit_payload(
+                    "lionelo|orfeo", {"product_id": "orf"}, {"benchmark_group": "compact"}
+                )
+        self.assertEqual(payload["price_median"], 102.5)
+        self.assertEqual(payload["semantic_state"]["price_median"], 102.5)
+
+    def test_direct_cli_without_context_keeps_derived_stages_scoped(self):
+        calls = []
+
+        class History:
+            run_id = "direct-cli-test"
+            payload = {"finished_at": ""}
+            def update_summary(self, **_kwargs): pass
+            def update_latest_stage(self, *_args): pass
+            def complete(self, status, **_kwargs): self.payload["finished_at"] = status
+            def save(self): pass
+
+        def fake_stage(number, _label, command=None, *_args, **_kwargs):
+            calls.append((number, command))
+            return ("", 0)
+
+        args = Namespace(
+            marketplace="allegro", brand="Lionelo", model="Orfeo", category_key="stroller",
+            benchmark_group="compact", apply=True, resume=False, skip_ai=True,
+            skip_product_profile=True, retry_errors=True, fixture_scenario=None,
+            fixture_root=None, run_context=None, cancel_check_file=None,
+        )
+        product = {"product_id": "orf", "category_key": "stroller", "benchmark_group": "compact"}
+        with patch.object(research_pipeline, "parse_args", return_value=args), \
+             patch.object(research_pipeline, "ResearchRun", return_value=History()), \
+             patch.object(research_pipeline, "product_for_group_key", return_value=product), \
+             patch.object(research_pipeline, "validate_category_assignment", return_value={"category_key": "stroller", "benchmark_group": "compact"}), \
+             patch.object(research_pipeline, "ensure_catalog_product", return_value=product), \
+             patch.object(research_pipeline, "ensure_group_directory", return_value=research_pipeline.ROOT), \
+             patch.object(research_pipeline, "retry_offer_ids_for_model", return_value=set()), \
+             patch.object(research_pipeline, "coverage_for_group", return_value={"group_key": "lionelo|orfeo"}), \
+             patch.object(research_pipeline, "run_stage", side_effect=fake_stage), \
+             patch.object(research_pipeline, "FileLock", side_effect=lambda *_args, **_kwargs: nullcontext()), \
+             patch.object(research_pipeline, "print_pipeline_summary"):
+            self.assertEqual(research_pipeline.main(), 0)
+        derived = {number: command for number, command in calls if number in {8, 9}}
+        self.assertEqual(derived[8][-2:], ["--group-key", "lionelo|orfeo"])
+        self.assertEqual(derived[9][-2:], ["--group-key", "lionelo|orfeo"])
+        self.assertNotIn("export_frontend_snapshot.py", " ".join(derived[8] + derived[9]))
 
     def test_requested_ineligible_scope_removes_stale_derived_rows(self):
         existing = [{"group_key": "lionelo|orfeo"}, {"group_key": "lionelo|nebo"}]

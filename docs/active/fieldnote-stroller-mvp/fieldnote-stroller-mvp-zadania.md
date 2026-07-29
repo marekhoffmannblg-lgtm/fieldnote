@@ -54,9 +54,9 @@
 ## Unit 6 — Przyrostowe commitowanie i przeliczanie
 
 - [x] Implementacja: `product_scope`, `benchmark_group_scope`, rebuild pojedynczego scope'u i serializowany admin full rebuild.
-- [x] Test: `tests/test_incremental_pipeline.py`, `tests/test_incremental_benchmark_rebuild.py`; niepowiązane produkty pozostają niezmienione, snapshot powstaje dopiero przy istotnej zmianie.
-- [x] Weryfikacja: suma przyrostowych rebuildów daje stan równy full rebuild na fixture.
-- [ ] Review: poprawki po `BLOKUJE` (3 P1, 2 P2) są zaimplementowane; oczekuje ograniczonego re-review w `review-unit-6.md`.
+- [x] Test: `tests/test_incremental_pipeline.py`, `tests/test_incremental_benchmark_rebuild.py` oraz opt-in `tests/test_supabase_runtime_contract.py`; direct CLI, dwa scope'y/admin, price threshold, stale rows i fenced RPC.
+- [x] Weryfikacja: suma rebuildów przyrostowych daje stan równy full rebuild na fixture; focused 28 PASS, runtime Unit 6 PASS, pełny offline gate PASS.
+- [ ] Review: remediacja 2 P1/4 P2 zakończona; oczekuje ograniczonego re-review `002c371^..HEAD` w `review-unit-6.md`.
 
 ## Unit 7 — Wspólny Firecrawl i katalog konkurencji
 
@@ -154,3 +154,9 @@
 - [x] P1: worker kończy sukces/partial wyłącznie przez fenced RPC Supabase, który atomowo zapisuje scoped semantic snapshoty i terminalizuje job.
 - [x] P2: scoped benchmark/coverage usuwa stare wiersze dla żądanej grupy, gdy przestaje być benchmark-eligible.
 - [x] P2: testy obejmują dwie grupy wewnętrzne, canonical `--group-key`, brak eksportu frontendu, izolację niepowiązanej grupy oraz próg ceny.
+- [x] P1: durable envelope wylicza medianę ceny z oryginalnych źródeł przed projekcją; cena 5%+ tworzy snapshot.
+- [x] P1: preflight/timeout bez semantic envelope jest terminalizowany jako `partial`, nie `failed`.
+- [x] P2: wykonawczy canonical direct-CLI test bez `--run-context` wymaga scoped etapów 8–9.
+- [x] P2: kontrolowany test nakładania się admin full rebuild i scoped read–merge–write zachowuje oba scope'y.
+- [x] P2: opt-in runtime PostgreSQL test fenced RPC obejmuje 4,99%/5%, stale token i invalid envelope.
+- [x] P2: integration test builderów obejmuje utratę eligibility i usunięcie benchmark/source rows.

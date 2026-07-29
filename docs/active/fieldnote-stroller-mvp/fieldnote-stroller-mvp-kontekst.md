@@ -296,3 +296,37 @@
   zastosowało migrację, a bezpieczne query schematu potwierdziło tabelę
   `research_scope_snapshots` i RPC `fieldnote_commit_incremental_research_job`.
   Unit 6 oczekuje ograniczonego re-review, Unit 7 nie rozpoczęto.
+
+### Unit 6 — ograniczony re-review commitu `002c371`
+
+- Zakres: wyłącznie `002c371^..002c371` i pięć findings poprzedniego review.
+  Correctness, security, tests i data pracowali niezależnie; UI review nie był
+  wymagany. Nie zmieniano kodu i nie rozpoczęto Unit 7.
+- Weryfikacja: focused Unit 6 + queue/schema/RLS — 27 PASS; pełna
+  `bash scripts/check_fieldnote.sh` PASS; `git diff --check 002c371^ 002c371`
+  PASS. Wykonawca potwierdził lokalne zastosowanie migracji i obecność tabeli
+  oraz RPC bez ujawniania kluczy.
+- Gate: **BLOKUJE** — 2 P1, 4 P2, 0 P3. P1: `scoped_commit_payload()` usuwa
+  pola ceny zanim liczy medianę, więc 5% price snapshot nie może powstać;
+  worker mapuje no-mutation `partial` (page-limit/timeout) na `failed`, gdy
+  committer nie dostaje envelope. P2: brakuje testów realnego direct CLI,
+  overlap admin/scoped, runtime PostgreSQL fenced RPC oraz builderów po
+  utracie eligibility.
+- Następny krok: naprawa wyłącznie tych 2 P1 i 4 P2 w Unit 6, potem kolejny
+  ograniczony re-review. Pełny raport: `review-unit-6.md`.
+
+### Unit 6 — wykonanie remediacji po review `002c371`
+
+- Naprawiono wyłącznie zaakceptowane 2 P1 i 4 P2. `scoped_commit_payload()`
+  liczy medianę z pełnych source records przed projekcją identifier-only.
+  No-mutation `partial` z preflight page-limit lub timeoutu przechodzi przez
+  fenced incremental RPC z pustą listą snapshotów i zachowuje status `partial`.
+- Dodano wykonawczy direct-CLI test bez contextu, overlap test dwóch scope'ów
+  z admin full rebuildem, builder integration test usuwający stale
+  benchmark/source rows oraz lokalny runtime contract RPC dla 4,99%/5%, stale
+  lease i invalid envelope. Poprawiono alias zmiennej `value` w SQL RPC.
+- Weryfikacja: focused Unit 6/schema/RLS — 28 PASS; opt-in test nowego RPC —
+  PASS; `py_compile` — PASS; pełny `bash scripts/check_fieldnote.sh` — PASS;
+  `git diff --check` — PASS. Nie rozpoczęto Unit 7.
+- Status: implementacja zakończona; dokumentacja oczekuje ograniczonego
+  re-review wyłącznie `002c371^..HEAD`.

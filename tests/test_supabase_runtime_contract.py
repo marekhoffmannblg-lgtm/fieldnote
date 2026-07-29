@@ -470,3 +470,105 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             query(f"delete from public.research_jobs where job_id like 'runtime-%-{suffix}%'")
             query(f"delete from public.products where product_id like 'product:runtime:queue-{suffix}-%'")
             query(f"delete from public.brands where brand_key = 'runtime-queue-{suffix}'")
+
+    def test_incremental_commit_rpc_fences_price_threshold_and_partial_without_snapshot(self) -> None:
+        """Execute the Unit 6 commit RPC against local PostgreSQL/PostgREST."""
+        environment = local_supabase_env()
+        rest_url = environment["API_URL"] + "/rest/v1"
+        service_key = environment["SERVICE_ROLE_KEY"]
+        suffix = hashlib.sha256(os.urandom(16)).hexdigest()[:12]
+        product_id = f"product:runtime:incremental-{suffix}"
+        brand_key = f"runtime-incremental-{suffix}"
+
+        def rpc(name: str, payload: dict[str, object]) -> tuple[int, str]:
+            return rest_request("POST", f"{rest_url}/rpc/{name}", service_key, service_key, payload)
+
+        def rows(result: tuple[int, str]) -> list[dict[str, object]]:
+            self.assertEqual(result[0], 200, result[1])
+            value = json.loads(result[1] or "[]")
+            return value if isinstance(value, list) else []
+
+        def snapshot(price: float, semantic: str) -> dict[str, object]:
+            return {
+                "scope_type": "product", "scope_id": product_id,
+                "semantic_hash": semantic * 64, "domain_hash": "d" * 64,
+                "price_median": price, "payload": {"price": price},
+            }
+
+        def start_job(index: int) -> tuple[str, str]:
+            job_id = f"runtime-incremental-{suffix}-{index}"
+            query(
+                "insert into public.research_jobs (job_id, product_id, requested_by, payload) "
+                f"values ('{job_id}', '{product_id}', '00000000-0000-0000-0000-000000000103', '{{}}'::jsonb)"
+            )
+            claimed = rows(rpc("fieldnote_claim_research_job", {"p_worker_id": f"incremental-{index}", "p_lease_seconds": 30, "p_max_active": 2}))
+            claimed_row = next(item for item in claimed if item.get("job_id") == job_id)
+            started = rows(rpc("fieldnote_start_research_job", {"p_job_id": job_id, "p_lease_token": claimed_row["lease_token"]}))
+            self.assertEqual(len(started), 1)
+            return job_id, str(claimed_row["lease_token"])
+
+        try:
+            query(
+                "insert into public.brands (brand_key, display_name) values "
+                f"('{brand_key}', 'Runtime Incremental {suffix}') on conflict do nothing;"
+            )
+            query(
+                "insert into public.products (product_id, brand_id, brand, model, product_slug, group_key) "
+                f"select '{product_id}', id, 'Runtime Incremental', 'Model', 'runtime-incremental-{suffix}', 'runtime|incremental-{suffix}' "
+                f"from public.brands where brand_key = '{brand_key}'"
+            )
+            first_job, first_token = start_job(1)
+            first = rows(rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": first_job, "p_lease_token": first_token, "p_status": "succeeded",
+                "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+                "p_scope": {"product_id": product_id, "scope_version": "1"},
+                "p_snapshots": [snapshot(100, "a")],
+            }))
+            self.assertEqual(first[0]["result"]["snapshot_updated"], True)
+
+            second_job, second_token = start_job(2)
+            second = rows(rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": second_job, "p_lease_token": second_token, "p_status": "succeeded",
+                "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+                "p_scope": {"product_id": product_id, "scope_version": "1"},
+                "p_snapshots": [snapshot(104.99, "b")],
+            }))
+            self.assertEqual(second[0]["result"]["snapshot_updated"], False)
+
+            third_job, third_token = start_job(3)
+            third = rows(rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": third_job, "p_lease_token": third_token, "p_status": "succeeded",
+                "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+                "p_scope": {"product_id": product_id, "scope_version": "1"},
+                "p_snapshots": [snapshot(105, "c")],
+            }))
+            self.assertEqual(third[0]["result"]["snapshot_updated"], True)
+            count = query(f"select count(*) as count from public.research_scope_snapshots where scope_id = '{product_id}'")
+            self.assertIn('"count": 2', count.stdout)
+
+            partial_job, partial_token = start_job(4)
+            stale = rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": partial_job, "p_lease_token": "00000000-0000-0000-0000-000000000000", "p_status": "partial",
+                "p_result": {"reason": "max_pages_exceeded_before_start"}, "p_usage": {"usage_complete": False}, "p_cost_used": 0,
+                "p_scope": {"product_id": product_id, "scope_version": "1"}, "p_snapshots": [],
+            })
+            self.assertEqual(stale[0], 200)
+            self.assertEqual(json.loads(stale[1] or "[]"), [])
+            invalid = rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": partial_job, "p_lease_token": partial_token, "p_status": "succeeded",
+                "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+                "p_scope": {"product_id": product_id, "scope_version": "1"},
+                "p_snapshots": [{**snapshot(110, "e"), "semantic_hash": "invalid"}],
+            })
+            self.assertNotEqual(invalid[0], 200)
+            partial = rows(rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": partial_job, "p_lease_token": partial_token, "p_status": "partial",
+                "p_result": {"reason": "max_pages_exceeded_before_start"}, "p_usage": {"usage_complete": False}, "p_cost_used": 0,
+                "p_scope": {"product_id": product_id, "scope_version": "1", "no_mutation": True}, "p_snapshots": [],
+            }))
+            self.assertEqual(partial[0]["status"], "partial")
+        finally:
+            query(f"delete from public.research_scope_snapshots where scope_id = '{product_id}'")
+            query(f"delete from public.research_jobs where product_id = '{product_id}'")
+            query(f"delete from public.products where product_id = '{product_id}'")
+            query(f"delete from public.brands where brand_key = '{brand_key}'")

@@ -5,15 +5,20 @@ import tempfile
 import threading
 import unittest
 import json
+import csv
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
+sys.path.insert(0, str(ROOT / "scripts"))
 from p0_runtime import LockUnavailableError  # noqa: E402
 from services.benchmark_rebuild_service import BenchmarkRebuildService, price_change_requires_snapshot, semantic_hash  # noqa: E402
 from services.benchmark_commit_service import BenchmarkCommitService  # noqa: E402
 from services.pipeline_service import PipelineResult  # noqa: E402
 from worker import ResearchWorker  # noqa: E402
+import build_model_benchmark  # noqa: E402
+import report_model_coverage  # noqa: E402
 
 
 def fixture() -> dict:
@@ -81,7 +86,7 @@ class IncrementalBenchmarkRebuildTests(unittest.TestCase):
             source, target = root / "seed.json", root / "state.json"
             source.write_text(json.dumps(fixture()), encoding="utf-8")
             service = BenchmarkRebuildService(lock_root=root / "locks")
-            barrier, errors = threading.Barrier(3), []
+            barrier, errors = threading.Barrier(4), []
 
             def rebuild(product_id, price):
                 try:
@@ -92,9 +97,15 @@ class IncrementalBenchmarkRebuildTests(unittest.TestCase):
 
             first = threading.Thread(target=rebuild, args=("orf", 105))
             second = threading.Thread(target=rebuild, args=("neb", 210))
-            first.start(); second.start(); barrier.wait(); first.join(); second.join()
+            def admin_rebuild():
+                try:
+                    barrier.wait()
+                    service.rebuild_all_admin_state_file(source, target, run_id="admin")
+                except Exception as exc:  # pragma: no cover - asserted below
+                    errors.append(exc)
+            admin = threading.Thread(target=admin_rebuild)
+            first.start(); second.start(); admin.start(); barrier.wait(); first.join(); second.join(); admin.join()
             self.assertEqual(errors, [])
-            service.rebuild_all_admin_state_file(source, target, run_id="admin")
             state = json.loads(target.read_text(encoding="utf-8"))
             prices = {item["product_id"]: item["price"] for item in state["products"]}
             self.assertEqual(prices, {"orf": 105, "neb": 210, "trail": 300})
@@ -125,6 +136,66 @@ class IncrementalBenchmarkRebuildTests(unittest.TestCase):
         jobs = Jobs()
         self.assertFalse(ResearchWorker(jobs, Pipeline()).process_one())
         self.assertEqual(jobs.completed, [])
+
+    def test_worker_preserves_no_mutation_partial_through_fenced_incremental_path(self):
+        class Pipeline:
+            def execute(self, _job, *, cancel_check_file):
+                return PipelineResult("partial", {"pages": 11, "usage_complete": False}, {"reason": "max_pages_exceeded_before_start"})
+        class Jobs:
+            def __init__(self): self.incremental = []; self.completed = []
+            def claim(self, *_args, **_kwargs): return {"job_id": "job", "lease_token": "token", "product_id": "orf", "payload": {"limits": {}}}
+            def start(self, *_args): return {"job_id": "job", "lease_token": "token", "product_id": "orf", "payload": {"limits": {}}}
+            def heartbeat(self, *_args): return {"job_id": "job"}
+            def complete_incremental(self, *args): self.incremental.append(args); return {"job_id": "job", "status": "partial"}
+            def complete(self, *args): self.completed.append(args); return {"job_id": "job"}
+        jobs = Jobs()
+        self.assertTrue(ResearchWorker(jobs, Pipeline()).process_one())
+        self.assertEqual(len(jobs.incremental), 1)
+        self.assertEqual(jobs.incremental[0][2], "partial")
+        self.assertEqual(jobs.incremental[0][-1], [])
+        self.assertEqual(jobs.incremental[0][-2]["no_mutation"], True)
+        self.assertEqual(jobs.completed, [])
+
+    def test_builder_commands_remove_stale_rows_for_ineligible_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            groups = root / "model_groups" / "orfeo"
+            groups.mkdir(parents=True)
+            (groups / "group.json").write_text(json.dumps({
+                "group_key": "lionelo|orfeo", "taxonomy_status": "review_required",
+                "benchmark_category": "", "taxonomy_version": "v1", "sources": [],
+            }), encoding="utf-8")
+            (groups / "model_state.json").write_text(json.dumps({
+                "group_key": "lionelo|orfeo", "brand": "Lionelo", "model": "Orfeo", "fields": {},
+            }), encoding="utf-8")
+            existing_benchmark = root / "model_benchmark.csv"
+            existing_sources = root / "model_benchmark_sources.csv"
+            existing_coverage = root / "model_coverage.csv"
+            for path, fields in (
+                (existing_benchmark, ["group_key", "category"]),
+                (existing_sources, ["group_key", "source_id"]),
+                (existing_coverage, ["group_key", "coverage_percent"]),
+            ):
+                with path.open("w", encoding="utf-8", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
+                    writer.writerow({fields[0]: "lionelo|orfeo", fields[1]: "stale"})
+                    writer.writerow({fields[0]: "lionelo|nebo", fields[1]: "keep"})
+            with patch.object(build_model_benchmark, "GROUPS", root / "model_groups"), patch.object(build_model_benchmark, "OUT", root), \
+                 patch.object(report_model_coverage, "GROUPS", root / "model_groups"), patch.object(report_model_coverage, "OUT", root), \
+                 patch.object(build_model_benchmark, "atomic_write_json", lambda path, value: path.write_text(json.dumps(value), encoding="utf-8")), \
+                 patch.object(report_model_coverage, "atomic_write_json", lambda path, value: path.write_text(json.dumps(value), encoding="utf-8")):
+                with patch("sys.argv", ["build_model_benchmark.py", "--group-key", "lionelo|orfeo"]):
+                    self.assertEqual(build_model_benchmark.main(), 0)
+                with patch("sys.argv", ["report_model_coverage.py", "--group-key", "lionelo|orfeo"]):
+                    self.assertEqual(report_model_coverage.main(), 0)
+            for path in (existing_benchmark, existing_sources):
+                with path.open(encoding="utf-8", newline="") as handle:
+                    rows = list(csv.DictReader(handle))
+                self.assertEqual([row["group_key"] for row in rows], ["lionelo|nebo"])
+            with existing_coverage.open(encoding="utf-8", newline="") as handle:
+                coverage_rows = list(csv.DictReader(handle))
+            self.assertEqual({row["group_key"] for row in coverage_rows}, {"lionelo|nebo", "lionelo|orfeo"})
+            self.assertNotIn("stale", {row.get("coverage_percent", "") for row in coverage_rows})
 
 
 if __name__ == "__main__":

@@ -30,7 +30,29 @@ class BenchmarkCommitService:
 
     def complete(self, job: Mapping[str, Any], lease_token: str, status: str, result: Mapping[str, Any], usage: Mapping[str, Any], cost_used: float) -> dict[str, Any]:
         scoped = _mapping(result.get("scoped_commit"))
-        if status in {"succeeded", "partial"} and not scoped:
+        # A bounded run can stop before any derived artefact exists (for
+        # example a page-limit preflight or a worker timeout).  It is still a
+        # valid partial terminal state and must be fenced/recorded without a
+        # semantic snapshot.  Use the job's product identity as the minimal
+        # scope required by the server-side RPC.
+        if status == "partial" and not scoped:
+            product_id = str(job.get("product_id", "")).strip()
+            if not product_id:
+                raise BenchmarkCommitError("Partial completion requires a product_id.")
+            complete = getattr(self.jobs, "complete_incremental", None)
+            if not callable(complete):
+                raise BenchmarkCommitError("Durable incremental completion RPC is unavailable.")
+            return complete(
+                str(job.get("job_id", "")),
+                lease_token,
+                status,
+                dict(result),
+                dict(usage),
+                cost_used,
+                {"product_id": product_id, "scope_version": "1", "no_mutation": True},
+                [],
+            )
+        if status == "succeeded" and not scoped:
             raise BenchmarkCommitError("Pipeline did not return a scoped semantic commit envelope.")
         snapshots, scope = self._snapshots(job, scoped)
         complete = getattr(self.jobs, "complete_incremental", None)

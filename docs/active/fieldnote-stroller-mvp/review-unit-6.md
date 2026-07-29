@@ -185,3 +185,170 @@ zaakceptowane P1/P2 z tego raportu; nie rozpoczynaj Unit 7.
   lokalne `supabase migration up --local` potwierdziło nową tabelę i RPC.
 - Status pozostaje **WYMAGA RE-REVIEW**; nie oznaczono PASS ani nie rozpoczęto
   Unit 7.
+
+## Ograniczony re-review remediacji Unit 6
+
+- **Data:** 2026-07-29
+- **Zakres diffu:** `002c371^..002c371` (`1e37e3e..002c371`)
+- **Tryb:** `ograniczony re-review` wyłącznie pięciu wcześniejszych findings
+  P1/P2 oraz ich regresji
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`,
+  `test_reviewer`, `data_reviewer`
+- **Gate:** `BLOKUJE`
+
+### Kryteria akceptacji i zakres
+
+Sprawdzono wyłącznie scoped normal CLI, serializację scoped/admin,
+worker → fenced Supabase snapshot, usuwanie stale rows oraz testy dwóch grup.
+Nie sprawdzano Unit 7 ani nie zmieniano kodu podczas review.
+
+### Skonsolidowane findings
+
+#### P1 — Cena jest usuwana przed wyliczeniem mediany durable snapshotu
+
+- **File:** `scripts/run_model_research_pipeline.py:122-136`,
+  `scoped_commit_payload`
+- **Evidence:** `group_data["sources"]` zachowuje wyłącznie identyfikatory,
+  po czym `source_price_median(group_data)` czyta pola ceny, których projekcja
+  już nie zawiera. Emitted `scoped_commit.price_median` jest więc `null`.
+- **Impact:** cena zmieniona o co najmniej 5% nie tworzy durable snapshotu,
+  mimo że to materialna zmiana wymagana przez Unit 6.
+- **Scenario:** źródła produktu przechodzą z mediany 1000 do 1050, bez zmiany
+  evidence ani pozostałych pól; RPC nie otrzymuje ceny i nie zapisuje zmiany.
+- **Recommendation:** wyliczyć medianę z oryginalnych records źródeł przed
+  projekcją identifier-only i przekazać ją w semantic envelope.
+- **Missing test:** fixture `scoped_commit_payload` z cenami 100 → 104,99 oraz
+  100 → 105, wraz z asercją decyzji snapshotu.
+
+#### P1 — Brak scoped envelope zmienia prawidłowy wynik `partial` w `failed`
+
+- **File:** `fieldnote-api/worker.py:58-63`,
+  `fieldnote-api/services/benchmark_commit_service.py:29-30`
+- **Evidence:** worker przekazuje każdy `partial` do committera; preflight
+  limitu stron i timeout PipelineService zwracają `partial` bez
+  `scoped_commit`, co wywołuje wyjątek i późniejsze legacy `complete(...,
+  "failed", ...)`.
+- **Impact:** limit kosztu/timeout traci semantykę `partial`, historię i
+  zachowanie operatora przewidziane dla bounded researchu.
+- **Scenario:** 11 wybranych ofert przy `max_pages=10` kończy się jako
+  `failed`, zamiast trwałego `partial` bez snapshotu.
+- **Recommendation:** terminalizować no-mutation `partial` przez fenced path
+  zachowujący `partial`; RPC snapshotu stosować tylko po istniejącym scoped
+  semantic commicie.
+- **Missing test:** worker integration dla preflight page limit i timeout,
+  asertująca `partial` i brak snapshotu.
+
+#### P2 — Direct normal CLI nie ma wykonawczego testu izolacji scope'u
+
+- **File:** `tests/test_incremental_pipeline.py:56-60`
+- **Evidence:** test sprawdza helper `derived_stage_commands()`, ale nie
+  uruchamia `main()` bez `--run-context`; późniejszy bypass helpera w realnym
+  runnerze pozostałby niewykryty.
+- **Impact:** regresja przywracająca globalne etapy 8–9 może przejść offline
+  gate mimo kryterium głównego flow.
+- **Scenario:** main wywołuje nie-scoped builders, pozostawiając helper bez
+  zmian.
+- **Recommendation:** mockowany CLI integration test bez contextu, który
+  przechwytuje komendy etapów 8–9 i wymaga `--group-key` oraz braku eksportu.
+- **Missing test:** opisany test canonical direct CLI.
+
+#### P2 — Test nie nakłada adminowego rebuilda na scoped read–merge–write
+
+- **File:** `tests/test_incremental_benchmark_rebuild.py:78-101`
+- **Evidence:** test czeka `join()` obu scoped threadów, a dopiero potem
+  wywołuje admin full rebuild; nie weryfikuje rzeczywistej kolizji obu klas
+  transakcji.
+- **Impact:** zmiana lock protocolu może dopuścić lost update w scenariuszu
+  admin/scoped bez regresji testowej.
+- **Scenario:** admin odczytuje stan przed scoped commitem i nadpisuje jego
+  wynik po zwolnieniu locka.
+- **Recommendation:** barrier-controlled test z nakładającymi się operacjami
+  scoped i admin oraz asercją retry/pełnego końcowego stanu.
+- **Missing test:** opisany deterministyczny concurrency test.
+
+#### P2 — Fenced RPC snapshotów nie ma wykonawczego kontraktu PostgreSQL
+
+- **File:** `tests/test_supabase_schema_contract.py:69-77`,
+  `tests/test_incremental_benchmark_rebuild.py:103-127`
+- **Evidence:** kontrakt SQL jest string inspection, a worker używa fake
+  `complete_incremental`; żaden test nie wykonuje RPC dla stale lease,
+  atomowego job+snapshot ani błędnego envelope.
+- **Impact:** zmiana semantyki migracji może raportować sukces bez trwałego
+  snapshotu, mimo zielonych testów fixture.
+- **Scenario:** stale token lub invalid snapshot nie jest odrzucony atomowo w
+  rzeczywistym PostgreSQL.
+- **Recommendation:** opt-in local Supabase runtime test dla 4,99%/5%, stale
+  tokenu oraz invalid envelope z asercją braku częściowego zapisu.
+- **Missing test:** opisany runtime contract.
+
+#### P2 — Usunięcie stale benchmark/source rows jest testowane tylko helperem
+
+- **File:** `tests/test_incremental_pipeline.py:68-71`
+- **Evidence:** test wywołuje `merge_scoped_rows` bez uruchomienia builderów;
+  nie pokrywa istniejących benchmark-source CSV ani kwalifikacji grupy.
+- **Impact:** CLI builder może nadal pozostawić widoczne stale rows po zmianie
+  eligibility.
+- **Scenario:** istniejące benchmark, benchmark-source i coverage dla grupy
+  zmienionej na ineligible nie są usuwane przez rzeczywiste skrypty.
+- **Recommendation:** temporary-output CLI fixture uruchamiający oba buildery
+  i zachowujący niepowiązaną grupę byte-for-byte.
+- **Missing test:** opisany integration test builderów.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | findings | 2 P1 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | findings | 4 P2 | 3 severity downgraded from P1, because direct code inspection confirms current behavior |
+| data_reviewer | finding | 1 P1 (duplikat correctness) | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused Unit 6 + queue/schema/RLS | PASS | 27 testów |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` |
+| Spójność diffu | PASS | `git diff --check 002c371^ 002c371` |
+| Lokalna migracja (wykonawca) | PASS | `supabase migration up --local` i bezpieczne query tabeli/RPC |
+
+### Bezpieczeństwo
+
+`security_reviewer`: PASS. Migration ogranicza RPC do `service_role`, RLS
+snapshotów używa istniejącego read guard i review nie wykrył nowego sekreta,
+bypassu RLS ani niewłaściwego grantu.
+
+### Odchylenia od planu
+
+Brak zmian zakresu funkcjonalnego, ale dwa kryteria Unit 6 pozostają złamane:
+5% price snapshot i trwały status `partial`. Unit 7 pozostaje poza zakresem.
+
+### Kontrole operatora
+
+Brak ręcznych kontroli do oznaczenia jako wykonane.
+
+### Decyzja gate
+
+**BLOKUJE** — 2 P1, 4 P2, 0 P3. Unit 6 nie jest ukończony.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 6` — napraw wyłącznie
+zaakceptowane 2 P1 i 4 P2 z tego ograniczonego re-review; nie rozpoczynaj
+Unit 7.
+
+## Wykonanie remediacji po ograniczonym re-review
+
+- Zakres: wyłącznie zaakceptowane 2 P1 i 4 P2 z review `002c371^..002c371`;
+  Unit 7 nie rozpoczęto.
+- `scoped_commit_payload()` zachowuje medianę ceny z raw source records,
+  a no-mutation `partial` używa fenced incremental RPC bez snapshotów.
+- Dodano test direct CLI bez contextu, rzeczywisty overlap scoped/admin,
+  builder integration stale-row oraz opt-in runtime RPC dla 4,99%/5%, stale
+  lease i invalid envelope. SQL RPC dostał alias dla elementu JSON, aby uniknąć
+  niejednoznaczności PL/pgSQL.
+- Weryfikacja: focused Unit 6/schema/RLS 28 PASS, opt-in RPC PASS,
+  `py_compile` PASS, pełny `bash scripts/check_fieldnote.sh` PASS i
+  `git diff --check` PASS.
+- Status: **WYMAGA OGRANICZONEGO RE-REVIEW** `002c371^..HEAD`; nie oznaczono
+  jeszcze Unit 6 jako ukończonego.

@@ -115,13 +115,21 @@ def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benc
     """Return a bounded domain projection for the durable semantic commit."""
     group_data: dict[str, object] = {}
     state_data: dict[str, object] = {}
+    raw_sources: list[object] = []
     for group_path in (ROOT / "output" / "model_groups").glob("*/group.json"):
         group = read_json(group_path, {})
         if not isinstance(group, dict) or group.get("group_key") != group_key:
             continue
+        # Keep the complete source records long enough to derive semantic
+        # price data.  The durable envelope intentionally projects sources to
+        # stable identifiers only, but projecting first would discard the
+        # price fields and silently turn every median into ``null``.
+        raw_sources = group.get("sources", group.get("offers", []))
+        if not isinstance(raw_sources, list):
+            raw_sources = []
         group_data = {
             "group_key": group_key, "category": group.get("category", ""), "benchmark_group": group.get("benchmark_group", ""),
-            "sources": [{"source_id": item.get("source_id", ""), "marketplace": item.get("marketplace", ""), "external_offer_id": item.get("external_offer_id", item.get("offer_id", ""))} for item in group.get("sources", group.get("offers", [])) if isinstance(item, dict)],
+            "sources": [{"source_id": item.get("source_id", ""), "marketplace": item.get("marketplace", ""), "external_offer_id": item.get("external_offer_id", item.get("offer_id", ""))} for item in raw_sources if isinstance(item, dict)],
         }
         state = read_json(group_path.parent / "model_state.json", {})
         if isinstance(state, dict):
@@ -129,7 +137,10 @@ def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benc
         break
     benchmark = next((row for row in read_csv(ROOT / "output" / "model_benchmark.csv") if row.get("group_key") == group_key), {})
     scope = {"product_id": str(product_scope.get("product_id", group_key)), "group_key": group_key, "benchmark_group": str(benchmark_group_scope.get("benchmark_group", product_scope.get("benchmark_group", group_data.get("benchmark_group", ""))))}
-    price_median = source_price_median(group_data)
+    # Compute the median from the original records before the identifier-only
+    # source projection above.  This value is carried separately in the
+    # semantic envelope so a 5% durable price transition remains observable.
+    price_median = source_price_median({"sources": raw_sources})
     semantic_state = {"group": group_data, "model_state": state_data, "benchmark": benchmark, "coverage": coverage_for_group(group_key)}
     if price_median is not None:
         semantic_state["price_median"] = price_median
