@@ -22,6 +22,10 @@ def read(path: Path) -> dict:
         return {}
 
 
+def merge_scoped_rows(existing: list[dict[str, object]], updates: list[dict[str, object]], scoped_keys: set[str]) -> list[dict[str, object]]:
+    return [item for item in existing if str(item.get("group_key", "")) not in scoped_keys] + updates
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--group-key", action="append", default=[], help="Przebuduj i scal wyłącznie wskazaną grupę.")
@@ -84,8 +88,9 @@ def main() -> int:
             if existing_path.exists():
                 with existing_path.open(encoding="utf-8", newline="") as handle:
                     existing = list(csv.DictReader(handle))
-            changed = {str(item.get("group_key", "")) for item in updates}
-            return [item for item in existing if str(item.get("group_key", "")) not in changed] + updates
+            # Coverage is a derived projection too: remove every requested
+            # scope before appending eligible/current replacements.
+            return merge_scoped_rows(existing, updates, scoped_keys)
         rows = merge(OUT / "model_coverage.csv", rows)
     atomic_write_csv(OUT / "model_coverage.csv", columns, rows)
     atomic_write_json(OUT / "model_coverage.json", rows)

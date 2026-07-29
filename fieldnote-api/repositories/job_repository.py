@@ -58,6 +58,14 @@ class JobRepository:
         rows = self.client.rpc("fieldnote_complete_research_job", {"p_job_id": job_id, "p_lease_token": lease_token, "p_status": status, "p_result": result, "p_usage": usage, "p_cost_used": cost_used})
         return rows[0] if rows else {}
 
+    def complete_incremental(self, job_id: str, lease_token: str, status: str, result: dict[str, Any], usage: dict[str, Any], cost_used: float, scope: dict[str, Any], snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+        rows = self.client.rpc("fieldnote_commit_incremental_research_job", {
+            "p_job_id": job_id, "p_lease_token": lease_token, "p_status": status,
+            "p_result": result, "p_usage": usage, "p_cost_used": cost_used,
+            "p_scope": scope, "p_snapshots": snapshots,
+        })
+        return rows[0] if rows else {}
+
     def request_cancel(self, job_id: str) -> dict[str, Any]:
         rows = self.client.rpc("fieldnote_request_research_job_cancel", {"p_job_id": job_id})
         return rows[0] if rows else {}

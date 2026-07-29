@@ -56,7 +56,7 @@
 - [x] Implementacja: `product_scope`, `benchmark_group_scope`, rebuild pojedynczego scope'u i serializowany admin full rebuild.
 - [x] Test: `tests/test_incremental_pipeline.py`, `tests/test_incremental_benchmark_rebuild.py`; niepowiązane produkty pozostają niezmienione, snapshot powstaje dopiero przy istotnej zmianie.
 - [x] Weryfikacja: suma przyrostowych rebuildów daje stan równy full rebuild na fixture.
-- [ ] Review: brak otwartych P1/P2.
+- [ ] Review: poprawki po `BLOKUJE` (3 P1, 2 P2) są zaimplementowane; oczekuje ograniczonego re-review w `review-unit-6.md`.
 
 ## Unit 7 — Wspólny Firecrawl i katalog konkurencji
 
@@ -146,3 +146,11 @@
 - [x] P2: po terminalizacji wygasłego anulowanego joba test tworzy kolejny job dla tego samego produktu, dowodząc zwolnienia blokady.
 - [x] P2: runtime PostgreSQL odrzuca drugi aktywny job tego samego produktu przed cancel recovery, a po terminalizacji przyjmuje nowy job.
 - [x] Review: PASS po ograniczonym re-review `8fa7fd4..b59d169`; brak otwartych P1/P2. Unit 6 nie rozpoczęto.
+
+### Unit 6
+
+- [x] P1: kanoniczny CLI zawsze wylicza scope produktu i przekazuje `--group-key`; globalny rebuild pozostaje wyłącznie w jawnym CLI admina.
+- [x] P1: scoped read–merge–commit oraz admin full rebuild używają wspólnej transakcji locka fixture; test współbieżny zachowuje oba scope'y i adminowy rebuild.
+- [x] P1: worker kończy sukces/partial wyłącznie przez fenced RPC Supabase, który atomowo zapisuje scoped semantic snapshoty i terminalizuje job.
+- [x] P2: scoped benchmark/coverage usuwa stare wiersze dla żądanej grupy, gdy przestaje być benchmark-eligible.
+- [x] P2: testy obejmują dwie grupy wewnętrzne, canonical `--group-key`, brak eksportu frontendu, izolację niepowiązanej grupy oraz próg ceny.

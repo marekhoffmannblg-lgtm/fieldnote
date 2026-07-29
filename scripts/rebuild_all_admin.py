@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
-from services.benchmark_rebuild_service import BenchmarkRebuildService, read_state, write_state  # noqa: E402
+from services.benchmark_rebuild_service import BenchmarkRebuildService  # noqa: E402
 
 
 def main() -> int:
@@ -20,8 +20,8 @@ def main() -> int:
     parser.add_argument("--run-id", default="admin-full-rebuild")
     parser.add_argument("--lock-root", type=Path)
     args = parser.parse_args()
-    result = BenchmarkRebuildService(lock_root=args.lock_root).rebuild_all_admin(read_state(args.input), run_id=args.run_id)
-    write_state(args.output, result.state)
+    service = BenchmarkRebuildService(lock_root=args.lock_root)
+    result = service.rebuild_all_admin_state_file(args.input, args.output, run_id=args.run_id)
     print(json.dumps({"status": "ok", **result.metadata}, ensure_ascii=False, sort_keys=True))
     return 0
 

@@ -11,7 +11,8 @@ import copy
 import hashlib
 import json
 import sys
-from contextlib import nullcontext
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -183,23 +184,47 @@ class BenchmarkRebuildService:
     def __init__(self, *, lock_root: Path | None = None) -> None:
         self.lock_root = Path(lock_root) if lock_root else PROJECT_ROOT / "output" / "run_locks"
 
-    def rebuild_product_scope(self, state: Mapping[str, Any], product_id: str, *, updates: Mapping[str, Any] | None = None, run_id: str = "scoped-rebuild") -> RebuildResult:
+    @contextmanager
+    def aggregation_transaction(self, *, run_id: str, scope: str, wait_seconds: float = 5.0) -> Iterator[None]:
+        """Serialize a complete file-fixture read/merge/write transaction.
+
+        Production uses the fenced PostgreSQL commit RPC. This bounded retry is
+        the equivalent safety boundary for offline JSON fixtures and explicit
+        operator CLIs: a competing scope waits rather than overwriting a
+        freshly committed state from another scope.
+        """
+        lock = FileLock(self.lock_root / "aggregation.lock", {"run_id": run_id, "scope": scope})
+        deadline = time.monotonic() + max(0, wait_seconds)
+        while True:
+            try:
+                lock.acquire()
+                break
+            except LockUnavailableError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.02)
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def rebuild_product_scope(self, state: Mapping[str, Any], product_id: str, *, updates: Mapping[str, Any] | None = None, run_id: str = "scoped-rebuild", lock_already_held: bool = False) -> RebuildResult:
         working = copy.deepcopy(dict(state))
         scope = product_scope(working, product_id)
-        lock = FileLock(self.lock_root / f"product-{_lock_component(product_id)}.lock", {"run_id": run_id, "scope": "product_scope", "product_id": product_id})
-        global_lock = self.lock_root / "aggregation.lock"
-        if global_lock.exists():
-            raise LockUnavailableError("Global admin rebuild is active.")
-        with lock:
+        lock = FileLock(self.lock_root / "aggregation.lock", {"run_id": run_id, "scope": "scoped_derived_commit", "product_id": product_id})
+        if lock_already_held:
             metadata = _apply_product(working, product_id, updates)
+        else:
+            with lock:
+                metadata = _apply_product(working, product_id, updates)
         working.setdefault("research_runs", []).append({"run_id": run_id, "scope_type": "product", "scope_id": product_id, "snapshot_created": metadata["snapshot_created"], "semantic_hash": metadata["semantic_hash"]})
         metadata.update({"run_id": run_id, "scope": scope})
         return RebuildResult(working, metadata)
 
-    def rebuild_all_admin(self, state: Mapping[str, Any], *, run_id: str = "admin-full-rebuild") -> RebuildResult:
+    def rebuild_all_admin(self, state: Mapping[str, Any], *, run_id: str = "admin-full-rebuild", lock_already_held: bool = False) -> RebuildResult:
         working = copy.deepcopy(dict(state))
         lock = FileLock(self.lock_root / "aggregation.lock", {"run_id": run_id, "scope": "admin_full_rebuild"})
-        with lock:
+        def apply() -> dict[str, Any]:
             products = sorted((item for item in working.get("products", []) if isinstance(item, Mapping)), key=lambda item: str(item.get("product_id", item.get("id", ""))))
             metadata = {"run_id": run_id, "scope": "full", "product_ids": []}
             for item in products:
@@ -208,7 +233,29 @@ class BenchmarkRebuildService:
                     metadata["product_ids"].append(product_id)
                     _apply_product(working, product_id, None)
             working.setdefault("research_runs", []).append({"run_id": run_id, "scope_type": "full", "scope_id": "catalog", "product_ids": metadata["product_ids"]})
+            return metadata
+        if lock_already_held:
+            metadata = apply()
+        else:
+            with lock:
+                metadata = apply()
         return RebuildResult(working, metadata)
+
+    def rebuild_product_state_file(self, input_path: Path, output_path: Path, product_id: str, *, updates: Mapping[str, Any] | None = None, run_id: str = "scoped-rebuild") -> RebuildResult:
+        """Commit one product to the canonical fixture file without lost writes."""
+        with self.aggregation_transaction(run_id=run_id, scope="scoped_derived_commit"):
+            source_path = output_path if output_path.exists() else input_path
+            result = self.rebuild_product_scope(read_state(source_path), product_id, updates=updates, run_id=run_id, lock_already_held=True)
+            write_state(output_path, result.state)
+            return result
+
+    def rebuild_all_admin_state_file(self, input_path: Path, output_path: Path, *, run_id: str = "admin-full-rebuild") -> RebuildResult:
+        """Run the explicit full rebuild under the same fixture transaction."""
+        with self.aggregation_transaction(run_id=run_id, scope="admin_full_rebuild"):
+            source_path = output_path if output_path.exists() else input_path
+            result = self.rebuild_all_admin(read_state(source_path), run_id=run_id, lock_already_held=True)
+            write_state(output_path, result.state)
+            return result
 
 
 def read_state(path: Path) -> dict[str, Any]:

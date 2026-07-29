@@ -29,6 +29,8 @@ class SupabaseSchemaContractTests(unittest.TestCase):
                 "202607230003_market_benchmarks.sql",
                 "202607230004_jobs_audit.sql",
                 "202607230005_auth_roles_rls_storage.sql",
+                "202607280001_durable_research_queue.sql",
+                "202607290001_incremental_benchmark_commit.sql",
             ],
         )
         schema = "\n".join(migration(path.name) for path in sorted(MIGRATIONS.glob("*.sql")))
@@ -63,6 +65,15 @@ class SupabaseSchemaContractTests(unittest.TestCase):
         self.assertIn("fieldnote_validate_evidence_link", provenance)
         self.assertIn("new.product_id is distinct from linked_product_id", provenance)
         self.assertIn("new.source_id is distinct from linked_source_id", provenance)
+
+    def test_incremental_commit_is_fenced_and_serializes_durable_snapshots(self) -> None:
+        incremental = migration("202607290001_incremental_benchmark_commit.sql")
+        self.assertIn("create table public.research_scope_snapshots", incremental)
+        self.assertIn("pg_advisory_xact_lock(hashtext('fieldnote_benchmark_incremental_commit'))", incremental)
+        self.assertIn("lease_token = p_lease_token", incremental)
+        self.assertIn("scope product does not match fenced job", incremental)
+        self.assertIn("abs(candidate_price - previous.price_median) / abs(previous.price_median) >= 0.05", incremental)
+        self.assertIn("grant execute on function public.fieldnote_commit_incremental_research_job", incremental)
 
 
 if __name__ == "__main__":

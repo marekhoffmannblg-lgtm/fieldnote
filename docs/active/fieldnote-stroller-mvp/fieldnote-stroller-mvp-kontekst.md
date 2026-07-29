@@ -254,3 +254,45 @@
   `bash scripts/check_fieldnote.sh` oraz `git diff --check` — PASS.
 - Status: implementacja Unit 6 zakończona; oczekuje niezależnego review.
   Unit 7 nie rozpoczęto.
+
+### Unit 6 — pełny review
+
+- Zakres: `b59d169..1e37e3e`. Correctness, security i test reviewer pracowali
+  niezależnie; data review wykonano jako single-agent fallback po braku wyniku
+  warunkowego subagenta. UI review nie był wymagany.
+- Weryfikacja review: focused Unit 6 7 PASS, `git diff --check
+  b59d169..1e37e3e` PASS oraz pełna `bash scripts/check_fieldnote.sh` PASS.
+- Gate: **BLOKUJE** — 3 P1, 2 P2, 0 P3. P1: no-context canonical CLI nadal
+  przebudowuje globalnie; scoped read–merge–commit i admin rebuild mogą się
+  ścigać; semantic snapshoty są tylko fixtureem i nie są utrwalane przez
+  worker/Supabase. P2: stale rows po utracie eligibility oraz niedostateczne
+  testy izolacji grup/canonical pipeline.
+- Nie zmieniano kodu podczas review. Unit 6 pozostaje otwarty; Unit 7 nie
+  rozpoczęto. Pełny raport: `review-unit-6.md`.
+
+### Unit 6 — remediacja findings P1/P2
+
+- Kanoniczny runner wylicza teraz `product_scope` również bez przekazanego
+  contextu i zawsze uruchamia benchmark/coverage z `--group-key`; etapy 8–9
+  nie wywołują globalnego eksportu. Commit scope zawiera ograniczoną projekcję
+  group/model-state/benchmark/coverage oraz medianę ceny wyłącznie z
+  zresearchowanych źródeł.
+- JSON fixture CLIs wykonują wspólną, retryowaną transakcję locka obejmującą
+  read–merge–write; drugi scope odczytuje już zapisany canonical output, a
+  jawny admin full rebuild korzysta z tego samego protokołu. Produkcyjny
+  boundary jest pojedynczym fenced RPC PostgreSQL z advisory transaction lock,
+  które atomowo tworzy snapshoty i terminalizuje job.
+- Dodano `research_scope_snapshots`, `BenchmarkCommitService` i
+  `JobRepository.complete_incremental()`. Worker nie raportuje `succeeded`/
+  `partial`, gdy scoped envelope lub trwały commit nie przejdzie; status
+  końcowy jest wtedy `failed`.
+- Builder benchmarku i coverage usuwają stare wiersze żądanej grupy przed
+  merge, także po utracie eligibility. Regresje obejmują dwie grupy,
+  canonical commands, 4,99%/5%, trwały envelope, brak lost update dla dwóch
+  równoległych scope'ów oraz adminowy rebuild.
+- Weryfikacja remediacji: focused Unit 6 + lease/schema/RLS contracts — 27
+  PASS; `py_compile` zmienionych modułów PASS; `git diff --check` PASS; pełna
+  `bash scripts/check_fieldnote.sh` PASS. `supabase migration up --local`
+  zastosowało migrację, a bezpieczne query schematu potwierdziło tabelę
+  `research_scope_snapshots` i RPC `fieldnote_commit_incremental_research_job`.
+  Unit 6 oczekuje ograniczonego re-review, Unit 7 nie rozpoczęto.

@@ -15,13 +15,15 @@ from repositories.job_repository import JobRepository
 from repositories.supabase_client import SupabaseClient
 from services.job_service import cost_number
 from services.pipeline_service import PipelineResult, PipelineService
+from services.benchmark_commit_service import BenchmarkCommitService
 
 
 class ResearchWorker:
-    def __init__(self, jobs: JobRepository, pipeline: PipelineService, *, worker_id: str | None = None, lease_seconds: int = 60) -> None:
+    def __init__(self, jobs: JobRepository, pipeline: PipelineService, *, worker_id: str | None = None, lease_seconds: int = 60, committer: BenchmarkCommitService | None = None) -> None:
         self.jobs, self.pipeline = jobs, pipeline
         self.worker_id = worker_id or f"worker-{uuid.uuid4()}"
         self.lease_seconds = max(10, lease_seconds)
+        self.committer = committer or (BenchmarkCommitService(jobs) if callable(getattr(jobs, "complete_incremental", None)) else None)
 
     def process_one(self) -> bool:
         job = self.jobs.claim(self.worker_id, self.lease_seconds, max_active=2)
@@ -53,6 +55,13 @@ class ResearchWorker:
             if lease_lost.is_set():
                 return False
             final = self._final_status(job, result)
+            if self.committer and final in {"succeeded", "partial"}:
+                try:
+                    completed = self.committer.complete(job, token, final, result.result, result.usage, cost_number(result.usage.get("cost_used", 0)))
+                except Exception as exc:
+                    failed = {**result.result, "incremental_commit_error": str(exc)}
+                    return bool(self.jobs.complete(job_id, token, "failed", failed, result.usage, cost_number(result.usage.get("cost_used", 0))))
+                return bool(completed)
             return bool(self.jobs.complete(job_id, token, final, result.result, result.usage, cost_number(result.usage.get("cost_used", 0))))
         finally:
             stop_heartbeat.set(); thread.join(timeout=2); control.unlink(missing_ok=True)

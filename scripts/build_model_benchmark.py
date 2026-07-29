@@ -39,6 +39,11 @@ def normalize_evidence_items(value, current_value: str = "") -> list[dict[str, s
     return normalized
 
 
+def merge_scoped_rows(existing: list[dict[str, str]], updates: list[dict[str, str]], scoped_keys: set[str]) -> list[dict[str, str]]:
+    """Replace every requested derived scope, including ineligible no-row ones."""
+    return [item for item in existing if str(item.get("group_key", "")) not in scoped_keys] + updates
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--group-key", action="append", default=[], help="Przebuduj i scal wyłącznie wskazaną grupę.")
@@ -96,10 +101,10 @@ def main() -> int:
             if path.exists():
                 with path.open(encoding="utf-8", newline="") as handle:
                     existing = list(csv.DictReader(handle))
-            changed = {str(item.get("group_key", "")) for item in updates}
-            merged = [item for item in existing if str(item.get("group_key", "")) not in changed]
-            merged.extend(updates)
-            return merged
+            # Requested groups replace their entire derived projection.  An
+            # ineligible group deliberately has no replacement row, so its
+            # historical benchmark/evidence rows must disappear as well.
+            return merge_scoped_rows(existing, updates, scoped_keys)
         rows = merge_csv("model_benchmark.csv", columns, rows)
         sources = merge_csv("model_benchmark_sources.csv", source_columns, sources)
         quality = {"models_total": len(rows), "fields_confirmed": sum(int(item.get("fields_confirmed", 0) or 0) for item in rows), "fields_x": sum(int(item.get("fields_x", 0) or 0) for item in rows)}

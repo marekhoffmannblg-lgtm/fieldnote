@@ -56,6 +56,12 @@ class RlsPolicyContractTests(unittest.TestCase):
         self.assertIn("new.actor_id is distinct from auth.uid()", RLS)
         self.assertIn("new.actor_id := auth.uid()", RLS)
 
+    def test_incremental_snapshot_table_is_rls_protected(self) -> None:
+        incremental = (ROOT / "supabase" / "migrations" / "202607290001_incremental_benchmark_commit.sql").read_text(encoding="utf-8")
+        self.assertIn("alter table public.research_scope_snapshots enable row level security;", incremental)
+        self.assertIn("public.fieldnote_can_read()", incremental)
+        self.assertNotRegex(incremental.lower(), re.compile(r"grant\s+(insert|update|delete|all).*research_scope_snapshots.*authenticated"))
+
 
 if __name__ == "__main__":
     unittest.main()

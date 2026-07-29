@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
-from services.benchmark_rebuild_service import BenchmarkRebuildService, read_state, write_state  # noqa: E402
+from services.benchmark_rebuild_service import BenchmarkRebuildService  # noqa: E402
 
 
 def main() -> int:
@@ -32,8 +32,8 @@ def main() -> int:
         if not isinstance(value, dict):
             raise SystemExit("--updates musi wskazywać obiekt JSON")
         updates = value
-    result = BenchmarkRebuildService(lock_root=args.lock_root).rebuild_product_scope(read_state(args.input), args.product_id, updates=updates, run_id=args.run_id)
-    write_state(args.output, result.state)
+    service = BenchmarkRebuildService(lock_root=args.lock_root)
+    result = service.rebuild_product_state_file(args.input, args.output, args.product_id, updates=updates, run_id=args.run_id)
     print(json.dumps({"status": "ok", **result.metadata}, ensure_ascii=False, sort_keys=True))
     return 0
 

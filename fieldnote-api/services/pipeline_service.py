@@ -89,7 +89,11 @@ class PipelineService:
         usage["command_exit_code"] = completed.returncode
         if usage.get("usage_complete") is False and status == "succeeded":
             status = "partial"
-        return PipelineResult(status=status, usage=usage, result={"output_tail": output[-4000:]}, error="" if completed.returncode == 0 else output[-800:])
+        scoped_commit = self._scoped_commit_from_output(output)
+        result = {"output_tail": output[-4000:]}
+        if scoped_commit:
+            result["scoped_commit"] = scoped_commit
+        return PipelineResult(status=status, usage=usage, result=result, error="" if completed.returncode == 0 else output[-800:])
 
     @staticmethod
     def _build_run_context(job: dict[str, Any], selection: dict[str, Any], selected: list[str], manufacturer: list[str], include_manufacturer: bool) -> dict[str, Any]:
@@ -118,6 +122,20 @@ class PipelineService:
                 "benchmark_group": str(payload.get("benchmark_group", "")),
             },
         }
+
+    @staticmethod
+    def _scoped_commit_from_output(output: str) -> dict[str, Any]:
+        for line in reversed(output.splitlines()):
+            key, separator, raw = line.partition("=")
+            if key != "scoped_commit" or not separator:
+                continue
+            try:
+                value = json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(value, dict) and isinstance(value.get("scope"), dict) and isinstance(value.get("semantic_state"), dict):
+                return value
+        return {}
 
     @staticmethod
     def _usage_from_output(output: str, *, selected_count: int, skip_ai: bool) -> dict[str, Any]:
@@ -161,7 +179,11 @@ class PipelineService:
         usage = PipelineService._usage_from_output(output, selected_count=0, skip_ai=False)
         if usage.get("usage_complete") is False and status == "succeeded":
             status = "partial"
-        return PipelineResult(status, usage, {"output_tail": output[-4000:]}, "" if process.returncode == 0 else output[-800:])
+        result = {"output_tail": output[-4000:]}
+        scoped_commit = PipelineService._scoped_commit_from_output(output)
+        if scoped_commit:
+            result["scoped_commit"] = scoped_commit
+        return PipelineResult(status, usage, result, "" if process.returncode == 0 else output[-800:])
 
     @staticmethod
     def _cancel_requested(path: Path) -> bool:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -70,6 +72,68 @@ def output_counter(output: str, key: str) -> int:
             except ValueError:
                 return 0
     return 0
+
+
+def derived_stage_commands(group_key: str) -> tuple[list[str], list[str]]:
+    """Build the only derived-artifact commands allowed for one research run."""
+    return (
+        [sys.executable, str(SCRIPTS / "build_model_benchmark.py"), "--group-key", group_key],
+        [sys.executable, str(SCRIPTS / "report_model_coverage.py"), "--group-key", group_key],
+    )
+
+
+def source_price_median(group: dict[str, object]) -> float | None:
+    """Return a normalized price median when the researched sources provide one."""
+    values: list[float] = []
+    raw_sources = group.get("sources", group.get("offers", []))
+    if not isinstance(raw_sources, list):
+        return None
+    for source in raw_sources:
+        if not isinstance(source, dict):
+            continue
+        raw_price = next((source.get(key) for key in ("price", "price_gross", "gross_price", "current_price") if source.get(key) not in (None, "")), None)
+        if isinstance(raw_price, (int, float)):
+            value = float(raw_price)
+        elif isinstance(raw_price, str):
+            number = re.sub(r"[^0-9,.-]", "", raw_price).replace(" ", "")
+            if number.count(",") == 1 and number.count(".") >= 1:
+                number = number.replace(".", "").replace(",", ".")
+            elif number.count(",") == 1:
+                number = number.replace(",", ".")
+            try:
+                value = float(number)
+            except ValueError:
+                continue
+        else:
+            continue
+        if value > 0:
+            values.append(value)
+    return float(statistics.median(values)) if values else None
+
+
+def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benchmark_group_scope: dict[str, object]) -> dict[str, object]:
+    """Return a bounded domain projection for the durable semantic commit."""
+    group_data: dict[str, object] = {}
+    state_data: dict[str, object] = {}
+    for group_path in (ROOT / "output" / "model_groups").glob("*/group.json"):
+        group = read_json(group_path, {})
+        if not isinstance(group, dict) or group.get("group_key") != group_key:
+            continue
+        group_data = {
+            "group_key": group_key, "category": group.get("category", ""), "benchmark_group": group.get("benchmark_group", ""),
+            "sources": [{"source_id": item.get("source_id", ""), "marketplace": item.get("marketplace", ""), "external_offer_id": item.get("external_offer_id", item.get("offer_id", ""))} for item in group.get("sources", group.get("offers", [])) if isinstance(item, dict)],
+        }
+        state = read_json(group_path.parent / "model_state.json", {})
+        if isinstance(state, dict):
+            state_data = {"group_key": state.get("group_key", ""), "brand": state.get("brand", ""), "model": state.get("model", ""), "fields": {key: {name: value.get(name) for name in ("value", "status", "confidence", "validation_status")} for key, value in state.get("fields", {}).items() if isinstance(value, dict)}}
+        break
+    benchmark = next((row for row in read_csv(ROOT / "output" / "model_benchmark.csv") if row.get("group_key") == group_key), {})
+    scope = {"product_id": str(product_scope.get("product_id", group_key)), "group_key": group_key, "benchmark_group": str(benchmark_group_scope.get("benchmark_group", product_scope.get("benchmark_group", group_data.get("benchmark_group", ""))))}
+    price_median = source_price_median(group_data)
+    semantic_state = {"group": group_data, "model_state": state_data, "benchmark": benchmark, "coverage": coverage_for_group(group_key)}
+    if price_median is not None:
+        semantic_state["price_median"] = price_median
+    return {"scope": scope, "price_median": price_median, "semantic_state": semantic_state}
 
 
 def queue_rows_for_offer_ids(offer_ids: set[str]) -> list[dict[str, str]]:
@@ -222,23 +286,13 @@ def run_stage(
             history.finish_stage(record, "skipped", detail or "skipped")
         return "", 0
     try:
-        lock: FileLock | None = None
-        if number in {8, 9} and not getattr(run_stage, "scoped_rebuild", False):
-            lock = FileLock(ROOT / "output" / "run_locks" / "aggregation.lock", {"run_id": getattr(history, "run_id", "cli"), "scope": "global_aggregation"})
-        elif number in {8, 9} and getattr(run_stage, "scoped_rebuild", False):
-            lock = FileLock(ROOT / "output" / "run_locks" / f"product-{getattr(history, 'run_id', 'cli')}.lock", {"run_id": getattr(history, "run_id", "cli"), "scope": "product_scope"})
-            lock.acquire()
-        try:
-            result = subprocess.run(
-                command,
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=stage_timeout(label),
-            )
-        finally:
-            if lock:
-                lock.release()
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=stage_timeout(label),
+        )
     except subprocess.TimeoutExpired as exc:
         if history and record:
             history.finish_stage(record, "timed_out", f"timeout after {stage_timeout(label)}s")
@@ -714,7 +768,9 @@ def main() -> int:
     args = parse_args()
     run_stage.cancel_check_file = args.cancel_check_file
     immutable_context = load_run_context(args.run_context)
-    run_stage.scoped_rebuild = bool(immutable_context and isinstance(immutable_context.get("product_scope"), dict))
+    # Every ordinary CLI invocation is one product research.  Maintenance/full
+    # rebuilds have their own explicit admin command and never pass here.
+    run_stage.scoped_rebuild = True
     if args.fixture_scenario:
         return run_fixture_scenario(args)
     marketplace = normalized(args.marketplace)
@@ -961,7 +1017,7 @@ def main() -> int:
                 if str(value).strip()
             ] if immutable_context else [],
             "include_manufacturer_sources": bool(immutable_context.get("include_manufacturer_sources")) if immutable_context else False,
-            "product_scope": immutable_context.get("product_scope") if immutable_context and isinstance(immutable_context.get("product_scope"), dict) else {"product_id": group_key},
+            "product_scope": immutable_context.get("product_scope") if immutable_context and isinstance(immutable_context.get("product_scope"), dict) else {"product_id": str(existing_catalog_product.get("product_id", group_key)), "group_key": group_key},
             "benchmark_group_scope": immutable_context.get("benchmark_group_scope") if immutable_context and isinstance(immutable_context.get("benchmark_group_scope"), dict) else {},
         }
         context_path = write_run_context(run_context)
@@ -1034,16 +1090,17 @@ def main() -> int:
             elif cascade_code:
                 raise RuntimeError("Etap 7/9 nie powiódł się: model facts cascade")
 
-        current_stage = "model benchmark"
-        benchmark_command = [sys.executable, str(SCRIPTS / "build_model_benchmark.py")]
-        if immutable_context and isinstance(immutable_context.get("product_scope"), dict):
-            benchmark_command.extend(["--group-key", group_key])
-        run_stage(8, "model benchmark", benchmark_command, history=history)
-        current_stage = "coverage report"
-        coverage_command = [sys.executable, str(SCRIPTS / "report_model_coverage.py")]
-        if immutable_context and isinstance(immutable_context.get("product_scope"), dict):
-            coverage_command.extend(["--group-key", group_key])
-        run_stage(9, "coverage report", coverage_command, history=history)
+        benchmark_command, coverage_command = derived_stage_commands(group_key)
+        # Both CSVs are read/merge/write projections. A single lock must span
+        # both stages, otherwise two distinct product jobs can lose one merge.
+        with FileLock(
+            ROOT / "output" / "run_locks" / "aggregation.lock",
+            {"run_id": history.run_id, "scope": "scoped_derived_commit", "group_key": group_key},
+        ):
+            current_stage = "model benchmark"
+            run_stage(8, "model benchmark", benchmark_command, history=history)
+            current_stage = "coverage report"
+            run_stage(9, "coverage report", coverage_command, history=history)
 
         # Optional narrative profile never blocks the factual research result.
         current_stage = "product profile generation"
@@ -1065,6 +1122,15 @@ def main() -> int:
         coverage = coverage_for_group(group_key)
         if not coverage:
             raise RuntimeError(f"Brak rekordu coverage dla {group_key}")
+        print("scoped_commit=" + json.dumps(
+            scoped_commit_payload(
+                group_key,
+                run_context["product_scope"] if isinstance(run_context.get("product_scope"), dict) else {},
+                run_context["benchmark_group_scope"] if isinstance(run_context.get("benchmark_group_scope"), dict) else {},
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        ))
         pipeline_status = pipeline_status_for_fetch(fetch_summary["fetch_status"])
         if analysis_partial and pipeline_status == "success":
             pipeline_status = "partial"
