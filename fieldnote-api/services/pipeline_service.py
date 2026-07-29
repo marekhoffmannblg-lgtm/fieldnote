@@ -108,6 +108,15 @@ class PipelineService:
             "selected_manufacturer_source_ids": manufacturer,
             "include_manufacturer_sources": include_manufacturer,
             "selected_offers_csv": str(selection.get("selected_offers_csv", "")),
+            "product_scope": selection.get("product_scope") if isinstance(selection.get("product_scope"), dict) else {
+                "product_id": str(payload.get("product_id", job.get("product_id", ""))),
+                "product_slug": str(payload.get("product_slug", "")),
+                "group_key": group_key,
+            },
+            "benchmark_group_scope": selection.get("benchmark_group_scope") if isinstance(selection.get("benchmark_group_scope"), dict) else {
+                "category_key": str(payload.get("category_key", "")),
+                "benchmark_group": str(payload.get("benchmark_group", "")),
+            },
         }
 
     @staticmethod

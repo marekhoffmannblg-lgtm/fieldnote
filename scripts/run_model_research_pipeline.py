@@ -223,8 +223,10 @@ def run_stage(
         return "", 0
     try:
         lock: FileLock | None = None
-        if number in {8, 9}:
+        if number in {8, 9} and not getattr(run_stage, "scoped_rebuild", False):
             lock = FileLock(ROOT / "output" / "run_locks" / "aggregation.lock", {"run_id": getattr(history, "run_id", "cli"), "scope": "global_aggregation"})
+        elif number in {8, 9} and getattr(run_stage, "scoped_rebuild", False):
+            lock = FileLock(ROOT / "output" / "run_locks" / f"product-{getattr(history, 'run_id', 'cli')}.lock", {"run_id": getattr(history, "run_id", "cli"), "scope": "product_scope"})
             lock.acquire()
         try:
             result = subprocess.run(
@@ -712,6 +714,7 @@ def main() -> int:
     args = parse_args()
     run_stage.cancel_check_file = args.cancel_check_file
     immutable_context = load_run_context(args.run_context)
+    run_stage.scoped_rebuild = bool(immutable_context and isinstance(immutable_context.get("product_scope"), dict))
     if args.fixture_scenario:
         return run_fixture_scenario(args)
     marketplace = normalized(args.marketplace)
@@ -958,6 +961,8 @@ def main() -> int:
                 if str(value).strip()
             ] if immutable_context else [],
             "include_manufacturer_sources": bool(immutable_context.get("include_manufacturer_sources")) if immutable_context else False,
+            "product_scope": immutable_context.get("product_scope") if immutable_context and isinstance(immutable_context.get("product_scope"), dict) else {"product_id": group_key},
+            "benchmark_group_scope": immutable_context.get("benchmark_group_scope") if immutable_context and isinstance(immutable_context.get("benchmark_group_scope"), dict) else {},
         }
         context_path = write_run_context(run_context)
 
@@ -1030,9 +1035,15 @@ def main() -> int:
                 raise RuntimeError("Etap 7/9 nie powiódł się: model facts cascade")
 
         current_stage = "model benchmark"
-        run_stage(8, "model benchmark", [sys.executable, str(SCRIPTS / "build_model_benchmark.py")], history=history)
+        benchmark_command = [sys.executable, str(SCRIPTS / "build_model_benchmark.py")]
+        if immutable_context and isinstance(immutable_context.get("product_scope"), dict):
+            benchmark_command.extend(["--group-key", group_key])
+        run_stage(8, "model benchmark", benchmark_command, history=history)
         current_stage = "coverage report"
-        run_stage(9, "coverage report", [sys.executable, str(SCRIPTS / "report_model_coverage.py")], history=history)
+        coverage_command = [sys.executable, str(SCRIPTS / "report_model_coverage.py")]
+        if immutable_context and isinstance(immutable_context.get("product_scope"), dict):
+            coverage_command.extend(["--group-key", group_key])
+        run_stage(9, "coverage report", coverage_command, history=history)
 
         # Optional narrative profile never blocks the factual research result.
         current_stage = "product profile generation"

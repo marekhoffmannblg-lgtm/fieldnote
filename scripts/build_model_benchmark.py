@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import argparse
 from pathlib import Path
 
 from benchmark_taxonomy import is_benchmark_eligible
@@ -39,6 +40,10 @@ def normalize_evidence_items(value, current_value: str = "") -> list[dict[str, s
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--group-key", action="append", default=[], help="Przebuduj i scal wyłącznie wskazaną grupę.")
+    args = parser.parse_args()
+    scoped_keys = {str(key) for key in args.group_key if str(key).strip()}
     columns = ("group_key", "category", "subcategory", "benchmark_category", "taxonomy_version", *FIELDS, "marketplaces_used", "sources_total", "sources_by_marketplace", "offers_used", "offers_available", "fields_confirmed", "fields_weak", "fields_x", "primary_image_url", "product_rating", "source_quality_note")
     source_columns = ("group_key", "brand", "model", "field_name", "value", "status", "confidence", "source_id", "marketplace", "external_offer_id", "source_url", "evidence")
     rows, sources = [], []
@@ -48,7 +53,9 @@ def main() -> int:
         state = read_json(directory / "model_state.json")
         if state.get("group_key"):
             candidates.setdefault(state["group_key"], []).append(directory)
-    for directories in candidates.values():
+    for key, directories in candidates.items():
+        if scoped_keys and key not in scoped_keys:
+            continue
         directory = next((path for path in directories if path.name == f"{read_json(path / 'model_state.json').get('brand','').lower().replace(' ','-')}__{read_json(path / 'model_state.json').get('model','').lower().replace(' ','-')}"), directories[0])
         state = read_json(directory / "model_state.json")
         group = read_json(directory / "group.json")
@@ -79,6 +86,23 @@ def main() -> int:
             for evidence in normalize_evidence_items(item.get("evidence"), item.get("value", "X")):
                 source_id = evidence.get("source_id", evidence.get("offer_id", "")); source_url = evidence.get("source_url", "")
                 sources.append({"group_key": state.get("group_key", ""), "brand": state.get("brand", ""), "model": state.get("model", ""), "field_name": field, "value": evidence.get("value", item.get("value", "X")), "status": item.get("status", "open"), "confidence": item.get("confidence", "low"), "source_id": source_id, "marketplace": evidence.get("marketplace", "allegro"), "external_offer_id": evidence.get("external_offer_id", evidence.get("offer_id", "")), "source_url": source_url, "evidence": evidence.get("evidence", "")})
+    if scoped_keys:
+        for key in scoped_keys:
+            if key not in candidates:
+                raise SystemExit(f"Nie znaleziono group_key: {key}")
+        def merge_csv(filename: str, fieldnames: tuple[str, ...], updates: list[dict[str, str]]) -> list[dict[str, str]]:
+            path = OUT / filename
+            existing: list[dict[str, str]] = []
+            if path.exists():
+                with path.open(encoding="utf-8", newline="") as handle:
+                    existing = list(csv.DictReader(handle))
+            changed = {str(item.get("group_key", "")) for item in updates}
+            merged = [item for item in existing if str(item.get("group_key", "")) not in changed]
+            merged.extend(updates)
+            return merged
+        rows = merge_csv("model_benchmark.csv", columns, rows)
+        sources = merge_csv("model_benchmark_sources.csv", source_columns, sources)
+        quality = {"models_total": len(rows), "fields_confirmed": sum(int(item.get("fields_confirmed", 0) or 0) for item in rows), "fields_x": sum(int(item.get("fields_x", 0) or 0) for item in rows)}
     for filename, fieldnames, data in (("model_benchmark.csv", columns, rows), ("model_benchmark_sources.csv", source_columns, sources)):
         atomic_write_csv(OUT / filename, fieldnames, data)
     atomic_write_json(OUT / "model_benchmark_quality.json", quality)

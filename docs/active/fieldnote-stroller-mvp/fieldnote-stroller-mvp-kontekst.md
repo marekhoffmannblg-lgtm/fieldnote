@@ -2,7 +2,7 @@
 
 - **Branch:** `main` (preflight Unit 2: czyste drzewo i synchronizacja z `origin/main`)
 - **Ostatni commit przed Unit 2:** `807e81bd9176e274925ce3d1feac67fdb3dc9447 — data: add lionelo internal specification fixtures`
-- **Ostatnia aktualizacja:** 2026-07-28
+- **Ostatnia aktualizacja:** 2026-07-29
 
 ## Źródła
 
@@ -173,6 +173,19 @@
 - Status: implementacja P2 zakończona; Unit 5 oczekuje ograniczonego re-review
   wyłącznie tej regresji.
 
+### Unit 5 — końcowy ograniczony re-review P2
+
+- Zakres: `8fa7fd4..b59d169`, wyłącznie wykonawcza asercja odmowy drugiego
+  aktywnego joba tego samego produktu oraz jej regresja. Correctness i security
+  sprawdziły subagenty; test/data wykonano jako single-agent fallback z powodu
+  limitu wątków. Nie uruchamiano UI review, bo diff nie dotyczył frontendu.
+- Wynik: PASS. Runtime test wymaga błędu nazwanego indeksu
+  `research_jobs_one_active_per_product`, a po cancel recovery potwierdza
+  ponowne utworzenie joba. Nie znaleziono P1, P2 ani P3.
+- Weryfikacja: runtime Supabase 6 PASS, focused backend 32 PASS, pełna
+  `bash scripts/check_fieldnote.sh` PASS, `python3 -m py_compile` PASS oraz
+  `git diff --check b59d169^..b59d169` PASS. Unit 6 nie rozpoczęto.
+
 ### Unit 5 — ograniczony re-review runtime PostgreSQL/RLS
 
 - Zakres: wyłącznie otwarty P2 wymagający wykonawczego lokalnego testu kolejki,
@@ -214,3 +227,30 @@
 - Weryfikacja: focused backend 32 PASS, opt-in runtime test PASS jako napisany,
   `git diff --check 8c50b59..19019ff` PASS.
 - Gate Unit 5: **WYMAGA POPRAWEK** — 0 P1, 3 P2, 0 P3. Unit 6 nie rozpoczęto.
+
+### Unit 5 — końcowy status po re-review
+
+- Zakres końcowego commitu `8fa7fd4..b59d169` został sprawdzony; Unit 5 ma
+  **PASS** i brak otwartych P1/P2. Dokumentem źródłowym wyniku jest
+  `review-unit-5.md`; wcześniejsze historyczne findingi pozostają tam jako
+  ślad procesu, ale nie są aktywnymi blokadami.
+
+### Unit 6 — przyrostowe commitowanie i przeliczanie
+
+- Dodano neutralny względem repozytorium `BenchmarkRebuildService` z jawnymi
+  `product_scope` i `benchmark_group_scope`, kanonicznym hashem semantycznym,
+  progiem zmiany ceny 5% oraz snapshotem tworzonym wyłącznie po istotnej
+  zmianie domeny.
+- `scripts/rebuild_product_scope.py` wykonuje tylko rebuild wskazanego produktu
+  i blokadę produktu; odrzuca pracę, gdy aktywna jest blokada administracyjnego
+  full rebuildu. `scripts/rebuild_all_admin.py` jest oddzielnym poleceniem
+  administracyjnym i serializuje pełny rebuild przez `aggregation.lock`.
+- Etapy benchmarku i coverage w kanonicznym runnerze przyjmują `--group-key`
+  w scoped runie i nie używają globalnej blokady ani frontendowego eksportu;
+  globalne zachowanie bez scope pozostaje kompatybilne dla maintenance.
+- Weryfikacja: `tests/test_incremental_pipeline.py` i
+  `tests/test_incremental_benchmark_rebuild.py` — 7 PASS; testy backendowe
+  Unit 5 — 32 PASS; `py_compile` nowych/zmienionych modułów, pełna
+  `bash scripts/check_fieldnote.sh` oraz `git diff --check` — PASS.
+- Status: implementacja Unit 6 zakończona; oczekuje niezależnego review.
+  Unit 7 nie rozpoczęto.

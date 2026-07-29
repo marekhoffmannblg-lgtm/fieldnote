@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import argparse
 from pathlib import Path
 
 from p0_runtime import atomic_write_csv, atomic_write_json
@@ -22,6 +23,10 @@ def read(path: Path) -> dict:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--group-key", action="append", default=[], help="Przebuduj i scal wyłącznie wskazaną grupę.")
+    args = parser.parse_args()
+    scoped_keys = {str(key) for key in args.group_key if str(key).strip()}
     rows = []
     candidates = {}
     for directory in sorted(GROUPS.glob("*/model_state.json")):
@@ -30,6 +35,8 @@ def main() -> int:
         if not key: continue
         candidates.setdefault(key, []).append(directory)
     for key, dirs in candidates.items():
+        if scoped_keys and key not in scoped_keys:
+            continue
         def canonical(path):
             state = read(path); brand = str(state.get("brand", "")).lower().replace(" ", "-"); model = str(state.get("model", "")).lower().replace(" ", "-")
             return path.parent.name == f"{brand}__{model}"
@@ -68,6 +75,18 @@ def main() -> int:
         else: priority = "low"
         rows.append({"group_key": state.get("group_key", ""), "brand": state.get("brand", ""), "model": state.get("model", ""), "category": group.get("category", ""), "subcategory": group.get("subcategory", ""), "benchmark_category": group.get("benchmark_category", ""), "taxonomy_version": group.get("taxonomy_version", ""), "taxonomy_status": group.get("taxonomy_status", "review_required"), "marketplaces": ",".join(marketplaces), "sources_total": len(sources), "sources_allegro": allegro_count, "fields_confirmed": confirmed, "fields_weak": weak, "fields_open": open_fields, "fields_x": x_fields, "coverage_percent": coverage, "targeted_search_recommended": recommended, "additional_research_recommended": recommended, "research_priority": priority, "recommended_marketplaces": json.dumps(["allegro"] if allegro_count < 3 else [], ensure_ascii=False), "recommended_query": f"{state.get('brand','')} {state.get('model','')}".strip(), "missing_critical_fields": json.dumps(missing_critical, ensure_ascii=False), "recommendation_reasons": json.dumps(reasons, ensure_ascii=False), "warnings": json.dumps(duplicate_warning, ensure_ascii=False)})
     columns = tuple(rows[0]) if rows else ("group_key", "brand", "model", "category", "subcategory", "benchmark_category", "taxonomy_version", "taxonomy_status", "marketplaces", "sources_total", "sources_allegro", "fields_confirmed", "fields_weak", "fields_open", "fields_x", "coverage_percent", "targeted_search_recommended", "additional_research_recommended", "research_priority", "recommended_marketplaces", "recommended_query", "missing_critical_fields", "recommendation_reasons", "warnings")
+    if scoped_keys:
+        for key in scoped_keys:
+            if key not in candidates:
+                raise SystemExit(f"Nie znaleziono group_key: {key}")
+        def merge(existing_path: Path, updates: list[dict[str, object]]) -> list[dict[str, object]]:
+            existing: list[dict[str, object]] = []
+            if existing_path.exists():
+                with existing_path.open(encoding="utf-8", newline="") as handle:
+                    existing = list(csv.DictReader(handle))
+            changed = {str(item.get("group_key", "")) for item in updates}
+            return [item for item in existing if str(item.get("group_key", "")) not in changed] + updates
+        rows = merge(OUT / "model_coverage.csv", rows)
     atomic_write_csv(OUT / "model_coverage.csv", columns, rows)
     atomic_write_json(OUT / "model_coverage.json", rows)
     print(f"coverage_models={len(rows)}")

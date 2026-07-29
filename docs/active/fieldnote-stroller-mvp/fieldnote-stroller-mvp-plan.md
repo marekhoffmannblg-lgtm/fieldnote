@@ -46,13 +46,13 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 2 — Unit 5: Kolejka PostgreSQL i worker z dwoma slotami
 
-- Status: `review remediation required` (0 P1, 1 P2: runtime PostgreSQL nie dowodzi odmowy duplikatu aktywnego produktu; Unit 6 zablokowany do PASS)
+- Status: `completed` (review PASS; 0 P1, 0 P2; Unit 6 pozostaje pending)
 - Zależności: Unit 3, Unit 4
 - Kryterium ukończenia: trwałe joby, lease, maksymalnie dwa różne produkty i brak podwójnego uruchomienia tego samego produktu.
 
 ### Faza 2 — Unit 6: Przyrostowe commitowanie i przeliczanie
 
-- Status: `pending`
+- Status: `in_progress` (implementacja i weryfikacja zakończone; oczekuje review)
 - Zależności: Unit 3, Unit 5
 - Kryterium ukończenia: research produktu zmienia wyłącznie jego scope; pełna przebudowa jest osobną, serializowaną akcją administratora.
 

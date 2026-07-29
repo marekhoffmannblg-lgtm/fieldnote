@@ -539,3 +539,49 @@ ograniczony `$dev-docs-review` Unit 5.
   focused backend 32 PASS, `bash scripts/check_fieldnote.sh` PASS i
   `git diff --check` PASS. Unit 6 nie został rozpoczęty; wymagany jest
   ograniczony re-review tej jednej poprawki.
+
+## Końcowy ograniczony re-review P2 aktywnego duplikatu produktu
+
+- **Data:** 2026-07-28
+- **Zakres diffu:** `8fa7fd4..b59d169`
+- **Tryb:** `re-review`; test/data review zapisano jako `single-agent fallback`
+  z powodu limitu wątków.
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`, test/data single-agent fallback
+- **Gate:** `GOTOWE DO KONTYNUACJI`
+
+### Kryteria i zakres
+
+Review obejmował wyłącznie nową próbę drugiego INSERT-u dla aktywnego
+`product_id` oraz zachowaną pozytywną próbę po terminalizacji cancel recovery.
+Nie recenzowano Unit 6 ani innych części kolejki.
+
+### Skonsolidowane findings
+
+Brak zaakceptowanych findings. Test wymaga konkretnego błędu
+`research_jobs_one_active_per_product`, więc nie przejdzie przy usuniętym lub
+zmienionym predykacie indeksu; następnie potwierdza udane utworzenie nowego joba
+po zwolnieniu blokady.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | single-agent fallback: PASS | 0 | 0 |
+| data_reviewer | single-agent fallback: PASS | 0 | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Runtime PostgreSQL/PostgREST | PASS | 6 testów |
+| Focused backend queue/API | PASS | 32 testy |
+| Python syntax | PASS | `python3 -m py_compile tests/test_supabase_runtime_contract.py` |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` |
+| Spójność diffu | PASS | `git diff --check b59d169^..b59d169` |
+
+### Decyzja gate
+
+**GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 5 jest ukończony, a Unit 6
+może zostać rozpoczęty dopiero osobnym poleceniem użytkownika.
