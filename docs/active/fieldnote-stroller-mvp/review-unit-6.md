@@ -617,3 +617,68 @@ Następne polecenie:
 
 `$dev-docs-review docs/active/fieldnote-stroller-mvp 6` — ograniczony re-review
 wyłącznie poprawki testu upgrade'u; nie poprawiaj kodu i nie rozpoczynaj Unit 7.
+
+## Ograniczony re-review remediacji `c3646b7`
+
+- **Data:** 2026-07-30
+- **Zakres diffu:** `395abc9..c3646b7`
+- **Tryb:** `ograniczony re-review` wyłącznie P2 wykonawczego upgrade'u
+  migracji i jego regresji
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`,
+  `test_reviewer`, `data_reviewer`
+- **Gate:** `GOTOWE DO KONTYNUACJI`
+
+### Kryteria akceptacji i zakres
+
+Sprawdzono tylko, czy baza z już zapisaną migracją `202607290001` otrzymuje
+zastępczy RPC z `202607300001` bez resetu, a po upgrade wykonują się oba
+poprawione flow: no-mutation `partial` i JSON snapshot. Nie sprawdzano Unit 7,
+UI ani innych fragmentów Unit 6.
+
+### Skonsolidowane findings
+
+Brak zaakceptowanych findings P1, P2 i P3. Test instaluje jedno-statement
+baseline sentinel, usuwa wyłącznie wpis historii `202607300001`, stosuje
+następcę przez lokalne `supabase migration up`, a następnie wykonawczo
+potwierdza oba wymagane RPC. Unikalne fixture'y są usuwane w `finally`.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | PASS | 0 | 0 |
+| data_reviewer | PASS | 0 | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused Unit 6 + schema/RLS | PASS | 30 testów |
+| Opt-in fenced RPC + upgrade bez resetu | PASS | 2 testy lokalnego Supabase/PostgREST |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` |
+| Spójność diffu | PASS | `git diff --check 395abc9..c3646b7` |
+
+### Bezpieczeństwo
+
+`security_reviewer`: PASS. Test korzysta wyłącznie z lokalnego service role,
+nie zmienia grantów ani RLS, nie zapisuje sekretów i sprząta dane testowe.
+
+### Odchylenia od planu
+
+Brak. Poprawka domyka wymaganie bezpiecznego rollout'u sekwencyjnej migracji;
+nie zmienia kodu produkcyjnego ani scope'u Unit 6.
+
+### Kontrole operatora
+
+Brak ręcznych kontroli do oznaczenia jako wykonane.
+
+### Decyzja gate
+
+**GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 6 jest ukończony.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 7` — rozpocznij wyłącznie
+Unit 7, jeżeli użytkownik zdecyduje o kontynuacji.

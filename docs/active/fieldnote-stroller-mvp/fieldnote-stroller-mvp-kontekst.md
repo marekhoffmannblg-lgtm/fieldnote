@@ -405,3 +405,18 @@
   c35f1d7..395abc9` — PASS.
 - Następny krok: naprawić wyłącznie wykonawczy test upgrade'u migracji i
   wykonać kolejny ograniczony re-review Unit 6. Unit 7 pozostaje poza zakresem.
+
+### Unit 6 — ograniczony re-review commitu `c3646b7`
+
+- Zakres: wyłącznie `395abc9..c3646b7`, czyli testowy P2 upgrade'u migracji
+  oraz jego dokumentacja. Correctness, security, tests i data pracowali
+  niezależnie; UI review nie był wymagany. Nie zmieniano kodu ani nie
+  rozpoczęto Unit 7.
+- Wszyscy reviewerzy: PASS. Test pozostawia `202607290001` w historii,
+  odtwarza pending `202607300001` bez resetu, wykonuje jego zastosowanie i
+  przez PostgREST potwierdza no-mutation `partial` oraz JSON snapshot.
+- Weryfikacja review: focused Unit 6/schema/RLS — 30 PASS; opt-in lokalne RPC
+  i upgrade — 2 PASS; `git diff --check 395abc9..c3646b7` — PASS; pełna
+  `bash scripts/check_fieldnote.sh` — PASS.
+- Gate: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 6 jest ukończony;
+  Unit 7 nie został rozpoczęty.

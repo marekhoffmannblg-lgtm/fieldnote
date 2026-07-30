@@ -55,8 +55,8 @@
 
 - [x] Implementacja: `product_scope`, `benchmark_group_scope`, rebuild pojedynczego scope'u i serializowany admin full rebuild.
 - [x] Test: `tests/test_incremental_pipeline.py`, `tests/test_incremental_benchmark_rebuild.py` oraz opt-in `tests/test_supabase_runtime_contract.py`; direct CLI, dwa scope'y/admin, price threshold, stale rows i fenced RPC.
-- [x] Weryfikacja: suma rebuildów przyrostowych daje stan równy full rebuild na fixture; focused 28 PASS, runtime Unit 6 PASS, pełny offline gate PASS.
-- [ ] Review: ograniczony re-review `c35f1d7..395abc9` potwierdził naprawę P1, ale przyjął 1 P2 testu upgrade'u migracji; Unit 7 pozostaje zablokowany. Szczegóły w `review-unit-6.md`.
+- [x] Weryfikacja: suma rebuildów przyrostowych daje stan równy full rebuild na fixture; focused 30 PASS, opt-in runtime Unit 6 (RPC i upgrade migracji) 2 PASS, pełny offline gate PASS.
+- [x] Review: PASS po ograniczonym re-review `395abc9..c3646b7`; brak otwartych P1/P2. Szczegóły w `review-unit-6.md`.
 
 ## Unit 7 — Wspólny Firecrawl i katalog konkurencji
 
