@@ -505,3 +505,115 @@ Następne polecenie:
 `$dev-docs-review docs/active/fieldnote-stroller-mvp 6` — ograniczony re-review
 wyłącznie poprawek z bieżącego commitu; nie poprawiaj kodu i nie rozpoczynaj
 Unit 7.
+
+## Ograniczony re-review remediacji `395abc9`
+
+- **Data:** 2026-07-30
+- **Zakres diffu:** `395abc9^..395abc9` (`c35f1d7..395abc9`)
+- **Tryb:** `ograniczony re-review` wyłącznie trzech zaakceptowanych findings
+  P1/P2 i ich regresji
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`,
+  `test_reviewer`, `data_reviewer`
+- **Gate:** `WYMAGA POPRAWEK`
+
+### Kryteria akceptacji i zakres
+
+Sprawdzono tylko: brak price leakage produktu do snapshotu grupy, rollout
+poprawionego RPC bez modyfikowania zastosowanej migracji oraz deterministyczną
+serializację scoped/admin. Unit 7 i UI są poza zakresem.
+
+### Skonsolidowane findings
+
+#### P2 — Upgrade migracji RPC nie ma wykonawczego testu historii istniejącej bazy
+
+- **File:** `tests/test_supabase_schema_contract.py:79-87`; powiązana migracja
+  `supabase/migrations/202607300001_incremental_commit_partial_fixes.sql`
+- **Evidence:** test kontraktu sprawdza wyłącznie tekst historycznej i nowej
+  migracji, a lokalny runtime test wykonano po `supabase db reset`, który
+  tworzy świeżą bazę i stosuje obie migracje w jednym bootstrapie. Żaden test
+  nie zaczyna od bazy, gdzie `202607290001` jest już wpisana w historii, ani
+  nie aplikuje wyłącznie migracji `202607300001`.
+- **Impact:** regress w kolejności/odkrywaniu migracji albo w replace RPC może
+  przejść testy, mimo że środowisko wdrożone przed poprawką nie otrzyma
+  no-mutation `partial` i aliasu JSON.
+- **Scenario:** staging ma zastosowaną `202607290001`; deployment dodaje
+  `202607300001`, ale migracja nie zostaje wykonana lub nie zastępuje funkcji.
+- **Recommendation:** dodaj opt-in lokalny test upgrade'u: zastosuj historię
+  do `202607290001`, potem wyłącznie `202607300001`, a następnie wykonaj RPC
+  z prawidłowym snapshotem JSON i no-mutation `partial`.
+- **Missing test:** opisany wykonawczy test upgrade'u bez `db reset` po
+  zapisaniu wersji historycznej.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | findings | 1 P2 | 0 |
+| data_reviewer | PASS | 0 | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused Unit 6 + schema/RLS | PASS | `fieldnote-api/.venv/bin/python -m unittest tests/test_incremental_pipeline.py tests/test_incremental_benchmark_rebuild.py tests/test_supabase_schema_contract.py tests/test_rls_policy_contract.py` — 30 testów |
+| Opt-in fenced RPC | PASS | `FIELDNOTE_SUPABASE_INTEGRATION=1 fieldnote-api/.venv/bin/python -m unittest tests.test_supabase_runtime_contract.SupabaseRuntimeContractTests.test_incremental_commit_rpc_fences_price_threshold_and_partial_without_snapshot -v` — 1 test |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` |
+| Spójność diffu | PASS | `git diff --check c35f1d7..395abc9` |
+
+### Bezpieczeństwo
+
+`security_reviewer`: PASS. Nie wykryto nowego bypassu RLS, grantu RPC poza
+`service_role`, wycieku sekretu ani regresji fencing/`SECURITY DEFINER`.
+
+### Odchylenia od planu
+
+Wszystkie trzy poprawki funkcjonalne są potwierdzone, lecz kryterium bezpiecznego
+rolloutu wymaga jeszcze wykonawczego testu upgrade'u z istniejącą historią
+migracji. Unit 7 pozostaje poza zakresem.
+
+### Kontrole operatora
+
+Brak ręcznych kontroli do oznaczenia jako wykonane.
+
+### Decyzja gate
+
+**WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Unit 6 nie jest ukończony.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 6` — napraw wyłącznie
+zaakceptowany P2 wykonawczego testu upgrade'u migracji; nie rozpoczynaj Unit 7.
+
+## Wykonanie remediacji P2 po re-review `395abc9`
+
+- **Zakres:** wyłącznie zaakceptowany P2 dotyczący wykonawczego upgrade'u
+  migracji; Unit 7 nie rozpoczęto.
+- Dodano opt-in test `test_incremental_commit_migration_upgrade_without_reset`.
+  Test zachowuje wpis `202607290001`, usuwa tylko `202607300001`, instaluje
+  jedno-statement baseline sentinel i uruchamia `supabase migration up
+  --local --yes` bez resetu. Następnie przez PostgREST wykonuje no-mutation
+  `partial` bez snapshotu oraz `succeeded` z JSON snapshotem, potwierdzając
+  odpowiednio brak mutacji i zapis snapshotu.
+- `finally` przywraca migrację następczą i usuwa unikalne fixture'y produktów,
+  jobów, brandów i snapshotów. Nie zmieniono kodu produkcyjnego ani migracji.
+
+### Weryfikacja wykonania
+
+| Kontrola | Wynik |
+|---|---|
+| Focused Unit 6/schema/RLS | PASS — 30 testów |
+| Opt-in runtime RPC + upgrade bez resetu | PASS — 2 testy |
+| `py_compile tests/test_supabase_runtime_contract.py` | PASS |
+| `git diff --check` | PASS |
+| `bash scripts/check_fieldnote.sh` | PASS |
+
+**Status:** poprawka P2 wykonana; dokumentacja oczekuje ograniczonego
+re-review wyłącznie tej poprawki. Unit 6 nie jest jeszcze ukończony, Unit 7
+pozostaje poza zakresem.
+
+Następne polecenie:
+
+`$dev-docs-review docs/active/fieldnote-stroller-mvp 6` — ograniczony re-review
+wyłącznie poprawki testu upgrade'u; nie poprawiaj kodu i nie rozpoczynaj Unit 7.

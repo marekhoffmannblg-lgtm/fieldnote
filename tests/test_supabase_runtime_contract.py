@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import subprocess
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -53,6 +54,11 @@ def seed_statements(path: Path) -> str:
         line for line in path.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("--")
     )
+
+
+def migration_versions() -> set[str]:
+    result = query("select version from supabase_migrations.schema_migrations order by version")
+    return set(re.findall(r"2026\d{8}", f"{result.stdout}\n{result.stderr}"))
 
 
 def local_supabase_env() -> dict[str, str]:
@@ -568,6 +574,125 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             }))
             self.assertEqual(partial[0]["status"], "partial")
         finally:
+            query(f"delete from public.research_scope_snapshots where scope_id = '{product_id}'")
+            query(f"delete from public.research_jobs where product_id = '{product_id}'")
+            query(f"delete from public.products where product_id = '{product_id}'")
+            query(f"delete from public.brands where brand_key = '{brand_key}'")
+
+    def test_incremental_commit_migration_upgrade_without_reset(self) -> None:
+        """Apply only the follow-up migration over an already-applied baseline."""
+        versions_before = migration_versions()
+        baseline = "202607290001"
+        upgrade = "202607300001"
+        if baseline not in versions_before or upgrade not in versions_before:
+            self.skipTest("local Supabase stack is not at the Unit 6 baseline/upgrade")
+
+        environment = local_supabase_env()
+        rest_url = environment["API_URL"] + "/rest/v1"
+        service_key = environment["SERVICE_ROLE_KEY"]
+        suffix = hashlib.sha256(os.urandom(16)).hexdigest()[:12]
+        product_id = f"product:runtime:migration-upgrade-{suffix}"
+        brand_key = f"runtime-migration-upgrade-{suffix}"
+
+        def rpc(name: str, payload: dict[str, object]) -> tuple[int, str]:
+            return rest_request("POST", f"{rest_url}/rpc/{name}", service_key, service_key, payload)
+
+        def rows(result: tuple[int, str]) -> list[dict[str, object]]:
+            self.assertEqual(result[0], 200, result[1])
+            value = json.loads(result[1] or "[]")
+            return value if isinstance(value, list) else []
+
+        def start_job(index: int) -> tuple[str, str]:
+            job_id = f"runtime-migration-upgrade-{suffix}-{index}"
+            query(
+                "insert into public.research_jobs (job_id, product_id, requested_by, payload) "
+                f"values ('{job_id}', '{product_id}', '00000000-0000-0000-0000-000000000103', '{{}}'::jsonb)"
+            )
+            claimed = rows(rpc("fieldnote_claim_research_job", {
+                "p_worker_id": f"migration-upgrade-{index}", "p_lease_seconds": 30, "p_max_active": 2,
+            }))
+            claimed_row = next(item for item in claimed if item.get("job_id") == job_id)
+            started = rows(rpc("fieldnote_start_research_job", {
+                "p_job_id": job_id, "p_lease_token": claimed_row["lease_token"],
+            }))
+            self.assertEqual(len(started), 1)
+            return job_id, str(claimed_row["lease_token"])
+
+        migration_up = ["supabase", "migration", "up", "--local", "--yes"]
+
+        def legacy_rpc_sql() -> str:
+            """Install a one-statement baseline sentinel before the upgrade."""
+            return """
+create or replace function public.fieldnote_commit_incremental_research_job(
+  p_job_id text,
+  p_lease_token uuid,
+  p_status public.research_job_status,
+  p_result jsonb default '{}'::jsonb,
+  p_usage jsonb default '{}'::jsonb,
+  p_cost_used numeric default 0,
+  p_scope jsonb default '{}'::jsonb,
+  p_snapshots jsonb default '[]'::jsonb
+) returns setof public.research_jobs
+language plpgsql security definer set search_path = public as $$
+begin
+  raise exception 'legacy migration sentinel';
+end;
+$$
+""".strip()
+
+        try:
+            # Leave 001 recorded, replace the RPC with a baseline sentinel and
+            # remove only the follow-up row. The CLI therefore has exactly one
+            # pending migration and must upgrade in place without a reset.
+            query(f"delete from supabase_migrations.schema_migrations where version = '{upgrade}'")
+            query(legacy_rpc_sql())
+            self.assertNotIn(upgrade, migration_versions())
+            applied = subprocess.run(migration_up, cwd=ROOT, text=True, capture_output=True)
+            self.assertEqual(applied.returncode, 0, applied.stderr or applied.stdout)
+            versions_after = migration_versions()
+            self.assertIn(baseline, versions_after)
+            self.assertIn(upgrade, versions_after)
+
+            query(
+                "insert into public.brands (brand_key, display_name) values "
+                f"('{brand_key}', 'Runtime Migration Upgrade {suffix}') on conflict do nothing;"
+            )
+            query(
+                "insert into public.products (product_id, brand_id, brand, model, product_slug, group_key) "
+                f"select '{product_id}', id, 'Runtime Migration Upgrade', 'Model', 'runtime-migration-upgrade-{suffix}', 'runtime|migration-upgrade-{suffix}' "
+                f"from public.brands where brand_key = '{brand_key}'"
+            )
+
+            partial_job, partial_token = start_job(1)
+            partial = rows(rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": partial_job, "p_lease_token": partial_token, "p_status": "partial",
+                "p_result": {"reason": "max_pages_exceeded_before_start"}, "p_usage": {"usage_complete": False},
+                "p_cost_used": 0, "p_scope": {}, "p_snapshots": [],
+            }))
+            self.assertEqual(partial[0]["status"], "partial")
+            self.assertTrue(partial[0]["result"]["scope"]["no_mutation"])
+            self.assertEqual(partial[0]["result"]["snapshot_updated"], False)
+
+            succeeded_job, succeeded_token = start_job(2)
+            snapshot = {
+                "scope_type": "product", "scope_id": product_id,
+                "semantic_hash": "a" * 64, "domain_hash": "b" * 64,
+                "price_median": 100, "payload": {"state": {"fields": {"weight": "7"}}},
+            }
+            succeeded = rows(rpc("fieldnote_commit_incremental_research_job", {
+                "p_job_id": succeeded_job, "p_lease_token": succeeded_token, "p_status": "succeeded",
+                "p_result": {}, "p_usage": {}, "p_cost_used": 0,
+                "p_scope": {"product_id": product_id, "scope_version": "1"}, "p_snapshots": [snapshot],
+            }))
+            self.assertTrue(succeeded[0]["result"]["snapshot_updated"])
+            count = query(f"select count(*) as count from public.research_scope_snapshots where scope_id = '{product_id}'")
+            self.assertIn('"count": 1', count.stdout)
+        finally:
+            # Ensure the upgrade migration is applied again after an assertion.
+            if upgrade not in migration_versions():
+                restored = subprocess.run(migration_up, cwd=ROOT, text=True, capture_output=True)
+                if restored.returncode:
+                    raise AssertionError(restored.stderr or restored.stdout)
             query(f"delete from public.research_scope_snapshots where scope_id = '{product_id}'")
             query(f"delete from public.research_jobs where product_id = '{product_id}'")
             query(f"delete from public.products where product_id = '{product_id}'")

@@ -368,3 +368,40 @@
 - Status: implementacja remediacji zakończona i gotowa do ograniczonego
   re-review commitu wykonawczego; Unit 6 nie jest jeszcze oznaczony jako
   ukończony, Unit 7 nie rozpoczęto.
+
+### Unit 6 — wykonanie P2 po re-review `395abc9`
+
+- Naprawiono wyłącznie zaakceptowany P2: dodano opt-in test upgrade'u lokalnej
+  bazy, w którym `202607290001` pozostaje zastosowana, usuwany jest wyłącznie
+  wpis `202607300001`, a `supabase migration up --local --yes` stosuje następcę
+  bez resetu. Test następnie wykonuje oba poprawione RPC: no-mutation `partial`
+  bez snapshotu oraz `succeeded` z JSON snapshotem.
+- Test używa jednego polecenia SQL instalującego baseline sentinel, ponieważ
+  `supabase db query` nie przyjmuje wielu komend w prepared statement; po
+  migracji następczej sentinel jest zastępowany produkcyjnym RPC. Fixture'y są
+  unikalne i sprzątane w `finally`.
+- Weryfikacja: focused Unit 6/schema/RLS — 30 PASS; opt-in runtime RPC i test
+  upgrade'u — 2 PASS; `py_compile` — PASS; `git diff --check` — PASS; pełna
+  `bash scripts/check_fieldnote.sh` — PASS. Nie rozpoczęto Unit 7.
+- Status: implementacja P2 zakończona; Unit 6 oczekuje ograniczonego
+  re-review wyłącznie tej poprawki.
+
+### Unit 6 — ograniczony re-review commitu `395abc9`
+
+- Zakres: wyłącznie `c35f1d7..395abc9` i trzy naprawy poprzedniego review.
+  Correctness, security, tests i data pracowali niezależnie; UI review nie był
+  wymagany. Nie zmieniano kodu ani nie rozpoczęto Unit 7.
+- Correctness, security i data: PASS. Potwierdzono brak price leakage do
+  snapshotu grupy, niezmienność historycznej migracji oraz bezpieczne
+  zastąpienie RPC przez `202607300001`. Data review potwierdził, że bieżący
+  pipeline nie emituje agregatu grupowego, więc pominięcie takiego snapshotu
+  jest właściwe.
+- Gate: **WYMAGA POPRAWEK** — 0 P1, 1 P2, 0 P3. Test reviewer przyjął P2:
+  obecne testy analizują tekst migracji i resetują świeżą bazę, ale nie
+  wykonują upgrade'u istniejącej historii `202607290001` przez samą migrację
+  `202607300001`.
+- Weryfikacja review: focused Unit 6/schema/RLS — 30 PASS; opt-in lokalny RPC
+  — 1 PASS; pełna `bash scripts/check_fieldnote.sh` i `git diff --check
+  c35f1d7..395abc9` — PASS.
+- Następny krok: naprawić wyłącznie wykonawczy test upgrade'u migracji i
+  wykonać kolejny ograniczony re-review Unit 6. Unit 7 pozostaje poza zakresem.
