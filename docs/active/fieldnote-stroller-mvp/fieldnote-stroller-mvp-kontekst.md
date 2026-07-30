@@ -482,3 +482,38 @@
   i pełna `bash scripts/check_fieldnote.sh` — PASS.
 - Status: implementacja remediation zakończona; review-unit-7 pozostaje
   niezamknięty do ograniczonego re-review. Unit 8 nie rozpoczęto.
+
+### Unit 7 — ograniczony re-review commitu `f7ed8e3`
+
+- Zakres: wyłącznie `192a8a5..f7ed8e3`, czyli remediation poprzednich 5 P1 i
+  2 P2 oraz ich regresje. Użyto correctness_reviewer, security_reviewer,
+  test_reviewer i data_reviewer; UI review nie był wymagany. Nie zmieniano
+  kodu ani nie rozpoczęto Unit 8.
+- Security reviewer: PASS. Correctness potwierdził dwa P1: pusty poprawny
+  response official discovery raportuje `success/pass`, a `--resume` uznaje
+  istniejący HTML `document.pdf` za poprawnie pobrany. Test reviewer przyjął
+  dwa P2 (brak regresji provider `partial` oraz symlink/API 422), a data
+  reviewer przyjął P2: wynik deduplikacji statusu/grupy zależy od kolejności
+  duplikatów producenta.
+- Weryfikacja review: focused remediation suite — 21 PASS;
+  `git diff --check 192a8a5..f7ed8e3` — PASS; pełna
+  `bash scripts/check_fieldnote.sh` — PASS. Odtworzono puste live discovery,
+  legacy HTML PDF przy `--resume` oraz order-dependent classification.
+- Gate: **BLOKUJE** — 2 P1, 3 P2, 0 P3. Unit 7 nie jest ukończony; naprawić
+  wyłącznie te pięć findings i następnie wykonać ograniczony re-review. Unit 8
+  pozostaje poza zakresem.
+
+### Unit 7 — wykonanie remediation 2 P1 i 3 P2
+
+- Pusty lub nierozpoznany live payload official discovery zwraca teraz
+  kontrolowany `partial` z `quality_gate=review`. Resume manuala PDF ponownie
+  pobiera artefakt, jeśli istniejący `document.pdf` nie ma sygnatury `%PDF`.
+- Dodano test provider `FirecrawlError` → `partial`, regresję pustego payloadu,
+  symlink escape i route 422, a także test order-independent deduplikacji oraz
+  konfliktu grup benchmarkowych. Deduplikacja wybiera metadane deterministycznie
+  i oznacza sprzeczne grupy jako `review_required`.
+- Weryfikacja: focused Unit 7 — 26 PASS; API venv test — 10 PASS;
+  `py_compile` i `git diff --check` — PASS; pełna
+  `bash scripts/check_fieldnote.sh` — PASS. Nie wywołano płatnych API.
+- Status: implementacja remediation zakończona; dokumentacja oczekuje
+  ograniczonego re-review Unit 7. Unit 8 nie rozpoczęto.

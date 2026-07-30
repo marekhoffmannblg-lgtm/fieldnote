@@ -174,4 +174,9 @@
 - [x] P1: ścieżka manuala PDF nie zapisuje HTML/markdown jako `document.pdf` ani nie raportuje fałszywego sukcesu.
 - [x] P2: adaptery odrzucają kartę innego modelu, która tylko wspomina target jako kompatybilny.
 - [x] P2: API ogranicza `fixture_root` do repozytoryjnego katalogu fixtures po rozwiązaniu ścieżki.
-- [ ] Review: ograniczony re-review wszystkich siedmiu poprawek Unit 7 — PASS i 0 P1/P2.
+- [x] P1: discovery z poprawnym HTTP, ale pustym lub nierozpoznanym payloadem, kończy się `partial`/`review`, nie `success`/`pass`.
+- [x] P1: `--resume` dla manuala odrzuca istniejący `document.pdf` bez sygnatury `%PDF`; nie zwraca `resume_skipped_existing_source` dla starego HTML.
+- [x] P2: test discovery obejmuje wyczerpany `FirecrawlError` dla skonfigurowanego URL i asercję kontrolowanego `partial`.
+- [x] P2: testy obejmują symlink escape `fixture_root` oraz kontrakt routera 422 bez wycieku JSON.
+- [x] P2: deduplikacja rekordów katalogu jest niezależna od kolejności wejścia; sprzeczne klasyfikacje wymagają `review`.
+- [ ] Review: ograniczony re-review Unit 7 — PASS i 0 P1/P2.

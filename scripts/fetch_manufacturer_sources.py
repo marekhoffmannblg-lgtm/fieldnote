@@ -244,7 +244,8 @@ def write_source(
     if resume and metadata_path.exists():
         existing = json.loads(metadata_path.read_text(encoding="utf-8"))
         expected = target / ("document.pdf" if is_pdf else "page.html")
-        if existing.get("canonical_url") == canonical_url and expected.exists():
+        valid_existing = expected.exists() and (not is_pdf or expected.read_bytes().startswith(b"%PDF"))
+        if existing.get("canonical_url") == canonical_url and valid_existing:
             return source_id, True, ["resume_skipped_existing_source"]
 
     body, headers, status = fetch_bytes(url, expect_pdf=is_pdf)

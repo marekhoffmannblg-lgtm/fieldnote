@@ -223,3 +223,134 @@ wyłącznie kod/testy i dokumentację Unit 7. Nie rozpoczęto Unit 8.
 Status review pozostaje **PENDING LIMITED RE-REVIEW**; ten wpis nie oznacza
 jeszcze PASS ani zamknięcia findings. Następne polecenie:
 `$dev-docs-review docs/active/fieldnote-stroller-mvp 7`.
+
+## Ograniczony re-review remediation `192a8a5..f7ed8e3`
+
+- **Data:** 2026-07-30
+- **Tryb:** `re-review`
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`, `test_reviewer`,
+  `data_reviewer`
+- **Gate:** `BLOKUJE`
+
+### Zakres i kryteria
+
+Sprawdzono wyłącznie siedem poprzednio zaakceptowanych poprawek P1/P2 i ich
+testy: retry/partial Firecrawl, quality gate katalogu, official discovery,
+identity aliasów, PDF, odmowę nieprawidłowego modelu oraz containment
+`fixture_root`. Nie sprawdzano Unit 8 ani nie zmieniano kodu.
+
+### Skonsolidowane findings
+
+#### P1 — Pusty oficjalny crawl raportuje fałszywy sukces
+
+- **File:** `scripts/discover_manufacturer_catalog.py:98-116`
+- **Evidence:** poprawny `client.crawl()` z `{}` zwraca `status: success`,
+  `quality_gate: pass` i zero elementów; odtworzone z klientem fixture dla
+  Kinderkraft.
+- **Impact:** administrator może uznać katalog producenta za odświeżony mimo
+  braku używalnych rekordów, więc kontrolowany `partial` nie jest zachowany.
+- **Scenario:** provider zwraca HTTP 2xx bez `products/items/pages/data`.
+- **Recommendation:** dla pustego lub nierozpoznanego live payloadu zwracaj
+  jawny `partial`/`review` z błędem i nie raportuj sukcesu.
+- **Missing test:** configured URL z pustym payloadem kończy się `partial`, a
+  nie `success/pass`.
+
+#### P1 — `--resume` akceptuje stary HTML zapisany jako manual PDF
+
+- **File:** `scripts/fetch_manufacturer_sources.py:244-248`
+- **Evidence:** ścieżka resume sprawdza jedynie istnienie `document.pdf`; przy
+  zgodnym metadata i pliku HTML zwraca `resume_skipped_existing_source` bez
+  walidacji `%PDF`.
+- **Impact:** uszkodzone artefakty zapisane przez poprzednią wersję pozostają
+  niewiarygodnym provenance i są raportowane jako sukces.
+- **Scenario:** po dawnym zapisie markdown/HTML dla `--pdf-url` operator
+  uruchamia bieżący fetcher z `--resume`.
+- **Recommendation:** przed resume sprawdzaj `%PDF`; przy niezgodności
+  refetchuj albo kończ kontrolowanym błędem/partial, nigdy skipped success.
+- **Missing test:** seed HTML `document.pdf` + metadata z `resume=True` nie
+  może zwrócić `resume_skipped_existing_source`.
+
+#### P2 — Brak regresji dla błędu providera official discovery
+
+- **File:** `tests/test_unit7_review_remediation.py:96-108`
+- **Evidence:** test configured URL obejmuje wyłącznie sukces; nie wstrzykuje
+  `FirecrawlError` ani nie potwierdza `status: partial`.
+- **Impact:** kontrolowana degradacja po 429/timeout może zniknąć bez
+  wykrycia, mimo że jest kryterium Unit 7.
+- **Scenario:** crawl skonfigurowanego URL wyczerpuje retry i rzuca
+  `FirecrawlError`.
+- **Recommendation:** dodaj test service z klientem fixture rzucającym błąd i
+  asercją pojedynczego wywołania URL oraz odpowiedzi `partial`.
+
+#### P2 — Brak regresji symlink/API dla `fixture_root`
+
+- **File:** `tests/test_unit7_review_remediation.py:74-88`
+- **Evidence:** test odrzuca tylko zwykły katalog zewnętrzny przez service;
+  nie sprawdza symlinku wewnątrz allowlisty prowadzącego poza nią ani HTTP 422
+  routera bez wycieku JSON.
+- **Impact:** ważny failure path ochrony plików hosta nie ma wykonawczej
+  ochrony regresyjnej.
+- **Scenario:** admin przekazuje in-root symlink wskazujący katalog zewnętrzny.
+- **Recommendation:** dodaj test symlink escape oraz focused TestClient API
+  dla 422 i braku treści katalogu.
+
+#### P2 — Deduplikacja katalogu zależy od kolejności rekordów producenta
+
+- **File:** `scripts/normalize_product_aliases.py:78`,
+  `scripts/discover_manufacturer_catalog.py:110`
+- **Evidence:** `normalize_records()` zachowuje pierwszy rekord canonical key
+  i scala tylko aliasy/source IDs. Dwie kolorystyczne karty `Combi`, jedna z
+  grupą i jedna bez niej, dają `pass` w jednej kolejności i `review` w
+  odwrotnej.
+- **Impact:** ten sam katalog może fałszywie przejść quality gate albo być
+  niepotrzebnie blokowany, zależnie od kolejności odpowiedzi providera.
+- **Scenario:** duplikaty kolorystyczne mają niejednolite metadane klasyfikacji.
+- **Recommendation:** scalaj status/grupę deterministycznie; konflikt grup
+  wymaga `review`, nigdy wyboru według kolejności wejścia.
+- **Missing test:** odwrócone wejście daje identyczne items/counts/gate, a
+  konflikt grup kończy się `review`.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | findings | 2 P1 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | findings | 2 P2 | 0 |
+| data_reviewer | findings | 1 P2 | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused remediation | PASS | 21 testów: klient, adaptery, discovery, aliasy i `test_unit7_review_remediation.py` |
+| Spójność diffu | PASS | `git diff --check 192a8a5..f7ed8e3` |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` (backend, checkery, frontend typecheck/test/build) |
+| Reprodukcje findings | FAIL | puste live discovery, legacy HTML PDF resume i kolejność duplikatów są odtwarzalne |
+
+### Bezpieczeństwo i decyzja gate
+
+Security reviewer potwierdził admin-only discovery, containment po `resolve()`,
+allowlistę pól fixture oraz brak sekretów/płatnych wywołań w testach. Brak
+regresji security w kodzie nie zamyka jednak P2 dotyczącego testu symlink/API.
+
+**BLOKUJE** — 2 P1, 3 P2, 0 P3. Unit 7 nie jest ukończony i Unit 8 pozostaje
+poza zakresem.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 7` — napraw wyłącznie
+zaakceptowane 2 P1 i 3 P2 z ograniczonego re-review; nie rozpoczynaj Unit 8.
+
+## Remediation execute `f7ed8e3..WORKTREE`
+
+Wykonano wyłącznie pięć zaakceptowanych findings. Pusty lub nierozpoznany
+payload live discovery kończy się kontrolowanym `partial/review`; resume PDF
+sprawdza `%PDF` przed pominięciem istniejącego artefaktu. Dodano regresje
+provider partial, pustego payloadu, symlink escape i routera 422 oraz
+deterministycznej deduplikacji z konfliktem grup.
+
+Weryfikacja: focused Unit 7 — 26 PASS; API venv — 10 PASS; `py_compile` i
+`git diff --check` — PASS; `bash scripts/check_fieldnote.sh` — PASS. Unit 8
+pozostaje poza zakresem. Następny krok to ograniczony re-review tych pięciu
+poprawek; Unit 7 nie jest jeszcze oznaczony jako ukończony.

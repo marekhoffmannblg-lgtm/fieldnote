@@ -104,7 +104,9 @@ def discover_catalog(*, brand: str, fixture_root: Path | None = None, client: Fi
         try:
             raw = records_from_firecrawl_response(client.crawl(category_url, cache=cache).data)
         except FirecrawlError as exc:
-            return {"schema_version": "1", "brand": brand, "status": "partial", "error": str(exc), "items": [], "counts": {}}
+            return {"schema_version": "1", "brand": brand, "status": "partial", "error": str(exc), "items": [], "counts": {}, "quality_gate": "review"}
+        if not raw:
+            return {"schema_version": "1", "brand": brand, "status": "partial", "error": "Official catalog crawl returned no usable product records.", "items": [], "counts": {}, "quality_gate": "review"}
     items = [classify_catalog_record({"brand": brand, **item} if not item.get("brand") else item) for item in raw]
     # De-duplicate only after canonical identity is known; 2w1 and 3w1 remain separate.
     active = normalize_records(item for item in items if item.get("catalog_status") != "excluded")

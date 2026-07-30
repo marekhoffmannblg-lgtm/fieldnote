@@ -86,9 +86,33 @@ def normalize_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
         if current is None:
             grouped[key] = item
         else:
-            current["aliases"] = sorted(set(current.get("aliases", [])) | set(item.get("aliases", [])))
-            current["source_ids"] = sorted(set(current.get("source_ids", [])) | set(item.get("source_ids", [])))
+            grouped[key] = _merge_alias_records(current, item)
     return sorted(grouped.values(), key=lambda item: item["canonical_key"])
+
+
+def _merge_alias_records(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    """Merge duplicate identities without making classification order-dependent."""
+    candidates = (left, right)
+    stable_fields = {key: value for key, value in left.items() if key not in {"aliases", "source_ids", "canonical_key"}}
+    base = min(candidates, key=lambda item: json.dumps({key: item.get(key) for key in stable_fields}, ensure_ascii=False, sort_keys=True, default=str))
+    merged = dict(base)
+    merged["aliases"] = sorted(set(left.get("aliases", [])) | set(right.get("aliases", [])))
+    merged["source_ids"] = sorted(set(left.get("source_ids", [])) | set(right.get("source_ids", [])))
+
+    groups = {str(item.get("benchmark_group") or item.get("benchmark_group_key") or "").strip() for item in candidates}
+    groups.discard("")
+    if len(groups) > 1:
+        merged["catalog_status"] = "review_required"
+        merged["classification_reason"] = "conflicting_benchmark_groups"
+    elif groups and any("catalog_status" in item for item in candidates):
+        group = sorted(groups)[0]
+        merged["benchmark_group"] = group
+        merged["benchmark_group_key"] = group
+        merged["catalog_status"] = "classified"
+        merged["classification_reason"] = "official_catalog"
+    elif any(item.get("catalog_status") == "review_required" for item in candidates):
+        merged["catalog_status"] = "review_required"
+    return merged
 
 
 def _placeholder(model: str) -> bool:
