@@ -118,6 +118,7 @@ from services.run_service import index_runs  # noqa: E402
 from services.source_service import paginate  # noqa: E402
 from services.job_service import JobService  # noqa: E402
 from routers.jobs import router as jobs_router  # noqa: E402
+from routers.brand_catalogs import router as brand_catalogs_router  # noqa: E402
 RUN_COORDINATOR = RunCoordinator(runs_root=RUNS_ROOT, output_root=PROJECT_ROOT / "output")
 DATA_MODE = os.environ.get("FIELDNOTE_DATA_MODE", "legacy_readonly")
 if DATA_MODE not in {"legacy_readonly", "supabase"}:
@@ -163,6 +164,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(admin_users_router)
 app.include_router(jobs_router)
+app.include_router(brand_catalogs_router)
 if DATA_MODE == "supabase":
     _job_client = SupabaseClient.from_env()
     app.state.job_service = JobService(JobRepository(_job_client), CatalogRepository(_job_client))

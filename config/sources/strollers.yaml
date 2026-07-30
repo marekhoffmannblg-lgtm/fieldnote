@@ -1,0 +1,24 @@
+version: 1
+category: strollers
+market: PL
+sources:
+  - brand: Bugaboo
+    manufacturer_domains: [bugaboo.com]
+    catalog_urls: [https://www.bugaboo.com]
+    retailers: [allegro.pl, amazon.pl]
+  - brand: CYBEX
+    manufacturer_domains: [cybex-online.com]
+    catalog_urls: [https://www.cybex-online.com]
+    retailers: [allegro.pl, amazon.pl]
+  - brand: Ergobaby
+    manufacturer_domains: [ergobaby.com]
+    catalog_urls: [https://ergobaby.com]
+    retailers: [allegro.pl, amazon.pl]
+  - brand: Joolz
+    manufacturer_domains: [joolz.com]
+    catalog_urls: [https://www.joolz.com]
+    retailers: [allegro.pl, amazon.pl]
+  - brand: Kinderkraft
+    manufacturer_domains: [kinderkraft.com, kinderkraft.pl]
+    catalog_urls: [https://kinderkraft.pl]
+    retailers: [allegro.pl, amazon.pl]

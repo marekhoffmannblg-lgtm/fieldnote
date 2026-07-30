@@ -9,8 +9,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from firecrawl_client import FirecrawlClient, FirecrawlError
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -23,7 +22,6 @@ from prepare_firecrawl_offer_queue import QUEUE_COLUMNS
 
 
 QUEUE_PATH = ROOT_DIR / "output" / "firecrawl_offer_queue.csv"
-FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 OFFER_PAGES_ROOT = ROOT_DIR / "input" / "firecrawl_offer_pages"
 MAX_RETRIES = 3
 
@@ -70,20 +68,11 @@ def require_api_key() -> str:
 
 
 def scrape_offer(url: str, api_key: str, *, capture_visuals: bool = True) -> dict[str, object]:
-    # Firecrawl receives visual formats inside the same scrape request. No
-    # follow-up render is issued merely to obtain a screenshot.
     formats = ["markdown", "html", "rawHtml", "links"]
     if capture_visuals:
         formats.extend(["images", "screenshot"])
-    payload = json.dumps({"url": url, "formats": formats}).encode("utf-8")
-    request = Request(
-        FIRECRAWL_SCRAPE_URL,
-        data=payload,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urlopen(request, timeout=120) as response:
-        return json.loads(response.read().decode("utf-8"))
+    response = FirecrawlClient(api_key=api_key, timeout=120, max_retries=2).scrape(url, formats=formats)
+    return {"success": response.ok, "data": response.data, "usage": asdict(response.usage), "request_id": response.request_id}
 
 
 def _links_text(value: object) -> str:

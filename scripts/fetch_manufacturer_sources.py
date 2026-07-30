@@ -12,6 +12,7 @@ import base64
 import hashlib
 import html
 import json
+import os
 import re
 import unicodedata
 import uuid
@@ -21,6 +22,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
+
+from firecrawl_client import FirecrawlClient, FirecrawlError
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -180,6 +183,15 @@ def technical_clean(markdown: str) -> str:
 
 
 def fetch_bytes(url: str) -> tuple[bytes, dict[str, str], int]:
+    """Fetch through the shared Firecrawl client; direct HTTP is dev-only."""
+    if os.getenv("FIELDNOTE_ALLOW_DIRECT_HTTP") != "1":
+        try:
+            response = FirecrawlClient(timeout=60).scrape(url, formats=["markdown", "html", "rawHtml"])
+        except FirecrawlError as exc:
+            raise RuntimeError(str(exc)) from exc
+        data = response.data
+        body = str(data.get("html") or data.get("rawHtml") or data.get("markdown") or "").encode("utf-8")
+        return body, {"Content-Type": "text/html; charset=utf-8", "X-Firecrawl-Request-Id": response.request_id}, response.status_code
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/pdf;q=0.9,*/*;q=0.5"})
     with urlopen(request, timeout=30) as response:  # nosec B310 - explicit user supplied official URL
         body = response.read()

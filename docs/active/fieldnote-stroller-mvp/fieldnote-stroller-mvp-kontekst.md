@@ -2,7 +2,7 @@
 
 - **Branch:** `main` (preflight Unit 2: czyste drzewo i synchronizacja z `origin/main`)
 - **Ostatni commit przed Unit 2:** `807e81bd9176e274925ce3d1feac67fdb3dc9447 — data: add lionelo internal specification fixtures`
-- **Ostatnia aktualizacja:** 2026-07-29
+- **Ostatnia aktualizacja:** 2026-07-30
 
 ## Źródła
 
@@ -420,3 +420,26 @@
   `bash scripts/check_fieldnote.sh` — PASS.
 - Gate: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 6 jest ukończony;
   Unit 7 nie został rozpoczęty.
+
+### Unit 7 — implementacja wspólnego Firecrawl i katalogu konkurencji
+
+- Zakres wykonania obejmuje wyłącznie Unit 7. Dodano `scripts/firecrawl_client.py`
+  z v2 Search/Scrape/Crawl, retry dla 429/5xx, limitami stron, usage i cache;
+  adaptery Allegro/Amazon/retailer/manufacturer korzystają z tego samego
+  `NormalizedSourceContent` i kontraktu provenance. Zmieniono fetchery ofert i
+  producenta tak, aby live pobrania przechodziły przez wspólnego klienta;
+  bezpośredni HTTP w skrypcie producenta jest tylko jawnie włączonym trybem
+  developerskim.
+- Dodano `scripts/discover_manufacturer_catalog.py`,
+  `scripts/normalize_product_aliases.py`, `config/sources/strollers.yaml`,
+  preview API `fieldnote-api/services/brand_catalog_service.py` + router oraz
+  offline fixtures w `fixtures/firecrawl/`. Discovery wyklucza akcesoria/
+  placeholdery, zachowuje jawny `review_required` dla realnych rekordów bez
+  grupy, a aliasy ignorują kolor i nie scalają konfiguracji 2w1/3w1.
+- Testy Unit 7: `python3 -m unittest tests/test_firecrawl_client.py
+  tests/test_firecrawl_source_adapters.py tests/test_manufacturer_catalog_discovery.py
+  tests/test_product_aliases.py` — 11 PASS. Weryfikacja istniejących kontraktów
+  producenta na `fieldnote-api/.venv/bin/python` — 18 PASS; `py_compile` — PASS;
+  pełna `bash scripts/check_fieldnote.sh` — PASS; `git diff --check` — PASS.
+- Status: implementacja i dokumentacja Unit 7 zakończone; niezależny review
+  Unit 7 pozostaje wymagany. Unit 8 nie rozpoczęto.

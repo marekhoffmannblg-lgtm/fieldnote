@@ -1,7 +1,7 @@
 # FIELDNOTE Stroller MVP — plan wykonawczy
 
 - **Branch:** `main` (brudne drzewo robocze; branch nie został zmieniony)
-- **Ostatnia aktualizacja:** 2026-07-28
+- **Ostatnia aktualizacja:** 2026-07-30
 
 ## Źródła
 
@@ -58,7 +58,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 3 — Unit 7: Wspólny Firecrawl i aktualny katalog konkurencji
 
-- Status: `pending`
+- Status: `implemented` (review pending)
 - Zależności: Unit 5, Unit 6
 - Kryterium ukończenia: wszystkie adaptery używają wspólnego klienta i kontraktu provenance; aktualny katalog nie ma niejawnych placeholderów ani niesklasyfikowanych realnych rekordów.
 

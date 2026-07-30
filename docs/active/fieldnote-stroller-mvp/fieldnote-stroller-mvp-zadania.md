@@ -60,9 +60,9 @@
 
 ## Unit 7 — Wspólny Firecrawl i katalog konkurencji
 
-- [ ] Implementacja: wspólny klient v2, adaptery, discovery katalogu producenta, aliasy, konfiguracja źródeł oraz fixtures dla manufacturer/Allegro/Amazon/retailers.
-- [ ] Test: `tests/test_firecrawl_client.py`, `tests/test_firecrawl_source_adapters.py`, `tests/test_manufacturer_catalog_discovery.py`, `tests/test_product_aliases.py`.
-- [ ] Weryfikacja: adapter tests przechodzą offline; raport nie ma aktywnego `Accessory / part` ani niejawnie niesklasyfikowanego realnego produktu.
+- [x] Implementacja: wspólny klient v2, adaptery, discovery katalogu producenta, aliasy, konfiguracja źródeł oraz fixtures dla manufacturer/Allegro/Amazon/retailers.
+- [x] Test: `tests/test_firecrawl_client.py`, `tests/test_firecrawl_source_adapters.py`, `tests/test_manufacturer_catalog_discovery.py`, `tests/test_product_aliases.py` — 11 PASS.
+- [x] Weryfikacja: adapter tests przechodzą offline; raport katalogu nie zawiera aktywnego `Accessory / part` ani niejawnie niesklasyfikowanego realnego produktu; pełny `bash scripts/check_fieldnote.sh` PASS.
 - [ ] Review: brak otwartych P1/P2.
 
 ## Unit 8 — Audyt atrybutów i względny scoring
