@@ -63,25 +63,12 @@ begin
    for update;
   if not found then return; end if;
 
-  -- A preflight/timeout partial has no semantic envelope by design.  Keep it
-  -- fenced to the claimed product while allowing an empty caller scope; the
-  -- terminal job record is durable, but no snapshot mutation is attempted.
-  if coalesce(p_scope->>'product_id', '') = '' then
-    if p_status = 'partial' and jsonb_array_length(p_snapshots) = 0 then
-      p_scope := jsonb_build_object(
-        'product_id', value.product_id,
-        'scope_version', '1',
-        'no_mutation', true
-      );
-    else
-      raise exception 'scope product does not match fenced job';
-    end if;
-  elsif p_scope->>'product_id' <> value.product_id then
+  if coalesce(p_scope->>'product_id', '') <> value.product_id then
     raise exception 'scope product does not match fenced job';
   end if;
 
   if value.cancel_requested_at is null and p_status in ('partial', 'succeeded') then
-    for candidate in select element from jsonb_array_elements(p_snapshots) as elements(element) loop
+    for candidate in select value from jsonb_array_elements(p_snapshots) loop
       if jsonb_typeof(candidate) <> 'object' then raise exception 'invalid snapshot'; end if;
       candidate_scope_type := candidate->>'scope_type';
       candidate_scope_id := candidate->>'scope_id';

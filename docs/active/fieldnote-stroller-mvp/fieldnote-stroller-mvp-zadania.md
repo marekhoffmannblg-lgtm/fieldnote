@@ -1,7 +1,7 @@
 # FIELDNOTE Stroller MVP — zadania
 
 - **Branch:** `main` (czyste i zsynchronizowane z `origin/main` przed Unit 2)
-- **Ostatnia aktualizacja:** 2026-07-29
+- **Ostatnia aktualizacja:** 2026-07-30
 
 ## Unit 1 — Bezpieczny baseline repozytorium i CI
 
@@ -56,7 +56,7 @@
 - [x] Implementacja: `product_scope`, `benchmark_group_scope`, rebuild pojedynczego scope'u i serializowany admin full rebuild.
 - [x] Test: `tests/test_incremental_pipeline.py`, `tests/test_incremental_benchmark_rebuild.py` oraz opt-in `tests/test_supabase_runtime_contract.py`; direct CLI, dwa scope'y/admin, price threshold, stale rows i fenced RPC.
 - [x] Weryfikacja: suma rebuildów przyrostowych daje stan równy full rebuild na fixture; focused 28 PASS, runtime Unit 6 PASS, pełny offline gate PASS.
-- [ ] Review: remediacja 2 P1/4 P2 zakończona; oczekuje ograniczonego re-review `002c371^..HEAD` w `review-unit-6.md`.
+- [ ] Review: po naprawie 2 P1 i 1 P2 w bieżącym commicie oczekuje ograniczonego re-review; Unit 7 pozostaje zablokowany. Szczegóły w `review-unit-6.md`.
 
 ## Unit 7 — Wspólny Firecrawl i katalog konkurencji
 
@@ -160,3 +160,6 @@
 - [x] P2: kontrolowany test nakładania się admin full rebuild i scoped read–merge–write zachowuje oba scope'y.
 - [x] P2: opt-in runtime PostgreSQL test fenced RPC obejmuje 4,99%/5%, stale token i invalid envelope.
 - [x] P2: integration test builderów obejmuje utratę eligibility i usunięcie benchmark/source rows.
+- [x] P1: snapshot `benchmark_group` nie dziedziczy ceny produktu; powstaje wyłącznie z jawnej projekcji internal benchmarku, a brak projekcji pomija snapshot grupy. Regresje pokrywają próg 4,99%/5% i zmianę agregatu.
+- [x] P1: historyczna migracja `202607290001` została przywrócona bez zmian; poprawiony RPC jest w sekwencyjnej migracji `202607300001_incremental_commit_partial_fixes.sql`, z kontraktem monotonicznego upgrade'u.
+- [x] P2: test serializacji fixture używa hooków sekcji krytycznej i zdarzeń, wymuszając adminową próbę podczas zablokowanego scoped read–merge–write.

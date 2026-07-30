@@ -31,6 +31,7 @@ class SupabaseSchemaContractTests(unittest.TestCase):
                 "202607230005_auth_roles_rls_storage.sql",
                 "202607280001_durable_research_queue.sql",
                 "202607290001_incremental_benchmark_commit.sql",
+                "202607300001_incremental_commit_partial_fixes.sql",
             ],
         )
         schema = "\n".join(migration(path.name) for path in sorted(MIGRATIONS.glob("*.sql")))
@@ -74,6 +75,16 @@ class SupabaseSchemaContractTests(unittest.TestCase):
         self.assertIn("scope product does not match fenced job", incremental)
         self.assertIn("abs(candidate_price - previous.price_median) / abs(previous.price_median) >= 0.05", incremental)
         self.assertIn("grant execute on function public.fieldnote_commit_incremental_research_job", incremental)
+
+    def test_incremental_partial_fix_is_a_monotonic_upgrade(self) -> None:
+        historical = migration("202607290001_incremental_benchmark_commit.sql")
+        upgrade = migration("202607300001_incremental_commit_partial_fixes.sql")
+        self.assertIn("if coalesce(p_scope->>'product_id', '') <> value.product_id then", historical)
+        self.assertNotIn("no_mutation", historical)
+        self.assertIn("create or replace function public.fieldnote_commit_incremental_research_job", upgrade)
+        self.assertIn("no_mutation", upgrade)
+        self.assertIn("for candidate in select element from jsonb_array_elements(p_snapshots) as elements(element)", upgrade)
+        self.assertNotIn("create table public.research_scope_snapshots", upgrade)
 
 
 if __name__ == "__main__":

@@ -92,15 +92,29 @@ class BenchmarkCommitService:
             "payload": product_payload,
         }]
         if benchmark_group:
-            group_payload = {"scope": {"group_key": group_key, "benchmark_group": benchmark_group}, "state": state.get("internal_benchmark", state)}
-            snapshots.append({
-                "scope_type": "benchmark_group",
-                "scope_id": benchmark_group,
-                "semantic_hash": semantic_hash(group_payload),
-                "domain_hash": semantic_hash(group_payload),
-                "price_median": None,
-                "payload": group_payload,
-            })
+            # A product semantic envelope is not an internal benchmark
+            # projection.  Falling back to ``state`` here would make a
+            # product-only price_median look like a group-domain change and
+            # create a misleading benchmark_group snapshot.  The pipeline may
+            # provide an explicit internal projection; otherwise there is no
+            # group snapshot to persist for this bounded commit.
+            internal = state.get("internal_benchmark", state.get("internal_benchmarks"))
+            if isinstance(internal, Mapping):
+                internal_projection: Any = dict(internal)
+            elif isinstance(internal, list):
+                internal_projection = [dict(item) for item in internal if isinstance(item, Mapping)]
+            else:
+                internal_projection = None
+            if internal_projection:
+                group_payload = {"scope": {"group_key": group_key, "benchmark_group": benchmark_group}, "state": internal_projection}
+                snapshots.append({
+                    "scope_type": "benchmark_group",
+                    "scope_id": benchmark_group,
+                    "semantic_hash": semantic_hash(group_payload),
+                    "domain_hash": semantic_hash(group_payload),
+                    "price_median": None,
+                    "payload": group_payload,
+                })
         for benchmark_id in scoped.get("competitive_benchmark_ids", []):
             benchmark_id = str(benchmark_id).strip()
             if not benchmark_id:

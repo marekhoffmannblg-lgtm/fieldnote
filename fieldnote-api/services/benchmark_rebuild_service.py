@@ -15,7 +15,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -181,8 +181,16 @@ class RebuildResult:
 class BenchmarkRebuildService:
     """Repository-neutral service used by scripts and the durable worker."""
 
-    def __init__(self, *, lock_root: Path | None = None) -> None:
+    def __init__(self, *, lock_root: Path | None = None, critical_section_hook: Callable[[str, str], None] | None = None) -> None:
         self.lock_root = Path(lock_root) if lock_root else PROJECT_ROOT / "output" / "run_locks"
+        # Offline fixture tests can inject a barrier at the lock boundary to
+        # prove read/merge/write serialization without relying on scheduler
+        # timing. Production callers leave this unset.
+        self.critical_section_hook = critical_section_hook
+
+    def _critical_section(self, phase: str, scope: str) -> None:
+        if self.critical_section_hook is not None:
+            self.critical_section_hook(phase, scope)
 
     @contextmanager
     def aggregation_transaction(self, *, run_id: str, scope: str, wait_seconds: float = 5.0) -> Iterator[None]:
@@ -194,6 +202,7 @@ class BenchmarkRebuildService:
         freshly committed state from another scope.
         """
         lock = FileLock(self.lock_root / "aggregation.lock", {"run_id": run_id, "scope": scope})
+        self._critical_section("before_acquire", scope)
         deadline = time.monotonic() + max(0, wait_seconds)
         while True:
             try:
@@ -204,6 +213,7 @@ class BenchmarkRebuildService:
                     raise
                 time.sleep(0.02)
         try:
+            self._critical_section("acquired", scope)
             yield
         finally:
             lock.release()
@@ -243,7 +253,7 @@ class BenchmarkRebuildService:
 
     def rebuild_product_state_file(self, input_path: Path, output_path: Path, product_id: str, *, updates: Mapping[str, Any] | None = None, run_id: str = "scoped-rebuild") -> RebuildResult:
         """Commit one product to the canonical fixture file without lost writes."""
-        with self.aggregation_transaction(run_id=run_id, scope="scoped_derived_commit"):
+        with self.aggregation_transaction(run_id=run_id, scope=f"scoped_derived_commit:{product_id}"):
             source_path = output_path if output_path.exists() else input_path
             result = self.rebuild_product_scope(read_state(source_path), product_id, updates=updates, run_id=run_id, lock_already_held=True)
             write_state(output_path, result.state)

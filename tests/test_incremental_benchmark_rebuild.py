@@ -85,26 +85,51 @@ class IncrementalBenchmarkRebuildTests(unittest.TestCase):
             root = Path(directory)
             source, target = root / "seed.json", root / "state.json"
             source.write_text(json.dumps(fixture()), encoding="utf-8")
-            service = BenchmarkRebuildService(lock_root=root / "locks")
-            barrier, errors = threading.Barrier(4), []
+            scoped_acquired = threading.Event()
+            release_scoped = threading.Event()
+            admin_attempted = threading.Event()
+            admin_acquired = threading.Event()
+            errors = []
+
+            def critical_section_hook(phase, scope):
+                if phase == "acquired" and scope == "scoped_derived_commit:orf":
+                    scoped_acquired.set()
+                    if not release_scoped.wait(5):
+                        raise AssertionError("scoped transaction was not released")
+                elif phase == "before_acquire" and scope == "admin_full_rebuild":
+                    admin_attempted.set()
+                elif phase == "acquired" and scope == "admin_full_rebuild":
+                    admin_acquired.set()
+
+            service = BenchmarkRebuildService(lock_root=root / "locks", critical_section_hook=critical_section_hook)
 
             def rebuild(product_id, price):
                 try:
-                    barrier.wait()
                     service.rebuild_product_state_file(source, target, product_id, updates={"price": price}, run_id=product_id)
                 except Exception as exc:  # pragma: no cover - asserted below
                     errors.append(exc)
 
             first = threading.Thread(target=rebuild, args=("orf", 105))
-            second = threading.Thread(target=rebuild, args=("neb", 210))
+
             def admin_rebuild():
                 try:
-                    barrier.wait()
                     service.rebuild_all_admin_state_file(source, target, run_id="admin")
                 except Exception as exc:  # pragma: no cover - asserted below
                     errors.append(exc)
+
             admin = threading.Thread(target=admin_rebuild)
-            first.start(); second.start(); admin.start(); barrier.wait(); first.join(); second.join(); admin.join()
+            first.start()
+            self.assertTrue(scoped_acquired.wait(5), "scoped transaction did not acquire the shared lock")
+            admin.start()
+            self.assertTrue(admin_attempted.wait(5), "admin transaction did not reach lock acquisition")
+            self.assertFalse(admin_acquired.is_set(), "admin acquired the lock while scoped read/merge/write was held")
+
+            second = threading.Thread(target=rebuild, args=("neb", 210))
+            second.start()
+            release_scoped.set()
+            first.join(5); second.join(5); admin.join(5)
+            self.assertFalse(first.is_alive() or second.is_alive() or admin.is_alive())
+            self.assertTrue(admin_acquired.is_set(), "admin did not acquire the lock after scoped commit released it")
             self.assertEqual(errors, [])
             state = json.loads(target.read_text(encoding="utf-8"))
             prices = {item["product_id"]: item["price"] for item in state["products"]}
@@ -119,8 +144,27 @@ class IncrementalBenchmarkRebuildTests(unittest.TestCase):
         high = BenchmarkCommitService(object())._snapshots(job, payload(105)["scoped_commit"])[0][0]
         self.assertEqual(low["price_median"], 104.99)
         self.assertEqual(high["price_median"], 105.0)
+        self.assertEqual(len(BenchmarkCommitService(object())._snapshots(job, payload(104.99)["scoped_commit"])[0]), 1)
         self.assertFalse(price_change_requires_snapshot(100, low["price_median"]))
         self.assertTrue(price_change_requires_snapshot(100, high["price_median"]))
+
+    def test_group_snapshot_uses_only_explicit_internal_projection(self):
+        job = {"job_id": "job", "product_id": "orf"}
+
+        def payload(price, score=None):
+            state = {"fields": {"weight": "7"}, "price_median": price}
+            if score is not None:
+                state["internal_benchmark"] = {"score": score, "participants": ["orf", "neb"]}
+            return {"scope": {"product_id": "orf", "group_key": "lionelo|orfeo", "benchmark_group": "compact"}, "semantic_state": state, "price_median": price}
+
+        without_group = BenchmarkCommitService(object())._snapshots(job, payload(100))[0]
+        self.assertEqual([item["scope_type"] for item in without_group], ["product"])
+        first = BenchmarkCommitService(object())._snapshots(job, payload(100, 0.7))[0]
+        second = BenchmarkCommitService(object())._snapshots(job, payload(100, 0.8))[0]
+        first_group = next(item for item in first if item["scope_type"] == "benchmark_group")
+        second_group = next(item for item in second if item["scope_type"] == "benchmark_group")
+        self.assertNotIn("price_median", first_group["payload"]["state"])
+        self.assertNotEqual(first_group["semantic_hash"], second_group["semantic_hash"])
 
     def test_worker_does_not_report_success_when_durable_incremental_commit_fails(self):
         class Pipeline:

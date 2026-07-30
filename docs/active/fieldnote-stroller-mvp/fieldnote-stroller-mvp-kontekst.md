@@ -330,3 +330,41 @@
   `git diff --check` — PASS. Nie rozpoczęto Unit 7.
 - Status: implementacja zakończona; dokumentacja oczekuje ograniczonego
   re-review wyłącznie `002c371^..HEAD`.
+
+### Unit 6 — ograniczony re-review commitu `c35f1d7`
+
+- Zakres: wyłącznie `002c371..c35f1d7` oraz regresje sześciu wcześniejszych
+  findings P1/P2. Pracowali niezależnie correctness, security, tests i data;
+  UI review nie był wymagany. Nie zmieniano kodu ani nie rozpoczęto Unit 7.
+- Weryfikacja review: focused Unit 6/schema/RLS — 28 PASS; opt-in lokalny
+  runtime RPC — 1 PASS; `py_compile`, `git diff --check c35f1d7^ c35f1d7` i
+  pełna `bash scripts/check_fieldnote.sh` — PASS.
+- Gate: **BLOKUJE** — 2 P1, 1 P2, 0 P3. P1: group snapshot dziedziczy
+  `price_median` z payloadu produktu, więc zmiana 4,99% tworzy snapshot;
+  poprawiony RPC zmienia już zarejestrowaną migrację `202607290001`, więc nie
+  przejdzie na bazę po wcześniejszym deployu. P2: test scoped/admin nie
+  wymusza deterministycznego nakładania krytycznych sekcji. Security review:
+  PASS. Szczegóły w `review-unit-6.md`.
+- Następny krok: naprawić wyłącznie te 2 P1 i 1 P2 w Unit 6, dodać migrację
+  następczą oraz wykonać ograniczony re-review. Unit 7 pozostaje poza zakresem.
+
+### Unit 6 — wykonanie remediacji po review `c35f1d7`
+
+- Naprawiono wyłącznie 2 P1 i 1 P2: `_snapshots()` emituje snapshot grupy
+  tylko z jawnego `internal_benchmark`/`internal_benchmarks`, historyczna
+  migracja `202607290001` jest niezmieniona, a `202607300001` dostarcza
+  poprawiony fenced RPC. Fixture concurrency ma deterministyczny hook po
+  zdobyciu locka i potwierdza, że admin czeka na scoped commit.
+- Zmienione pliki implementacyjne/testowe: `fieldnote-api/services/benchmark_commit_service.py`,
+  `fieldnote-api/services/benchmark_rebuild_service.py`,
+  `supabase/migrations/202607290001_incremental_benchmark_commit.sql`,
+  `supabase/migrations/202607300001_incremental_commit_partial_fixes.sql`,
+  `tests/test_incremental_benchmark_rebuild.py` i
+  `tests/test_supabase_schema_contract.py`.
+- Weryfikacja: focused Unit 6/schema/RLS — 30 PASS; `py_compile` i
+  `git diff --check` — PASS; `supabase db reset --local --yes` zastosował
+  migracje `202607290001` i `202607300001`; lokalny runtime RPC — 1 PASS;
+  pełna `bash scripts/check_fieldnote.sh` — PASS.
+- Status: implementacja remediacji zakończona i gotowa do ograniczonego
+  re-review commitu wykonawczego; Unit 6 nie jest jeszcze oznaczony jako
+  ukończony, Unit 7 nie rozpoczęto.

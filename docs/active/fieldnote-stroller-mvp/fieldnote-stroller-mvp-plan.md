@@ -52,7 +52,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 2 — Unit 6: Przyrostowe commitowanie i przeliczanie
 
-- Status: `in_progress` (remediacja 2 P1/4 P2 zakończona; oczekuje ograniczonego re-review; Unit 7 zablokowany do PASS)
+- Status: `in_progress` (naprawiono 2 P1 i 1 P2 z re-review `c35f1d7`; oczekuje ograniczonego re-review; Unit 7 zablokowany do PASS)
 - Zależności: Unit 3, Unit 5
 - Kryterium ukończenia: research produktu zmienia wyłącznie jego scope; pełna przebudowa jest osobną, serializowaną akcją administratora.
 
