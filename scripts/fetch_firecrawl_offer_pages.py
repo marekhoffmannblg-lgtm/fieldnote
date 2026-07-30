@@ -9,6 +9,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from firecrawl_client import FirecrawlClient, FirecrawlError
 
 
@@ -254,7 +255,7 @@ def fetch_pending_rows(
             row["fetched_at"] = timestamp()
             row["error_message"] = ""
             result.offers_fetched += 1
-        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, OSError) as exc:
+        except (FirecrawlError, HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, OSError) as exc:
             record_error(row, str(exc))
             result.offers_failed += 1
 

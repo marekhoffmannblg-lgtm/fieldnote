@@ -38,6 +38,14 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(result["quality_gate"], "rejected")
         self.assertEqual(result["product_type"], "accessory")
 
+    def test_compatibility_mention_does_not_accept_other_model_card(self):
+        adapter = AmazonAdapter()
+        source = SourceCandidate("amazon:wrong", "amazon", "marketplace_offer", "https://amazon.pl/dp/WRONG", "Kinderkraft NUBI 2 stroller compatible with NEBO")
+        normalized = adapter.normalize(source)
+        result = adapter.classify(normalized, {"brand": "Kinderkraft", "model": "NEBO"})
+        self.assertEqual(result["model_match"], False)
+        self.assertEqual(result["quality_gate"], "rejected")
+
 
 if __name__ == "__main__":
     unittest.main()

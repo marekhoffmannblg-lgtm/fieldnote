@@ -30,8 +30,9 @@ def list_brand_catalogs(brand: str | None = None, service: BrandCatalogService =
 
 @router.post("/discover", status_code=202)
 def discover_brand_catalog(request: CatalogRefreshRequest, _: Principal = Depends(require_roles("admin")), service: BrandCatalogService = Depends(get_service)) -> dict[str, Any]:
-    fixture = Path(request.fixture_root).resolve() if request.fixture_root else None
-    if fixture is not None and not fixture.exists():
-        raise HTTPException(status_code=422, detail="Fixture katalogu nie istnieje.")
     # Preview only: committing catalog rows belongs to the later import unit.
-    return service.discover(request.brand, fixture_root=fixture)
+    try:
+        fixture = Path(request.fixture_root) if request.fixture_root else None
+        return service.discover(request.brand, fixture_root=fixture)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -149,7 +149,8 @@ class LocalSnapshotAdapter:
             nested = raw_source.content.get("normalized")
             if isinstance(nested, dict) and isinstance(nested.get("metadata"), dict):
                 metadata.update(nested["metadata"])
-        return NormalizedSourceContent(raw_source.source_id, str(content.get("title", "")), str(content.get("canonical_url", "")), str(content.get("domain", "")), content.get("content_hash"), raw_source.raw_snapshot_path, raw_source.clean_snapshot_path, metadata)
+        title = str(content.get("title") or metadata.get("title") or "").strip()
+        return NormalizedSourceContent(raw_source.source_id, title, str(content.get("canonical_url", "")), str(content.get("domain", "")), content.get("content_hash"), raw_source.raw_snapshot_path, raw_source.clean_snapshot_path, metadata)
 
     def firecrawl_fetch(self, source: SourceCandidate, context: dict[str, Any]) -> FetchResult:
         client = context.get("firecrawl_client")
@@ -160,7 +161,7 @@ class LocalSnapshotAdapter:
         except FirecrawlError as exc:
             return FetchResult(source.source_id, "failed", error=str(exc), content={"status_code": exc.status_code, "attempts": exc.attempts})
         normalized = self._normalise_response(source, response)
-        return FetchResult(source.source_id, "fetched", clean_snapshot_path=None, content={"normalized": normalized.provenance, "markdown": normalized.metadata.get("markdown", ""), "usage": asdict(response.usage)})
+        return FetchResult(source.source_id, "fetched", clean_snapshot_path=None, content={"normalized": {**normalized.provenance, "title": normalized.title}, "title": normalized.title, "markdown": normalized.metadata.get("markdown", ""), "usage": asdict(response.usage)})
 
 
 class AllegroAdapter(LocalSnapshotAdapter):
@@ -296,10 +297,18 @@ def classify_source(normalized_source: NormalizedSourceContent, product_context:
     model = _tokens(str(product_context.get("model", "")))
     brand = _tokens(str(product_context.get("brand", "")))
     configuration = _tokens(str(product_context.get("configuration", "")))
-    text = _tokens(" ".join((normalized_source.title, str(normalized_source.metadata.get("markdown", "")))))
+    title_text = str(normalized_source.title or "")
+    markdown_text = str(normalized_source.metadata.get("markdown", ""))
+    text = _tokens(" ".join((title_text, markdown_text)))
     accessory = any(term in " ".join(text) for term in ("accessory", "part", "adapter", "bag", "rain cover", "akcesoria", "czesc")) and not any(term in text for term in ("stroller", "wozek", "spacerowka"))
     brand_match = bool(brand) and all(token in text for token in brand)
-    model_match = bool(model) and all(token in text for token in model)
+    title_tokens = _tokens(title_text)
+    model_match = bool(model) and all(token in title_tokens for token in model)
+    compatibility_marker = re.search(r"\b(?:compatible\s+with|pasuje\s+do|kompatybiln\w*\s+z|do\s+w[oó]zka)\b", title_text.casefold())
+    if model_match and compatibility_marker:
+        after_marker = _tokens(title_text[compatibility_marker.end():])
+        if all(token in after_marker for token in model):
+            model_match = False
     config_match = not configuration or all(token in text for token in configuration)
     return {"source_role": source_role, "brand_match": brand_match, "model_match": model_match, "configuration_match": config_match, "product_type": "accessory" if accessory else ("stroller" if any(term in text for term in ("stroller", "wozek", "spacerowka")) else "unknown"), "quality_gate": "rejected" if accessory or not (brand_match and model_match and config_match) else "accepted"}
 

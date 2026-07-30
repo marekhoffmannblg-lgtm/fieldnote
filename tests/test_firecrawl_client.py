@@ -42,6 +42,26 @@ class FirecrawlClientTests(unittest.TestCase):
         self.assertEqual(response.data["markdown"], "cached")
         self.assertFalse(called)
 
+    def test_timeout_retries_and_normalizes_exhausted_transport(self):
+        calls = []
+
+        def transport(*args):
+            calls.append(1)
+            if len(calls) == 1:
+                raise TimeoutError("fixture timeout")
+            return 200, {"success": True, "data": {"markdown": "ok"}}
+
+        response = FirecrawlClient(api_key="fixture-key", max_retries=1, backoff_seconds=0, transport=transport, sleep=lambda _: None).scrape("https://example.test")
+        self.assertEqual(response.attempts, 2)
+        self.assertEqual(len(calls), 2)
+
+        def always_timeout(*args):
+            raise TimeoutError("fixture timeout")
+
+        with self.assertRaises(FirecrawlError) as error:
+            FirecrawlClient(api_key="fixture-key", max_retries=1, backoff_seconds=0, transport=always_timeout, sleep=lambda _: None).scrape("https://example.test")
+        self.assertEqual(error.exception.attempts, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ from normalize_product_aliases import alias_record, normalize_records
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "sources" / "strollers.yaml"
+FIXTURE_CATALOG_FIELDS = {"brand", "model", "name", "title", "configuration", "benchmark_group", "benchmark_group_key", "canonical_url", "url", "product_type", "aliases", "source_id"}
 
 
 def load_source_config(path: Path = CONFIG) -> dict[str, Any]:
@@ -88,9 +89,9 @@ def load_fixture_records(root: Path) -> list[dict[str, Any]]:
         except (OSError, json.JSONDecodeError):
             continue
         if isinstance(value, list):
-            records.extend(item for item in value if isinstance(item, dict))
+            records.extend({key: item[key] for key in item.keys() & FIXTURE_CATALOG_FIELDS} for item in value if isinstance(item, dict))
         elif isinstance(value, dict):
-            records.extend(records_from_firecrawl_response(value))
+            records.extend({key: item[key] for key in item.keys() & FIXTURE_CATALOG_FIELDS} for item in records_from_firecrawl_response(value))
     return records
 
 
@@ -109,8 +110,10 @@ def discover_catalog(*, brand: str, fixture_root: Path | None = None, client: Fi
     active = normalize_records(item for item in items if item.get("catalog_status") != "excluded")
     excluded = [item for item in items if item.get("catalog_status") == "excluded"]
     report_items = active + excluded
-    counts = {"total": len(report_items), "classified": sum(item.get("catalog_status") == "classified" for item in report_items), "review_required": sum(item.get("catalog_status") == "review_required" for item in report_items), "excluded": len(excluded), "unclassified_real_products": 0}
-    return {"schema_version": "1", "brand": brand, "status": "success", "items": sorted(report_items, key=lambda item: str(item.get("canonical_key") or item.get("model") or "")), "counts": counts, "quality_gate": "pass" if counts["unclassified_real_products"] == 0 else "review"}
+    review_items = [item for item in active if item.get("catalog_status") == "review_required" or (item.get("product_type") == "unknown" and not item.get("benchmark_group"))]
+    counts = {"total": len(report_items), "classified": sum(item.get("catalog_status") == "classified" for item in report_items), "review_required": sum(item.get("catalog_status") == "review_required" for item in report_items), "excluded": len(excluded), "unclassified_real_products": len(review_items)}
+    quality_gate = "pass" if counts["unclassified_real_products"] == 0 else "review"
+    return {"schema_version": "1", "brand": brand, "status": "success" if quality_gate == "pass" else "review", "items": sorted(report_items, key=lambda item: str(item.get("canonical_key") or item.get("model") or "")), "counts": counts, "quality_gate": quality_gate}
 
 
 def main() -> int:

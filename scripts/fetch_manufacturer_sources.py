@@ -182,20 +182,34 @@ def technical_clean(markdown: str) -> str:
     return "\n".join(result).strip() + ("\n" if result else "")
 
 
-def fetch_bytes(url: str) -> tuple[bytes, dict[str, str], int]:
+def fetch_bytes(url: str, *, expect_pdf: bool = False) -> tuple[bytes, dict[str, str], int]:
     """Fetch through the shared Firecrawl client; direct HTTP is dev-only."""
     if os.getenv("FIELDNOTE_ALLOW_DIRECT_HTTP") != "1":
         try:
-            response = FirecrawlClient(timeout=60).scrape(url, formats=["markdown", "html", "rawHtml"])
+            formats = ["pdf", "markdown", "html", "rawHtml"] if expect_pdf else ["markdown", "html", "rawHtml"]
+            response = FirecrawlClient(timeout=60).scrape(url, formats=formats)
         except FirecrawlError as exc:
             raise RuntimeError(str(exc)) from exc
         data = response.data
-        body = str(data.get("html") or data.get("rawHtml") or data.get("markdown") or "").encode("utf-8")
-        return body, {"Content-Type": "text/html; charset=utf-8", "X-Firecrawl-Request-Id": response.request_id}, response.status_code
+        candidate = data.get("pdf") or data.get("rawBinary") or data.get("binary")
+        if isinstance(candidate, str):
+            if candidate.startswith("data:") and "," in candidate:
+                candidate = candidate.split(",", 1)[1]
+            try:
+                candidate = base64.b64decode(candidate, validate=True)
+            except (ValueError, TypeError):
+                candidate = candidate.encode("utf-8")
+        body = candidate if isinstance(candidate, bytes) else str(data.get("html") or data.get("rawHtml") or data.get("markdown") or "").encode("utf-8")
+        if expect_pdf and not body.startswith(b"%PDF"):
+            raise RuntimeError("Firecrawl nie zwrócił artefaktu PDF dla pdf-url.")
+        content_type = "application/pdf" if expect_pdf else "text/html; charset=utf-8"
+        return body, {"Content-Type": content_type, "X-Firecrawl-Request-Id": response.request_id}, response.status_code
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/pdf;q=0.9,*/*;q=0.5"})
     with urlopen(request, timeout=30) as response:  # nosec B310 - explicit user supplied official URL
         body = response.read()
         headers = {key: value for key, value in response.headers.items()}
+        if expect_pdf and not body.startswith(b"%PDF"):
+            raise RuntimeError("Odpowiedź pdf-url nie jest prawidłowym PDF-em.")
         return body, headers, int(getattr(response, "status", 200))
 
 
@@ -233,7 +247,7 @@ def write_source(
         if existing.get("canonical_url") == canonical_url and expected.exists():
             return source_id, True, ["resume_skipped_existing_source"]
 
-    body, headers, status = fetch_bytes(url)
+    body, headers, status = fetch_bytes(url, expect_pdf=is_pdf)
     warnings: list[str] = []
     raw_response: dict[str, Any] = {
         "url": url,
@@ -248,6 +262,8 @@ def write_source(
     document_pages: list[dict[str, Any]] = []
 
     if is_pdf:
+        if not body.startswith(b"%PDF"):
+            raise ValueError("Odmowa zapisania document.pdf: brak sygnatury %PDF.")
         atomic_write(target / "document.pdf", body)
         raw_response["body_encoding"] = "base64"
         raw_response["body_base64"] = base64.b64encode(body).decode("ascii")

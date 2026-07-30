@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 CONFIGURATIONS = {"2w1", "3w1", "4w1", "2in1", "3in1", "4in1"}
 COLOUR_WORDS = {"black", "white", "grey", "gray", "red", "blue", "green", "beige", "czarny", "czarna", "bialy", "biały", "szary", "czerwony", "niebieski", "zielony", "beżowy"}
+NORMALIZED_COLOUR_WORDS = {"black", "white", "grey", "gray", "red", "blue", "green", "beige", "czarny", "czarna", "bialy", "szary", "czerwony", "niebieski", "zielony", "bezowy"}
 
 
 def fold(value: Any) -> str:
@@ -35,22 +36,43 @@ def canonical_product_key(brand: str, model: str, configuration: str | None = No
 def normalize_alias(value: str, *, brand: str = "", model: str = "", configuration: str | None = None) -> str:
     """Return an alias key while ignoring colour and preserving configuration."""
     text = fold(value)
-    for colour in COLOUR_WORDS:
+    for colour in NORMALIZED_COLOUR_WORDS:
         text = re.sub(rf"\b{re.escape(colour)}\b", " ", text)
     text = re.sub(r"\b(?:kolor|colour)\s*[:\-]?\s*[a-z]+\b", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return canonical_product_key(brand, model, configuration) if brand and model else slug(text)
 
 
+def _configuration_from_text(value: str) -> str | None:
+    match = re.search(r"\b([234])\s*(?:w1|in1)\b", fold(value))
+    return f"{match.group(1)}w1" if match else None
+
+
+def _model_without_variants(value: str) -> str:
+    text = fold(value)
+    text = re.sub(r"\b[234]\s*(?:w1|in1)\b", " ", text)
+    text = re.sub(r"\b(?:kolor|colour)\s*[:\-]?\s*[a-z]+\b", " ", text)
+    for colour in NORMALIZED_COLOUR_WORDS:
+        text = re.sub(rf"\b{re.escape(colour)}\b", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def alias_record(record: dict[str, Any]) -> dict[str, Any]:
     brand = str(record.get("brand") or "").strip()
-    model = str(record.get("model") or record.get("title") or "").strip()
-    configuration = str(record.get("configuration") or "").strip() or None
+    title = str(record.get("title") or "").strip()
+    raw_model = str(record.get("model") or title or "").strip()
+    if not record.get("model") and brand:
+        raw_model = re.sub(rf"^{re.escape(brand)}\b[\s:,-]*", "", raw_model, flags=re.IGNORECASE)
+    configuration = str(record.get("configuration") or "").strip() or _configuration_from_text(" ".join((raw_model, title)))
+    model = _model_without_variants(raw_model)
+    if not model and title:
+        model = _model_without_variants(title)
+    display_model = str(record.get("model") or model).strip()
     key = canonical_product_key(brand, model, configuration)
     aliases = {str(item).strip() for item in (record.get("aliases") or []) if str(item).strip()}
     if record.get("title"):
         aliases.add(str(record["title"]).strip())
-    return {**record, "canonical_key": key, "brand": brand, "model": model, "configuration": configuration or "", "aliases": sorted(aliases), "identity_status": "classified" if brand and model and not _placeholder(model) else "excluded"}
+    return {**record, "canonical_key": key, "brand": brand, "model": display_model, "configuration": configuration or "", "aliases": sorted(aliases), "identity_status": "classified" if brand and model and not _placeholder(model) else "excluded"}
 
 
 def normalize_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

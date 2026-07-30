@@ -63,7 +63,7 @@
 - [x] Implementacja: wspólny klient v2, adaptery, discovery katalogu producenta, aliasy, konfiguracja źródeł oraz fixtures dla manufacturer/Allegro/Amazon/retailers.
 - [x] Test: `tests/test_firecrawl_client.py`, `tests/test_firecrawl_source_adapters.py`, `tests/test_manufacturer_catalog_discovery.py`, `tests/test_product_aliases.py` — 11 PASS.
 - [x] Weryfikacja: adapter tests przechodzą offline; raport katalogu nie zawiera aktywnego `Accessory / part` ani niejawnie niesklasyfikowanego realnego produktu; pełny `bash scripts/check_fieldnote.sh` PASS.
-- [ ] Review: brak otwartych P1/P2.
+- [ ] Review: BLOKUJE — 5 P1, 2 P2. Szczegóły w `review-unit-7.md`.
 
 ## Unit 8 — Audyt atrybutów i względny scoring
 
@@ -164,3 +164,14 @@
 - [x] P1: historyczna migracja `202607290001` została przywrócona bez zmian; poprawiony RPC jest w sekwencyjnej migracji `202607300001_incremental_commit_partial_fixes.sql`, z kontraktem monotonicznego upgrade'u.
 - [x] P2: test serializacji fixture używa hooków sekcji krytycznej i zdarzeń, wymuszając adminową próbę podczas zablokowanego scoped read–merge–write.
 - [x] P2: wykonawczy lokalny test odtwarza bazę z już zastosowaną migracją `202607290001`, stosuje wyłącznie `202607300001` bez resetu i potwierdza poprawione RPC dla JSON snapshotu oraz no-mutation `partial`.
+
+### Unit 7
+
+- [x] P1: timeout/429 providerów kończą się retry i trwałym `error`/`partial`, bez `NameError` ani tracebacku fetchera.
+- [x] P1: quality gate blokuje realne rekordy `review_required`, a raport bieżącego katalogu wylicza niesklasyfikowane modele.
+- [x] P1: adminowy refresh używa skonfigurowanego oficjalnego URL producenta i wspólnego klienta albo zwraca kontrolowany błąd/partial.
+- [x] P1: normalizacja aliasów ignoruje kolor i zachowuje 2w1/3w1 także dla title-only recordów.
+- [x] P1: ścieżka manuala PDF nie zapisuje HTML/markdown jako `document.pdf` ani nie raportuje fałszywego sukcesu.
+- [x] P2: adaptery odrzucają kartę innego modelu, która tylko wspomina target jako kompatybilny.
+- [x] P2: API ogranicza `fixture_root` do repozytoryjnego katalogu fixtures po rozwiązaniu ścieżki.
+- [ ] Review: ograniczony re-review wszystkich siedmiu poprawek Unit 7 — PASS i 0 P1/P2.

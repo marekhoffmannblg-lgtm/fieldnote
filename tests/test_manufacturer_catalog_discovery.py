@@ -32,6 +32,14 @@ class ManufacturerCatalogTests(unittest.TestCase):
         report = discover_catalog(brand="Kinderkraft", fixture_root=ROOT / "fixtures" / "firecrawl" / "manufacturer")
         json.dumps(report, ensure_ascii=False)
 
+    def test_unclassified_real_product_blocks_quality_gate(self):
+        root = Path(tempfile.mkdtemp())
+        (root / "catalog.json").write_text(json.dumps({"products": [{"brand": "Brand", "model": "Future", "title": "Brand Future stroller"}]}), encoding="utf-8")
+        report = discover_catalog(brand="Brand", fixture_root=root)
+        self.assertEqual(report["counts"]["review_required"], 1)
+        self.assertEqual(report["counts"]["unclassified_real_products"], 1)
+        self.assertEqual(report["quality_gate"], "review")
+
 
 if __name__ == "__main__":
     unittest.main()

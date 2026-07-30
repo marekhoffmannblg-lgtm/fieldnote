@@ -443,3 +443,42 @@
   pełna `bash scripts/check_fieldnote.sh` — PASS; `git diff --check` — PASS.
 - Status: implementacja i dokumentacja Unit 7 zakończone; niezależny review
   Unit 7 pozostaje wymagany. Unit 8 nie rozpoczęto.
+
+### Unit 7 — pełny review
+
+- Zakres review: `696c19e..192a8a5`; użyto niezależnie
+  correctness_reviewer, security_reviewer, test_reviewer i data_reviewer. Nie
+  zmieniano kodu ani nie rozpoczęto Unit 8.
+- Weryfikacja: focused Unit 7 — 11 PASS; API/auth regression — 27 PASS;
+  `git diff --check 696c19e..192a8a5` — PASS; pełna
+  `bash scripts/check_fieldnote.sh` — PASS. Testy nie wywoływały Firecrawl ani
+  OpenAI.
+- Gate: **BLOKUJE** — 5 P1, 2 P2, 0 P3. Zaakceptowano: obsługę timeout/429 i
+  stale queue errors, fałszywy PASS dla niezaklasyfikowanego katalogu,
+  nieczynny refresh producenta, błędną tożsamość aliasów, uszkodzony PDF
+  manuala, akceptację innego modelu oraz nieograniczony `fixture_root` API.
+- Następny krok: naprawić wyłącznie zaakceptowane P1/P2 Unit 7 zgodnie z
+  `review-unit-7.md`, a potem wykonać ograniczony re-review. Unit 8 pozostaje
+  poza zakresem.
+
+### Unit 7 — remediation zaakceptowanych 5 P1 i 2 P2
+
+- Naprawiono retry/normalizację timeoutów transportu Firecrawl oraz obsługę
+  `FirecrawlError` w kolejce ofert, aby błędy providerów były zapisywane jako
+  `error` zamiast kończyć się tracebackiem. Quality gate discovery i bieżący
+  katalog wyliczają niesklasyfikowane realne rekordy; adminowy preview waliduje
+  markę, korzysta z `catalog_urls` i wspólnego klienta oraz ogranicza
+  `fixture_root` do `fixtures/firecrawl/manufacturer` po `resolve()`.
+- Fixture discovery dodatkowo przepuszcza wyłącznie allowlistę pól katalogu,
+  więc nawet poprawnie położony JSON nie może wyprowadzić sekretów lub pól
+  diagnostycznych przez preview API.
+- Alias identity stripuje kolory i wyprowadza konfigurację z title-only recordów,
+  dzięki czemu 2w1/3w1 nie są scalane. Adapter wymaga modelu w tytule i odrzuca
+  wzmiankę kompatybilności. Fetcher producenta żąda artefaktu PDF i sprawdza
+  magic bytes `%PDF` przed zapisem `document.pdf`.
+- Dodano regresje timeout/retry, błędu kolejki 429, jakości katalogu, discovery
+  z oficjalnego URL, bezpiecznego fixture root, aliasów, kompatybilności modelu
+  oraz PDF. Focused remediation suite: 21 PASS; `py_compile`, `git diff --check`
+  i pełna `bash scripts/check_fieldnote.sh` — PASS.
+- Status: implementacja remediation zakończona; review-unit-7 pozostaje
+  niezamknięty do ograniczonego re-review. Unit 8 nie rozpoczęto.

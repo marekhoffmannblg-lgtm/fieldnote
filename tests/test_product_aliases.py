@@ -28,6 +28,20 @@ class ProductAliasTests(unittest.TestCase):
         two = next(item for item in records if item["configuration"] == "2w1")
         self.assertEqual(len(two["aliases"]), 2)
 
+    def test_title_only_colour_variants_merge(self):
+        records = normalize_records([
+            {"brand": "Brand", "title": "Brand Combi Black"},
+            {"brand": "Brand", "title": "Brand Combi White"},
+        ])
+        self.assertEqual(len(records), 1)
+
+    def test_title_only_configurations_stay_separate(self):
+        records = normalize_records([
+            {"brand": "Brand", "title": "Brand Combi 2w1"},
+            {"brand": "Brand", "title": "Brand Combi 3w1"},
+        ])
+        self.assertEqual({item["configuration"] for item in records}, {"2w1", "3w1"})
+
 
 if __name__ == "__main__":
     unittest.main()

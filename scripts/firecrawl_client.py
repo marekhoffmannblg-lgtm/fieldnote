@@ -92,6 +92,18 @@ class FirecrawlClient:
         for attempt in range(1, self.max_retries + 2):
             try:
                 status, data = self.transport(f"{self.base_url}/{operation}", "POST", request_payload, self.timeout, headers)
+            except (TimeoutError, OSError, URLError) as exc:
+                # Injectable transports and urllib can expose transport
+                # failures using different exception classes.  Normalize them
+                # into the provider error contract so callers can persist a
+                # partial/error result instead of crashing the pipeline.
+                if attempt > self.max_retries:
+                    raise FirecrawlError(
+                        f"Firecrawl transport failed after {attempt} attempts: {type(exc).__name__}",
+                        attempts=attempt,
+                    ) from exc
+                self.sleep(self.backoff_seconds * (2 ** (attempt - 1)))
+                continue
             except FirecrawlError:
                 if attempt > self.max_retries:
                     raise
