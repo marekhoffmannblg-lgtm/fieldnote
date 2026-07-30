@@ -517,3 +517,36 @@
   `bash scripts/check_fieldnote.sh` — PASS. Nie wywołano płatnych API.
 - Status: implementacja remediation zakończona; dokumentacja oczekuje
   ograniczonego re-review Unit 7. Unit 8 nie rozpoczęto.
+
+### Unit 7 — finalny ograniczony re-review commitu `3e45506`
+
+- Zakres: wyłącznie `f7ed8e3..3e45506` i pięć ostatnich poprawek. Użyto
+  correctness_reviewer, security_reviewer, test_reviewer oraz data_reviewer;
+  UI review nie był wymagany. Nie zmieniano kodu ani nie rozpoczęto Unit 8.
+- Security i tests: PASS. Correctness potwierdził P1: pairwise merge trzech
+  kart może utracić wcześniejszy konflikt grup i zwrócić `pass`, zależnie od
+  kolejności. Data review potwierdził P2: merge zachowuje tylko jeden singular
+  `source_id` i nie buduje pełnego `source_ids` provenance.
+- Weryfikacja: focused Unit 7 — 26 PASS; API venv — 10 PASS;
+  `git diff --check f7ed8e3..3e45506` — PASS; pełna
+  `bash scripts/check_fieldnote.sh` — PASS. Odtworzono wszystkie permutacje
+  trzech kart A/B/A oraz utratę drugiego source ID.
+- Gate: **BLOKUJE** — 1 P1, 1 P2, 0 P3. Unit 7 nie jest ukończony; naprawić
+  wyłącznie te dwa findings i ponowić ograniczony re-review. Unit 8 pozostaje
+  poza zakresem.
+
+### Unit 7 — wykonanie remediation P1/P2 po re-review `3e45506`
+
+- Naprawiono wyłącznie oba zaakceptowane findings w `scripts/normalize_product_aliases.py`:
+  wszystkie rekordy tej samej tożsamości są agregowane jednocześnie, więc
+  konflikt `benchmark_group` pozostaje nieodwracalny i daje `review_required`;
+  `source_ids` jest deterministyczną unią singularnych `source_id` oraz
+  istniejących list provenance, z pierwszym ID jako stabilnym primary.
+- Dodano regresje wszystkich permutacji kart A/B/A oraz pełnej unii source IDs
+  w `tests/test_product_aliases.py`. Nie zmieniono adapterów, API ani danych
+  produkcyjnych i nie rozpoczęto Unit 8.
+- Weryfikacja: focused Unit 7 — 28 PASS; `fieldnote-api/.venv/bin/python -m
+  unittest tests/test_unit7_review_remediation.py` — 10 PASS; `py_compile`,
+  `git diff --check` oraz pełna `bash scripts/check_fieldnote.sh` — PASS.
+- Status: implementacja remediation zakończona i zacommitowana; Unit 7 nadal
+  oczekuje ograniczonego `$dev-docs-review` wyłącznie dla tego P1/P2.

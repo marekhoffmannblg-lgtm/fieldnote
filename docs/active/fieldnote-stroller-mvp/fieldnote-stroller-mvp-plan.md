@@ -58,7 +58,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 3 — Unit 7: Wspólny Firecrawl i aktualny katalog konkurencji
 
-- Status: `implemented; limited re-review pending` (2 P1, 3 P2 remediated in execute)
+- Status: `review requires fixes` (final limited re-review: 1 P1, 1 P2)
 - Zależności: Unit 5, Unit 6
 - Kryterium ukończenia: wszystkie adaptery używają wspólnego klienta i kontraktu provenance; aktualny katalog nie ma niejawnych placeholderów ani niesklasyfikowanych realnych rekordów.
 

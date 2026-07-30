@@ -76,32 +76,66 @@ def alias_record(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, dict[str, Any]] = {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for raw in records:
         item = alias_record(raw)
         key = item["canonical_key"]
         if item["identity_status"] == "excluded":
             continue
-        current = grouped.get(key)
-        if current is None:
-            grouped[key] = item
-        else:
-            grouped[key] = _merge_alias_records(current, item)
-    return sorted(grouped.values(), key=lambda item: item["canonical_key"])
+        grouped.setdefault(key, []).append(item)
+    return sorted(
+        (_merge_alias_records(items) for items in grouped.values()),
+        key=lambda item: item["canonical_key"],
+    )
 
 
-def _merge_alias_records(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    """Merge duplicate identities without making classification order-dependent."""
-    candidates = (left, right)
-    stable_fields = {key: value for key, value in left.items() if key not in {"aliases", "source_ids", "canonical_key"}}
-    base = min(candidates, key=lambda item: json.dumps({key: item.get(key) for key in stable_fields}, ensure_ascii=False, sort_keys=True, default=str))
+def _merge_alias_records(candidates: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Merge every duplicate identity at once, preserving conflicts and provenance."""
+    candidates = tuple(candidates)
+    if not candidates:
+        raise ValueError("at least one alias record is required")
+    base = min(
+        candidates,
+        key=lambda item: json.dumps(
+            {key: value for key, value in item.items() if key not in {"aliases", "source_ids"}},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ),
+    )
     merged = dict(base)
-    merged["aliases"] = sorted(set(left.get("aliases", [])) | set(right.get("aliases", [])))
-    merged["source_ids"] = sorted(set(left.get("source_ids", [])) | set(right.get("source_ids", [])))
+    merged["aliases"] = sorted(
+        {
+            str(alias).strip()
+            for item in candidates
+            for alias in (item.get("aliases") or [])
+            if str(alias).strip()
+        }
+    )
 
-    groups = {str(item.get("benchmark_group") or item.get("benchmark_group_key") or "").strip() for item in candidates}
+    source_ids = {
+        str(source_id).strip()
+        for item in candidates
+        for source_id in (
+            ([item.get("source_id")] if item.get("source_id") else [])
+            + (item.get("source_ids") if isinstance(item.get("source_ids"), list) else [])
+        )
+        if str(source_id).strip()
+    }
+    merged["source_ids"] = sorted(source_ids)
+    if merged["source_ids"]:
+        merged["source_id"] = merged["source_ids"][0]
+
+    groups = {
+        str(item.get("benchmark_group") or item.get("benchmark_group_key") or "").strip()
+        for item in candidates
+    }
     groups.discard("")
-    if len(groups) > 1:
+    has_conflict = len(groups) > 1 or any(
+        item.get("classification_reason") == "conflicting_benchmark_groups"
+        for item in candidates
+    )
+    if has_conflict:
         merged["catalog_status"] = "review_required"
         merged["classification_reason"] = "conflicting_benchmark_groups"
     elif groups and any("catalog_status" in item for item in candidates):

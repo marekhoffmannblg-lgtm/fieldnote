@@ -354,3 +354,82 @@ Weryfikacja: focused Unit 7 — 26 PASS; API venv — 10 PASS; `py_compile` i
 `git diff --check` — PASS; `bash scripts/check_fieldnote.sh` — PASS. Unit 8
 pozostaje poza zakresem. Następny krok to ograniczony re-review tych pięciu
 poprawek; Unit 7 nie jest jeszcze oznaczony jako ukończony.
+
+## Finalny ograniczony re-review `f7ed8e3..3e45506`
+
+- **Data:** 2026-07-30
+- **Tryb:** `re-review`
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`, `test_reviewer`,
+  `data_reviewer`
+- **Gate:** `BLOKUJE`
+
+### Zakres
+
+Sprawdzono wyłącznie naprawy pustego discovery, legacy PDF resume, provider
+partial, fixture-root symlink/API oraz deterministycznej deduplikacji katalogu.
+Nie sprawdzano Unit 8 ani nie zmieniano kodu.
+
+### Skonsolidowane findings
+
+#### P1 — Trzy duplikaty mogą skasować konflikt klasyfikacji i przejść gate
+
+- **File:** `scripts/normalize_product_aliases.py:_merge_alias_records`
+- **Evidence:** merge jest pairwise i zachowuje tylko jeden `benchmark_group`.
+  Dla kart `light_stroller`, `standard_stroller`, `light_stroller` kolejność
+  Black→White→Red zwraca `classified/official_catalog` oraz `pass`, a
+  Black→Red→White zwraca `review_required/conflicting_benchmark_groups`.
+- **Impact:** sprzeczny katalog producenta może fałszywie uzyskać sukces tylko
+  z powodu kolejności odpowiedzi providera.
+- **Scenario:** trzy kolorystyczne karty tego samego modelu zawierają dwie
+  różne grupy benchmarkowe, przy czym jedna grupa występuje dwukrotnie.
+- **Recommendation:** agreguj wszystkie rekordy canonical key jednocześnie,
+  zachowuj nieodwracalny marker konfliktu i wybieraj reprezentanta dopiero po
+  obliczeniu pełnej unii grup.
+- **Missing test:** wszystkie permutacje A/B/A muszą dawać identyczny
+  `review_required` i `conflicting_benchmark_groups`.
+
+#### P2 — Deduplikacja gubi provenance `source_id` duplikatów
+
+- **File:** `scripts/normalize_product_aliases.py:_merge_alias_records`
+- **Evidence:** `load_fixture_records()` dopuszcza singular `source_id`, ale
+  alias record nie przekształca go do `source_ids`; merge scala wyłącznie
+  istniejące listy i zostawia jeden arbitralny singular ID. Dwa duplikaty z
+  `official:black` i `official:white` kończą z pustym `source_ids`.
+- **Impact:** preview/import nie może odtworzyć pełnego provenance kart, na
+  których oparto znormalizowany produkt.
+- **Scenario:** kolorystyczne karty producenta tego samego modelu mają różne
+  identyfikatory źródłowe.
+- **Recommendation:** inicjalizuj `source_ids` z każdego singular `source_id`
+  i wykonuj pełną deterministyczną unię; ewentualny primary ID wybieraj
+  stabilnie.
+- **Missing test:** dwa duplikaty z różnymi `source_id` zachowują oba wpisy w
+  `source_ids`.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | findings | 1 P1 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | PASS | 0 | 0 |
+| data_reviewer | findings | 1 P2 | 0 |
+
+### Testy i decyzja gate
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused Unit 7 | PASS | 26 testów offline |
+| API venv | PASS | `fieldnote-api/.venv/bin/python -m unittest tests/test_unit7_review_remediation.py` — 10 testów |
+| Spójność diffu | PASS | `git diff --check f7ed8e3..3e45506` |
+| Pełna offline bramka | PASS | `bash scripts/check_fieldnote.sh` |
+| Reprodukcje findings | FAIL | wszystkie permutacje A/B/A oraz utrata `source_id` są odtwarzalne |
+
+Security reviewer nie wykrył regresji granic auth/ścieżek/secrets. Mimo zielonych
+testów **BLOKUJE** — 1 P1, 1 P2, 0 P3. Unit 7 pozostaje nieukończony; Unit 8
+pozostaje poza zakresem.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 7` — napraw wyłącznie
+zaakceptowane 1 P1 i 1 P2 z finalnego ograniczonego re-review; nie rozpoczynaj
+Unit 8.

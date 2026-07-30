@@ -61,9 +61,9 @@
 ## Unit 7 — Wspólny Firecrawl i katalog konkurencji
 
 - [x] Implementacja: wspólny klient v2, adaptery, discovery katalogu producenta, aliasy, konfiguracja źródeł oraz fixtures dla manufacturer/Allegro/Amazon/retailers.
-- [x] Test: `tests/test_firecrawl_client.py`, `tests/test_firecrawl_source_adapters.py`, `tests/test_manufacturer_catalog_discovery.py`, `tests/test_product_aliases.py` — 11 PASS.
+- [x] Test: `tests/test_firecrawl_client.py`, `tests/test_firecrawl_source_adapters.py`, `tests/test_manufacturer_catalog_discovery.py`, `tests/test_product_aliases.py` oraz remediation regressions — 28 PASS.
 - [x] Weryfikacja: adapter tests przechodzą offline; raport katalogu nie zawiera aktywnego `Accessory / part` ani niejawnie niesklasyfikowanego realnego produktu; pełny `bash scripts/check_fieldnote.sh` PASS.
-- [ ] Review: BLOKUJE — 5 P1, 2 P2. Szczegóły w `review-unit-7.md`.
+- [ ] Review: BLOKUJE — 1 P1, 1 P2 po ograniczonym re-review commitu `3e45506`. Szczegóły w `review-unit-7.md`.
 
 ## Unit 8 — Audyt atrybutów i względny scoring
 
@@ -179,4 +179,6 @@
 - [x] P2: test discovery obejmuje wyczerpany `FirecrawlError` dla skonfigurowanego URL i asercję kontrolowanego `partial`.
 - [x] P2: testy obejmują symlink escape `fixture_root` oraz kontrakt routera 422 bez wycieku JSON.
 - [x] P2: deduplikacja rekordów katalogu jest niezależna od kolejności wejścia; sprzeczne klasyfikacje wymagają `review`.
+- [x] P1: trzy lub więcej duplikatów nie może skasować uprzednio wykrytego konfliktu `benchmark_group`; wszystkie permutacje wymuszają `review_required`.
+- [x] P2: deduplikacja zachowuje pełny, deterministyczny `source_ids` z każdego singular `source_id` duplikatów.
 - [ ] Review: ograniczony re-review Unit 7 — PASS i 0 P1/P2.

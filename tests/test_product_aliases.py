@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from itertools import permutations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,29 @@ class ProductAliasTests(unittest.TestCase):
             {"brand": "Brand", "title": "Brand Combi 3w1"},
         ])
         self.assertEqual({item["configuration"] for item in records}, {"2w1", "3w1"})
+
+    def test_three_duplicate_conflicting_groups_are_order_independent(self):
+        cards = [
+            {"brand": "Brand", "model": "Combi", "title": "Brand Combi Black", "benchmark_group": "light_stroller"},
+            {"brand": "Brand", "model": "Combi", "title": "Brand Combi White", "benchmark_group": "standard_stroller"},
+            {"brand": "Brand", "model": "Combi", "title": "Brand Combi Red", "benchmark_group": "light_stroller"},
+        ]
+        results = {
+            (
+                normalize_records(list(order))[0]["catalog_status"],
+                normalize_records(list(order))[0]["classification_reason"],
+            )
+            for order in permutations(cards)
+        }
+        self.assertEqual(results, {("review_required", "conflicting_benchmark_groups")})
+
+    def test_duplicate_source_ids_include_singular_and_existing_values(self):
+        records = normalize_records([
+            {"brand": "Brand", "model": "Combi", "source_id": "official:white"},
+            {"brand": "Brand", "model": "Combi", "source_id": "official:black", "source_ids": ["retailer:one"]},
+        ])
+        self.assertEqual(records[0]["source_ids"], ["official:black", "official:white", "retailer:one"])
+        self.assertEqual(records[0]["source_id"], "official:black")
 
 
 if __name__ == "__main__":
