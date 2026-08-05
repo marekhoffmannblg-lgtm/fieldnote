@@ -191,6 +191,28 @@ class Unit7RemediationTests(unittest.TestCase):
         self.assertEqual(report["quality_gate"], "review")
         self.assertEqual(report["counts"]["review_required"], 1)
 
+    def test_catalog_conflicting_group_fields_requires_review(self):
+        records = [
+            {
+                "brand": "Brand",
+                "model": "Combi",
+                "title": "Brand Combi Black",
+                "benchmark_group": "light_stroller",
+                "benchmark_group_key": "standard_stroller",
+            },
+            {
+                "brand": "Brand",
+                "model": "Combi",
+                "title": "Brand Combi White",
+                "benchmark_group": "light_stroller",
+            },
+        ]
+        for order in (records, list(reversed(records))):
+            report = discover_catalog(brand="Brand", fixture_root=self._fixture_for_records(order))
+            self.assertEqual(report["quality_gate"], "review")
+            self.assertEqual(report["counts"]["review_required"], 1)
+            self.assertEqual(report["items"][0]["classification_reason"], "conflicting_benchmark_groups")
+
     @staticmethod
     def _fixture_for_records(records):
         root = Path(tempfile.mkdtemp())

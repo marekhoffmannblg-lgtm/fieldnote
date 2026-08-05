@@ -550,3 +550,43 @@
   `git diff --check` oraz pełna `bash scripts/check_fieldnote.sh` — PASS.
 - Status: implementacja remediation zakończona i zacommitowana; Unit 7 nadal
   oczekuje ograniczonego `$dev-docs-review` wyłącznie dla tego P1/P2.
+
+### Unit 7 — ograniczony re-review commitu `347a9d9`
+
+- Zakres: wyłącznie `3e45506..347a9d9`, czyli agregacja wszystkich duplikatów
+  aliasu oraz deterministyczna unia `source_ids`. Użyto niezależnie
+  `correctness_reviewer`, `security_reviewer`, `test_reviewer` i
+  `data_reviewer`; UI review nie był wymagany. Nie zmieniano kodu ani nie
+  rozpoczęto Unit 8.
+- Security i tests: PASS. Correctness i data niezależnie potwierdziły jeden
+  P1: logika grup używa `benchmark_group or benchmark_group_key`, więc
+  sprzeczne, równocześnie ustawione pola jednej karty mogą zostać zredukowane
+  do pojedynczej wartości i fałszywie zwrócić `classified/pass`.
+- Weryfikacja re-review: focused `tests/test_product_aliases.py` — 7 PASS;
+  `py_compile scripts/normalize_product_aliases.py` — PASS. Bezpośrednia
+  reprodukcja konfliktu pól wykazała fałszywe `classified/light_stroller`.
+  Nie uruchamiano ponownie pełnej offline bramki, ponieważ lokalne,
+  niezwiązane zmiany Auth/Supabase brudzą worktree, a wcześniejsza próba
+  zatrzymała się w teście hygiene. Executor uprzednio raportował focused 28
+  PASS, remediation 10 PASS, `git diff --check` i pełny offline gate PASS.
+- Gate: **BLOKUJE** — 1 P1, 0 P2, 0 P3. Naprawić wyłącznie agregację obu pól
+  grupy oraz dodać regresję permutacji; potem ponowić ograniczony re-review.
+  Unit 8 pozostaje poza zakresem.
+
+### Unit 7 — wykonanie remediation P1 po re-review `347a9d9`
+
+- W `scripts/normalize_product_aliases.py` agregacja grup zbiera teraz każdą
+  niepustą wartość z obu pól `benchmark_group` i `benchmark_group_key` dla
+  wszystkich kandydatów. Dowolna rozbieżność pozostaje nieodwracalnym
+  `review_required/conflicting_benchmark_groups`.
+- Dodano regresję permutacyjną w `tests/test_product_aliases.py` oraz test
+  wykonawczy discovery w `tests/test_unit7_review_remediation.py`; oba warianty
+  kolejności zwracają `quality_gate=review` i dokładnie jeden rekord do review.
+- Weryfikacja: `tests/test_product_aliases.py`,
+  `tests/test_unit7_review_remediation.py` i
+  `tests/test_manufacturer_catalog_discovery.py` — 23 PASS; `py_compile` oraz
+  `git diff --check` — PASS. Pełna `bash scripts/check_fieldnote.sh` ponownie
+  zatrzymała się w istniejącym teście hygiene podczas `git show` na bieżącym
+  brudnym drzewie i została przerwana; nie jest to regresja tej poprawki.
+- Status: poprawka wykonana, dokumentacja zaktualizowana, Unit 7 oczekuje
+  ograniczonego re-review wyłącznie tego P1. Unit 8 nie rozpoczęto.

@@ -433,3 +433,87 @@ pozostaje poza zakresem.
 `$dev-docs-execute docs/active/fieldnote-stroller-mvp 7` — napraw wyłącznie
 zaakceptowane 1 P1 i 1 P2 z finalnego ograniczonego re-review; nie rozpoczynaj
 Unit 8.
+
+## Ograniczony re-review `3e45506..347a9d9`
+
+- **Data:** 2026-08-05
+- **Tryb:** ograniczony re-review
+- **Zakres:** wyłącznie naprawa P1 agregacji wszystkich duplikatów aliasu i
+  P2 pełnego `source_ids` provenance oraz ich regresje w
+  `scripts/normalize_product_aliases.py` i `tests/test_product_aliases.py`.
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`,
+  `test_reviewer`, `data_reviewer`.
+- **Gate:** **BLOKUJE**.
+
+### Skonsolidowane findings
+
+#### P1 — Konflikt dwóch pól grupy może nadal fałszywie przepuścić katalog
+
+- **File:** `scripts/normalize_product_aliases.py:_merge_alias_records`
+- **Evidence:** zbiór grup pobiera dla każdej karty tylko
+  `benchmark_group or benchmark_group_key`. Jeżeli karta ma równocześnie
+  `benchmark_group=light_stroller` i
+  `benchmark_group_key=standard_stroller`, druga wartość jest pomijana.
+  Zduplikowana karta koloru z `light_stroller` daje wynik `classified`, oba
+  pola zostają przepisane na `light_stroller`, a quality gate może zwrócić
+  `pass`.
+- **Impact:** sprzeczna klasyfikacja oficjalnego katalogu zostaje utracona i
+  produkt może trafić do niewłaściwego segmentu benchmarku.
+- **Scenario:** payload producenta zawiera legacy/current pola grupy o różnych
+  wartościach dla jednej karty koloru oraz drugi wariant tego samego modelu.
+- **Recommendation:** zbierz wszystkie niepuste wartości obu pól ze wszystkich
+  kandydatów; więcej niż jedna unikalna wartość musi skutkować
+  `review_required` oraz `conflicting_benchmark_groups`.
+- **Missing test:** fixture discovery z konfliktem obu pól na jednej karcie i
+  duplikatem koloru, sprawdzony dla wszystkich permutacji, musi zwracać
+  `quality_gate=review`.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte |
+|---|---|---:|
+| correctness_reviewer | findings | 1 P1 |
+| security_reviewer | PASS | 0 |
+| test_reviewer | PASS | 0 |
+| data_reviewer | findings | 1 P1 (duplikat) |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Focused alias regressions | PASS | `fieldnote-api/.venv/bin/python -m unittest -v tests/test_product_aliases.py` — 7 PASS |
+| Składnia | PASS | `fieldnote-api/.venv/bin/python -m py_compile scripts/normalize_product_aliases.py` |
+| Reprodukcja findingu | FAIL | karta z równoczesnym `benchmark_group=light_stroller` i `benchmark_group_key=standard_stroller` została znormalizowana do `classified/light_stroller` |
+| Weryfikacja executora | PASS | zgłoszone przed review: Unit 7 focused 28 PASS, remediation 10 PASS, `git diff --check` i pełna offline bramka PASS |
+
+Nie uruchamiano ponownie pełnej offline bramki w tym re-review: bieżące,
+niezwiązane z Unit 7 lokalne zmiany Auth/Supabase pozostawiają drzewo robocze
+brudne, a wcześniejsza próba zatrzymała się w istniejącym teście hygiene.
+
+### Decyzja gate
+
+**BLOKUJE** — 1 P1, 0 P2, 0 P3. Unit 7 nie jest ukończony i Unit 8 pozostaje
+poza zakresem.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 7` — napraw wyłącznie
+zaakceptowany P1: konflikt `benchmark_group` i `benchmark_group_key` musi
+blokować quality gate; dodaj regresję. Nie rozpoczynaj Unit 8.
+
+## Remediation execute — P1 konfliktu pól grupy
+
+- Zmieniono wyłącznie agregację w `scripts/normalize_product_aliases.py` oraz
+  regresje w `tests/test_product_aliases.py` i
+  `tests/test_unit7_review_remediation.py`.
+- `_merge_alias_records` zbiera wszystkie niepuste wartości obu pól grupy ze
+  wszystkich kart. Sprzeczne wartości nie mogą zostać ukryte przez `or` i
+  zawsze dają `review_required/conflicting_benchmark_groups`.
+- Testy obejmują obie permutacje duplikatów oraz wykonawczy discovery z
+  `quality_gate=review` i `review_required=1`.
+- Wynik: Unit 7 remediation wykonana; 23 testy zakresowe PASS, `py_compile` i
+  `git diff --check` PASS. Pełna offline bramka zatrzymała się w istniejącym
+  teście hygiene na `git show` przy niezwiązanych lokalnych zmianach; nie
+  zmieniano Auth/Supabase i nie rozpoczęto Unit 8.
+- Następny krok: ograniczony `$dev-docs-review` wyłącznie tej poprawki; do
+  czasu PASS Unit 7 pozostaje nieukończony.

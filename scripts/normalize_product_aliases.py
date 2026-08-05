@@ -127,10 +127,11 @@ def _merge_alias_records(candidates: Iterable[dict[str, Any]]) -> dict[str, Any]
         merged["source_id"] = merged["source_ids"][0]
 
     groups = {
-        str(item.get("benchmark_group") or item.get("benchmark_group_key") or "").strip()
+        str(item.get(field) or "").strip()
         for item in candidates
+        for field in ("benchmark_group", "benchmark_group_key")
+        if str(item.get(field) or "").strip()
     }
-    groups.discard("")
     has_conflict = len(groups) > 1 or any(
         item.get("classification_reason") == "conflicting_benchmark_groups"
         for item in candidates

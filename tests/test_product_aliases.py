@@ -66,6 +66,34 @@ class ProductAliasTests(unittest.TestCase):
         self.assertEqual(records[0]["source_ids"], ["official:black", "official:white", "retailer:one"])
         self.assertEqual(records[0]["source_id"], "official:black")
 
+    def test_conflicting_group_fields_are_order_independent(self):
+        cards = [
+            {
+                "brand": "Brand",
+                "model": "Combi",
+                "title": "Brand Combi Black",
+                "benchmark_group": "light_stroller",
+                "benchmark_group_key": "standard_stroller",
+                "catalog_status": "classified",
+            },
+            {
+                "brand": "Brand",
+                "model": "Combi",
+                "title": "Brand Combi White",
+                "benchmark_group": "light_stroller",
+                "catalog_status": "classified",
+            },
+        ]
+        outcomes = set()
+        for order in permutations(cards):
+            merged = normalize_records(list(order))[0]
+            outcomes.add((merged["catalog_status"], merged["classification_reason"]))
+
+        self.assertEqual(
+            outcomes,
+            {("review_required", "conflicting_benchmark_groups")},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
