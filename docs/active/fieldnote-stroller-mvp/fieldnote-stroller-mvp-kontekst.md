@@ -590,3 +590,21 @@
   brudnym drzewie i została przerwana; nie jest to regresja tej poprawki.
 - Status: poprawka wykonana, dokumentacja zaktualizowana, Unit 7 oczekuje
   ograniczonego re-review wyłącznie tego P1. Unit 8 nie rozpoczęto.
+
+### Unit 7 — końcowy ograniczony re-review `360972e^..360972e`
+
+- Zakres obejmował wyłącznie naprawę konfliktu `benchmark_group` /
+  `benchmark_group_key` i jej testy regresyjne. Użyto
+  correctness_reviewer, security_reviewer, test_reviewer oraz data_reviewer;
+  UI review nie był wymagany. Nie zmieniano kodu podczas review i nie
+  rozpoczęto Unit 8.
+- Wszyscy reviewerzy: PASS. Agregacja zbiera obie wartości z każdej karty,
+  konflikt wewnątrz rekordu lub między aliasami daje `review_required`, a
+  discovery zwraca `quality_gate=review`; aliasy, konfiguracja i `source_ids`
+  pozostają zachowane.
+- Weryfikacja: `git diff --check 360972e^..360972e`, `py_compile` i focused
+  Unit 7 — 23 PASS. Pełna offline bramka nie została oznaczona jako powtórzona:
+  zatrzymuje się w istniejącym teście hygiene na `git show` przy niezwiązanych
+  lokalnych zmianach Auth/Supabase.
+- Gate: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 7 ukończony;
+  Unit 8 nie został rozpoczęty.

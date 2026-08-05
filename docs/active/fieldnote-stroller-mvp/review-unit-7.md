@@ -517,3 +517,57 @@ blokować quality gate; dodaj regresję. Nie rozpoczynaj Unit 8.
   zmieniano Auth/Supabase i nie rozpoczęto Unit 8.
 - Następny krok: ograniczony `$dev-docs-review` wyłącznie tej poprawki; do
   czasu PASS Unit 7 pozostaje nieukończony.
+
+## Ograniczony re-review `360972e^..360972e`
+
+- **Data:** 2026-08-05
+- **Zakres diffu:** wyłącznie naprawa P1 konfliktu `benchmark_group` /
+  `benchmark_group_key` oraz regresje w normalizacji i discovery katalogu.
+- **Tryb:** `re-review`
+- **Reviewers:** `correctness_reviewer`, `security_reviewer`,
+  `test_reviewer`, `data_reviewer`
+- **Gate:** `GOTOWE DO KONTYNUACJI`
+
+### Kryteria akceptacji unitu
+
+Sprzeczne niepuste wartości obu pól grupy, również na pojedynczej karcie,
+muszą deterministycznie kierować produkt do `review_required` i wymuszać
+`quality_gate=review`, bez utraty tożsamości aliasu, konfiguracji ani
+provenance źródeł.
+
+### Skonsolidowane findings
+
+Brak zaakceptowanych findings — 0 P1, 0 P2, 0 P3.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | PASS | 0 | 0 |
+| security_reviewer | PASS | 0 | 0 |
+| test_reviewer | PASS | 0 | 0 |
+| data_reviewer | PASS | 0 | 0 |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| Spójność diffu | PASS | `git diff --check 360972e^..360972e` |
+| Składnia | PASS | `py_compile` zmienionego skryptu i testów |
+| Focused Unit 7 | PASS | 23/23: aliasy, remediation i manufacturer discovery |
+| Pełna offline bramka | niepowtórzona | istniejący hygiene test zatrzymuje się na `git show` przy niezwiązanych lokalnych zmianach Auth/Supabase |
+
+### Bezpieczeństwo
+
+Brak nowych wejść sieciowych, sekretów, ścieżek auth/RLS lub regresji
+provenance. Sprzeczne dane producenta są bezpiecznie kierowane do review.
+
+### Decyzja gate
+
+**GOTOWE DO KONTYNUACJI** — Unit 7 ma końcowy PASS i 0 P1/P2. Unit 8 nie był
+częścią review.
+
+### Rekomendowany następny krok
+
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 8` — wyłącznie po
+wyraźnej dyspozycji użytkownika.

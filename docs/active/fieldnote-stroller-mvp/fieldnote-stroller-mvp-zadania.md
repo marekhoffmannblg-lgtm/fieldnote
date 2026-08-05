@@ -63,7 +63,7 @@
 - [x] Implementacja: wspólny klient v2, adaptery, discovery katalogu producenta, aliasy, konfiguracja źródeł oraz fixtures dla manufacturer/Allegro/Amazon/retailers.
 - [x] Test: `tests/test_firecrawl_client.py`, `tests/test_firecrawl_source_adapters.py`, `tests/test_manufacturer_catalog_discovery.py`, `tests/test_product_aliases.py` oraz remediation regressions — 28 PASS.
 - [x] Weryfikacja: adapter tests przechodzą offline; raport katalogu nie zawiera aktywnego `Accessory / part` ani niejawnie niesklasyfikowanego realnego produktu; pełny `bash scripts/check_fieldnote.sh` PASS.
-- [ ] Review: BLOKUJE — 1 P1, 0 P2 po ograniczonym re-review `3e45506..347a9d9`. Szczegóły w `review-unit-7.md`.
+- [x] Review: PASS po ograniczonym re-review `360972e^..360972e`; brak otwartych P1/P2. Szczegóły w `review-unit-7.md`.
 
 ## Unit 8 — Audyt atrybutów i względny scoring
 
@@ -182,4 +182,4 @@
 - [x] P1: trzy lub więcej duplikatów nie może skasować uprzednio wykrytego konfliktu `benchmark_group`; wszystkie permutacje wymuszają `review_required`.
 - [x] P2: deduplikacja zachowuje pełny, deterministyczny `source_ids` z każdego singular `source_id` duplikatów.
 - [x] P1: konflikt między równocześnie ustawionymi `benchmark_group` i `benchmark_group_key` na dowolnej karcie daje `review_required`, a nie zostaje ukryty przez wybór pierwszego pola; dodano testy permutacji i quality gate discovery.
-- [ ] Review: ograniczony re-review Unit 7 — PASS i 0 P1/P2.
+- [x] Review: ograniczony re-review Unit 7 — PASS i 0 P1/P2 (`360972e^..360972e`).
