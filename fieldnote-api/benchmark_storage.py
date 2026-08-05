@@ -26,6 +26,17 @@ class BenchmarkConflictError(FileExistsError):
     """A generated benchmark identifier is already occupied."""
 
 
+def semantic_benchmark_payload(group_key: str, profile: str, participants: list[dict[str, Any]], price_summary: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build a stable snapshot envelope; price is explicitly a separate dimension."""
+    return {
+        "schema_version": "strollers.v1",
+        "benchmark_group_key": str(group_key).strip(),
+        "profile": str(profile).strip(),
+        "participants": participants,
+        "price_summary": dict(price_summary or {}),
+    }
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

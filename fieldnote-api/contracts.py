@@ -193,6 +193,22 @@ class InternalBenchmarkDetail(BaseModel):
     updated_at: str | None = None
 
 
+class BenchmarkScoreV1(V1Model):
+    product_id: str
+    score: float
+    completeness: float
+    position: int | None = None
+    field_contributions: dict[str, float] = Field(default_factory=dict)
+
+
+class PriceSummaryV1(V1Model):
+    status: Literal["ok", "no_data"] = "no_data"
+    median: float | None = None
+    min: float | None = None
+    max: float | None = None
+    seller_count: int = 0
+
+
 # Backward-compatible import name for callers that used the previous detail DTO.
 CompetitiveBenchmarkResponse = CompetitiveBenchmarkDetail
 

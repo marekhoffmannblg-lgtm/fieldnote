@@ -608,3 +608,25 @@
   lokalnych zmianach Auth/Supabase.
 - Gate: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 7 ukończony;
   Unit 8 nie został rozpoczęty.
+
+### Unit 8 — implementacja audytu atrybutów i względnego scoringu
+
+- Dodano wersjonowany schema `config/categories/strollers.v1.yaml` z dokładnie
+  21 polami, typami, jednostkami, rolami i wagami profili `urban`, `terrain`,
+  `travel`. Plik używa składni JSON poprawnej jako YAML, aby testy offline nie
+  wymagały dodatkowego parsera.
+- `scripts/audit_stroller_attributes.py` audytuje 34 pliki
+  `data/internal_specs/lionelo__*.json` i generuje
+  `docs/audit/STROLLER_ATTRIBUTE_AUDIT.md`. Scoring normalizuje g→kg, mm→cm,
+  boolowskie wartości i brak danych; brak pola obniża completeness, ale nie
+  jest sztucznym zerem.
+- Dodano `InternalBenchmarkService` (minimum 3 Lionelo w grupie),
+  `CompetitiveBenchmarkService` (ta sama grupa i konfiguracja, maksymalnie 6)
+  oraz `PricingService` (mediana/min/max i deduplikacja sprzedawcy). Cena jest
+  osobnym agregatem i nie wpływa na utility score. Kontrakty otrzymały DTO
+  score/price, a storage stabilny envelope snapshotu.
+- Weryfikacja: 15 testów Unit 8 PASS, `py_compile` zmienionych modułów oraz
+  `git diff --check` PASS. Nie wywołano AI ani płatnych API; istniejące
+  endpointy legacy pozostały bez zmiany zachowania.
+- Status: implementacja zakończona, Unit 8 oczekuje niezależnego
+  `$dev-docs-review`. Unit 9 nie rozpoczęto.

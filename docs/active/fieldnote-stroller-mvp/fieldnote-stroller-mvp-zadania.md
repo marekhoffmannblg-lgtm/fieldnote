@@ -67,9 +67,9 @@
 
 ## Unit 8 — Audyt atrybutów i względny scoring
 
-- [ ] Implementacja: wersjonowany schema wózków, audyt 21 pól, scoring względny, internal/competitive benchmark i agregacja cen.
-- [ ] Test: atrybuty, normalizacja, scoring, ceny i semantyczne snapshoty bez AI.
-- [ ] Weryfikacja: każdy z 21 atrybutów ma decyzję; cztery grupy dają benchmark albo jawny powód braku uczestników.
+- [x] Implementacja: wersjonowany schema wózków, audyt 21 pól, scoring względny, internal/competitive benchmark i agregacja cen.
+- [x] Test: atrybuty, normalizacja, scoring, ceny i semantyczne snapshoty bez AI — 15 PASS.
+- [x] Weryfikacja: raport obejmuje 21 pól i 34 specyfikacje Lionelo; usługi filtrują segment/konfigurację, wymagają minimum 3 produktów internal, limitują competitive do 6 i oddzielają ceny od score.
 - [ ] Review: brak otwartych P1/P2.
 
 ## Unit 9 — UI produkcyjne i import administratora
