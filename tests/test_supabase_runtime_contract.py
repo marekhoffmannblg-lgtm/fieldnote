@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError
@@ -26,12 +27,19 @@ INTEGRATION_ENABLED = os.environ.get("FIELDNOTE_SUPABASE_INTEGRATION") == "1"
 
 
 def query(sql: str, *, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        ["supabase", "db", "query", "--local", sql],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-    )
+    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False, encoding="utf-8") as handle:
+        handle.write(sql)
+        path = Path(handle.name)
+    try:
+        result = subprocess.run(
+            ["supabase", "db", "query", "--local", "--file", str(path)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            env={**os.environ, "SUPABASE_TELEMETRY_DISABLED": "1"},
+        )
+    finally:
+        path.unlink(missing_ok=True)
     if expect_success and result.returncode:
         raise AssertionError(result.stderr or result.stdout)
     if not expect_success and not result.returncode:
@@ -135,7 +143,7 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             full_id = f"00000000-0000-0000-0000-000000000{user_id}"
             query(
                 "insert into auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at) "
-                f"values ('{full_id}', 'authenticated', 'authenticated', '{role}-runtime@fieldnote.test', '{{}}'::jsonb, '{{}}'::jsonb, now(), now()) "
+                f"values ('{full_id}', 'authenticated', 'authenticated', '{role}-{user_id}-runtime@fieldnote.test', '{{}}'::jsonb, '{{}}'::jsonb, now(), now()) "
                 "on conflict (id) do nothing"
             )
             query(
@@ -365,7 +373,8 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             must_change_read = rest_request("GET", f"{rest_url}/{table}?select=*&limit=1", must_change, api_key)
             viewer_read = rest_request("GET", f"{rest_url}/{table}?select=*&limit=1", viewer, api_key)
             self.assertIn(anon_read[0], {401, 403}, anon_read[1])
-            self.assertIn(must_change_read[0], {401, 403}, must_change_read[1])
+            self.assertEqual(must_change_read[0], 200, must_change_read[1])
+            self.assertEqual(json.loads(must_change_read[1] or "[]"), [])
             self.assertEqual(viewer_read[0], 200, viewer_read[1])
         for bucket in ("source-raw", "source-clean"):
             object_url = environment["API_URL"] + f"/storage/v1/object/{bucket}/runtime-refresh-{suffix}.txt"

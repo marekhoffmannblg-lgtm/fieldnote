@@ -38,6 +38,9 @@ create table public.product_refresh_run_sources (
 alter table public.product_refresh_runs enable row level security;
 alter table public.product_refresh_snapshots enable row level security;
 alter table public.product_refresh_run_sources enable row level security;
+grant select, insert, update, delete on public.product_refresh_runs to authenticated;
+grant select, insert, update, delete on public.product_refresh_snapshots to authenticated;
+grant select, insert, update, delete on public.product_refresh_run_sources to authenticated;
 create policy product_refresh_read on public.product_refresh_runs for select to authenticated using (public.fieldnote_can_read());
 create policy product_refresh_write on public.product_refresh_runs for all to authenticated using (public.fieldnote_can_write_data()) with check (public.fieldnote_can_write_data());
 create policy product_refresh_snapshots_read on public.product_refresh_snapshots for select to authenticated using (public.fieldnote_can_read());

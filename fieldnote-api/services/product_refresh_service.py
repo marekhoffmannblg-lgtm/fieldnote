@@ -51,11 +51,17 @@ class OpenAIRefreshExtractor:
         key = os.getenv("OPENAI_API_KEY", "").strip()
         return cls(key) if key else None
 
-    def __call__(self, *, text: str, fields: list[str], max_tokens: int = 2000) -> dict[str, Any]:
-        prompt = {"schema_version": self.schema_version, "fields": fields, "source_text": text[:16000], "rules": "Return only confirmed numeric kg values; do not infer."}
-        body = {"model": self.model, "temperature": 0, "max_tokens": max(1, min(int(max_tokens), 8000)), "response_format": {"type": "json_object"}, "messages": [{"role": "system", "content": "Extract only source-backed facts as JSON object {facts:{field:number}}."}, {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}]}
+    def __call__(self, *, text: str, fields: list[str], max_tokens: int = 2000, timeout: float | None = None) -> dict[str, Any]:
+        source_text = text[:16000]
+        prompt = {"schema_version": self.schema_version, "fields": fields, "source_text": source_text, "rules": "Return only confirmed numeric kg values; do not infer."}
+        prompt_text = json.dumps(prompt, ensure_ascii=False)
+        estimated_prompt_tokens = max(1, (len(prompt_text) + 3) // 4)
+        remaining_tokens = int(max_tokens) - estimated_prompt_tokens
+        if remaining_tokens < 1:
+            raise RefreshError("ai_budget_exceeded_before_request")
+        body = {"model": self.model, "temperature": 0, "max_tokens": min(remaining_tokens, 8000), "response_format": {"type": "json_object"}, "messages": [{"role": "system", "content": "Extract only source-backed facts as JSON object {facts:{field:number}}."}, {"role": "user", "content": prompt_text}]}
         request = Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
-        with urlopen(request, timeout=120) as response:
+        with urlopen(request, timeout=max(0.1, float(timeout if timeout is not None else 120))) as response:
             raw = json.loads(response.read().decode())
         content = raw.get("choices", [{}])[0].get("message", {}).get("content", "{}")
         value = json.loads(content) if isinstance(content, str) else {}
@@ -128,6 +134,15 @@ def _text(response: Any) -> str:
     return ""
 
 
+def _provider_usage(response: Any) -> tuple[int | None, bool, bool]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None, True, True
+    credits = getattr(usage, "credits_used", None)
+    complete = bool(getattr(usage, "usage_complete", False))
+    return (int(credits) if isinstance(credits, int) else None), complete, isinstance(credits, int)
+
+
 def _canonical(value: str) -> str:
     return " ".join(str(value or "").casefold().split())
 
@@ -174,6 +189,15 @@ def _provider_call(method: Callable[..., Any], *args: Any, timeout: float, **kwa
         return method(*args, **kwargs)
 
 
+def _ai_call(method: Callable[..., Any], *, text: str, fields: list[str], max_tokens: int, timeout: float) -> Any:
+    try:
+        return method(text=text, fields=fields, max_tokens=max_tokens, timeout=timeout)
+    except TypeError as exc:
+        if "timeout" not in str(exc):
+            raise
+        return method(text=text, fields=fields, max_tokens=max_tokens)
+
+
 @dataclass
 class ProductRefreshService:
     provider: RefreshProvider
@@ -218,14 +242,21 @@ class ProductRefreshService:
             field_candidates: list[dict[str, Any]] = []
             unresolved_fields: set[str] = set()
             fact_values: dict[str, list[Any]] = {}
-            provider_usage_complete = bool(getattr(getattr(search, "usage", None), "usage_complete", True))
+            search_credits, provider_usage_complete, search_usage_known = _provider_usage(search)
+            firecrawl_credits = search_credits or 0
+            firecrawl_credits_known = search_usage_known
             for url, title, item in accepted:
                 if cancel_check and cancel_check():
                     return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 # No cache/resume is passed to the provider; storage is written
                 # before any semantic value can be committed.
                 scraped = _provider_call(self.provider.scrape, url, timeout=deadline - time.monotonic())
-                provider_usage_complete = provider_usage_complete and bool(getattr(getattr(scraped, "usage", None), "usage_complete", True))
+                scrape_credits, scrape_usage_complete, scrape_usage_known = _provider_usage(scraped)
+                if scrape_credits is not None:
+                    firecrawl_credits += scrape_credits
+                else:
+                    firecrawl_credits_known = firecrawl_credits_known and scrape_usage_known
+                provider_usage_complete = provider_usage_complete and scrape_usage_complete
                 if cancel_check and cancel_check():
                     return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 text = _text(scraped)
@@ -285,8 +316,13 @@ class ProductRefreshService:
                 return self._finish(started, "partial", {"reason": "unresolved_fields_without_ai_adapter", "sources": fetched, "facts": all_facts, "candidates": field_candidates, "openai": ai_state, "no_mutation": True, "last_known_good_preserved": True})
             if unresolved_fields and self.ai_extractor:
                 requested = sorted(unresolved_fields)[:3]
+                ai_input = "\n".join(row["evidence"]["excerpt"] for row in fetched)
+                estimated_input_tokens = max(1, (len(ai_input) + 3) // 4)
+                remaining_ai_tokens = limits.max_ai_tokens - estimated_input_tokens
+                if remaining_ai_tokens < 1:
+                    return self._finish(started, "partial", {"reason": "ai_budget_exceeded_before_request", "sources": fetched, "facts": all_facts, "candidates": field_candidates, "openai": {"requested": False, "estimated_prompt_tokens": estimated_input_tokens}, "no_mutation": True, "last_known_good_preserved": True})
                 try:
-                    ai_values = self.ai_extractor(text="\n".join(row["evidence"]["excerpt"] for row in fetched), fields=requested, max_tokens=limits.max_ai_tokens)
+                    ai_values = _ai_call(self.ai_extractor, text=ai_input, fields=requested, max_tokens=remaining_ai_tokens, timeout=max(0.1, deadline - time.monotonic()))
                 except Exception as exc:
                     return self._finish(started, "partial", {"reason": "ai_extractor_error", "error": str(exc), "sources": fetched, "facts": all_facts, "candidates": field_candidates, "openai": {"requested": True, "fields": requested, "error": type(exc).__name__}, "no_mutation": True, "last_known_good_preserved": True})
                 ai_usage = ai_values.get("usage", {}) if isinstance(ai_values, dict) else {}
@@ -306,8 +342,8 @@ class ProductRefreshService:
                               "sources": [row.get("source_id", "") for row in fetched],
                               "candidates": field_candidates, "openai": ai_state}
             result = {"sources": fetched, "rejected": rejected, "semantic_snapshot_created": semantic_changed,
-                      "usage": {"pages": len(fetched), "ai_tokens": ai_usage.get("total_tokens") if unresolved_fields else 0, "usage_complete": provider_usage_complete and (not unresolved_fields or bool(ai_usage.get("complete", False)))},
-                      "usage_complete": provider_usage_complete and (not unresolved_fields or bool(ai_usage.get("complete", False))),
+                      "usage": {"pages": len(fetched), "firecrawl_credits": firecrawl_credits, "firecrawl_credits_known": firecrawl_credits_known, "cost_used": float(firecrawl_credits) if firecrawl_credits_known else None, "ai_tokens": ai_usage.get("total_tokens") if unresolved_fields else 0, "usage_complete": provider_usage_complete and firecrawl_credits_known and (not unresolved_fields or bool(ai_usage.get("complete", False)))},
+                      "usage_complete": provider_usage_complete and firecrawl_credits_known and (not unresolved_fields or bool(ai_usage.get("complete", False))),
                       "last_known_good_preserved": False,
                       "scoped_commit": {"scope": {"product_id": product_id, "group_key": group_key,
                                                     "benchmark_group": benchmark_group, "configuration": configuration,

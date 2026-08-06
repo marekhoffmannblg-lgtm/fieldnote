@@ -4,8 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "fieldnote-api"))
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from services.product_refresh_service import MemoryRefreshHistory, MemoryRefreshStorage, ProductRefreshService, RefreshLimits
-from firecrawl_client import FirecrawlClient
+from services.product_refresh_service import MemoryRefreshHistory, MemoryRefreshStorage, OpenAIRefreshExtractor, ProductRefreshService, RefreshError, RefreshLimits
+from firecrawl_client import FirecrawlClient, FirecrawlResponse, FirecrawlUsage
+from unittest.mock import patch
 
 
 class Provider:
@@ -190,6 +191,39 @@ class ProductRefreshTests(unittest.TestCase):
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", cancel_check=cancel)
         self.assertEqual(result["status"], "cancelled")
         self.assertNotIn("scoped_commit", result["result"])
+
+    def test_openai_adapter_uses_remaining_timeout_and_completion_budget(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): return None
+            def read(self): return b'{"choices":[{"message":{"content":"{\\"facts\\":{\\"maksymalne_obciazenie_kg\\":22}}"}}],"usage":{"total_tokens":4}}'
+        captured = {}
+        def opener(request, timeout):
+            captured["timeout"] = timeout
+            import json
+            captured["body"] = json.loads(request.data.decode())
+            return Response()
+        with patch("services.product_refresh_service.urlopen", opener):
+            result = OpenAIRefreshExtractor("fixture")(text="x" * 40, fields=["maksymalne_obciazenie_kg"], max_tokens=100, timeout=1.25)
+        self.assertEqual(captured["timeout"], 1.25)
+        self.assertLess(captured["body"]["max_tokens"], 100)
+        self.assertEqual(result["usage"]["total_tokens"], 4)
+
+    def test_openai_adapter_rejects_budget_before_request(self):
+        with self.assertRaises(RefreshError):
+            OpenAIRefreshExtractor("fixture")(text="x" * 400, fields=["waga_wozka_kg"], max_tokens=2, timeout=1)
+
+    def test_unknown_firecrawl_usage_is_partial_without_semantic_commit(self):
+        class MeteredProvider(Provider):
+            def search(self, query, *, limit):
+                return FirecrawlResponse("search", 200, {"items": [{"url": "https://allegro.pl/oferta/amber-123456", "title": "Lionelo Amber 3w1 stroller", "offer_id": "123456"}]}, FirecrawlUsage(credits_used=None, pages=1, usage_complete=False))
+            def scrape(self, url):
+                return FirecrawlResponse("scrape", 200, {"markdown": self.text}, FirecrawlUsage(credits_used=None, pages=1, usage_complete=False))
+        service, _, _ = self.make(MeteredProvider())
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(result["status"], "succeeded")
+        self.assertFalse(result["result"]["usage_complete"])
+        self.assertIsNone(result["result"]["usage"]["cost_used"])
 
 
 if __name__ == "__main__": unittest.main()

@@ -1010,3 +1010,27 @@ nie rozpoczęto.
 - Focused testy refresh/worker/Firecrawl/runtime contracts: **37 testów,
   28 PASS, 9 opt-in skipped**; `git diff --check` PASS. Unit 8.5 pozostaje
   partial do pełnego review i lokalnego runtime RLS; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — re-review `46be050^..46be050`
+
+Gate **BLOKUJE — 3 P1, 3 P2**. Adapter OpenAI nie respektuje deadline/cancel
+i może przekroczyć token budget przed requestem; Firecrawl credits nie trafiają
+do cost gate. Pozostają testy adaptera/unknown usage i lokalny runtime RLS.
+Unit 8.5 partial; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — remediation po re-review `46be050..HEAD` (`2026-08-06`)
+
+- Zaimplementowano wyłącznie sześć zaakceptowanych findings: metrowany OpenAI
+  respektuje remaining timeout/cancel, prebudget prompt+completion, usage
+  Firecrawl/AI trafia do cost gate, a nieznane usage kończy ścieżkę bez
+  semantic commit. Dodano offline regresje adaptera, unknown usage, partial
+  fence i timeout/cancel.
+- Runtime test poprawiono tak, aby wykonywał wielostatement SQL przez plik
+  tymczasowy z wyłączoną telemetry oraz nie traktował RLS `must_change` jako
+  HTTP 403, gdy PostgREST prawidłowo zwraca pusty zbiór.
+- Lokalnie zastosowano addytywnie trzy tabele historii i granty `authenticated`.
+  Pełny runtime test przeszedł część historii, ale cleanup SQL zawiesił się/
+  zakończył bez komunikatu po ręcznym stanie migracji. Nie wykonano resetu
+  bazy, nie powtarzano próby.
+- Offline focused suite: **31 PASS**, `py_compile` i `git diff --check` PASS.
+  Unit 8.5 pozostaje **partial**, bez końcowego PASS; Unit 9 nie rozpoczęto.

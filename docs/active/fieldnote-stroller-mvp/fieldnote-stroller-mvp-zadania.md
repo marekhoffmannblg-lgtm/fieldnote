@@ -264,6 +264,12 @@
 - [x] 32 focused testy, py_compile i git diff --check PASS; pełny gate zatrzymuje znane zawieszenie hygiene.
 - [ ] Review końcowy PASS.
 
+### Unit 8.5 — re-review `46be050^..46be050`
+
+- [ ] P1: OpenAI respektuje deadline/cancel oraz budżet prompt+completion przed requestem.
+- [ ] P1: credits Firecrawl i koszt trafiają do workerowego `cost_limit` gate.
+- [ ] P2: testować adapter OpenAI, invalid/unknown AI i Firecrawl usage oraz wykonać runtime RLS historii.
+
 ### Unit 8.5 — ograniczony re-review `dd1df6a^..dd1df6a`
 
 - [ ] P1: podłączyć do produkcyjnego workera metrowany adapter OpenAI z wersjonowanym schema i bezpłatnym fixture contractem.
@@ -325,3 +331,12 @@
 - [x] Dodano opt-in PostgREST test trzech tabel historii i Storage; wymaga uruchomionego Supabase.
 - [ ] Weryfikacja runtime PostgREST/Storage oraz pełny offline gate.
 - [ ] Review końcowy PASS.
+
+### Unit 8.5 — remediation `46be050..HEAD` (`2026-08-06`)
+
+- [x] OpenAI adapter przyjmuje pozostały deadline, odrzuca brak budżetu przed requestem i ogranicza completion do pozostałego budżetu.
+- [x] Refresh agreguje credits Firecrawl/AI i nie oznacza unknown usage jako kompletnego kosztowo.
+- [x] Worker otrzymuje produkcyjny adapter OpenAI; offline regresje obejmują timeout, prebudget, unknown usage, partial/no-mutation i cancel przed publikacją.
+- [x] Runtime helper SQL używa plików tymczasowych i nie wymaga zapisu telemetry.
+- [ ] Wykonawczy runtime PostgREST/RLS historii: lokalna baza została zmieniona addytywnie, ale test cleanup zawiesił się/kończy bez komunikatu; nie wykonano resetu.
+- [ ] Re-review końcowy PASS.
