@@ -264,6 +264,15 @@
 - [x] 32 focused testy, py_compile i git diff --check PASS; pełny gate zatrzymuje znane zawieszenie hygiene.
 - [ ] Review końcowy PASS.
 
+### Unit 8.5 — ograniczony re-review `54e7a05^..54e7a05`
+
+- [x] P1: worker produkcyjny kończy brak adaptera AI jako `partial/no_mutation`; pełny adapter pozostaje osobnym krokiem produkcyjnym.
+- [x] P1: `partial` nie publikuje `scoped_commit` nowych faktów i zachowuje last-known-good.
+- [x] P1: sprzeczne fakty z wielu źródeł są oznaczane jako unresolved/review, a nie rozstrzygane kolejnością.
+- [x] P2: cancel po ostatnim Scrape jest sprawdzany przed AI i scoped commit.
+- [x] P2: błąd adaptera AI daje kontrolowany `partial` po side effects, nie fałszywy `failed`.
+- [x] P2: runtime RLS wykonuje odmowę zapisu użytkownika must-change dla każdej tabeli historii.
+
 ### Unit 8.5 — ograniczony re-review `8b766a5..3745c45`
 
 - [ ] P1: nie tworzyć placeholderowego `semantic_benchmark`; scoped refresh nie może zapisać snapshotu grupy bez pełnej projekcji istniejącego scope.

@@ -350,6 +350,13 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
         self.assertIn(viewer_link[0], {401, 403}, viewer_link[1])
         analyst_link = rest_request("POST", f"{rest_url}/product_refresh_run_sources", analyst, api_key, link)
         self.assertIn(analyst_link[0], {200, 201}, analyst_link[1])
+        for table, payload in {
+            "product_refresh_runs": run,
+            "product_refresh_snapshots": snapshot,
+            "product_refresh_run_sources": link,
+        }.items():
+            denied = rest_request("POST", f"{rest_url}/{table}", must_change, api_key, payload)
+            self.assertIn(denied[0], {401, 403}, denied[1])
         # Every refresh-history table has the same executable boundary: anon
         # and a forced-password user cannot read or write; viewer can read but
         # cannot mutate; analyst can write the valid FK-shaped payload above.

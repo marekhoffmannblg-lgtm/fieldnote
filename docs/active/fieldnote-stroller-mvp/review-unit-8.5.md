@@ -569,3 +569,79 @@ docs/active/fieldnote-stroller-mvp 8.5`.
 **BLOKUJE — 2 P1, 3 P2, 0 P3.** Unit 8.5 pozostaje partial. Następny krok:
 `$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie
 pięć findings z tej sekcji.
+
+---
+
+## Ograniczony re-review `54e7a05^..54e7a05` (`2026-08-06`)
+
+- **Tryb:** ograniczony re-review wyłącznie remediation z `54e7a05`; kod nie był zmieniany podczas review i Unit 9 nie został rozpoczęty.
+- **Reviewers:** correctness_reviewer, security_reviewer, test_reviewer; data review jako single-agent fallback z powodu limitu agentów.
+
+### P1 — Produkcyjny worker nie ma adaptera OpenAI
+
+- File: `fieldnote-api/worker.py:111-113`, `fieldnote-api/services/product_refresh_service.py:236-248`
+- Evidence: worker tworzy `ProductRefreshService` bez `ai_extractor`; fallback istnieje wyłącznie jako ręcznie wstrzykiwany callback w teście.
+- Impact: produkcyjny refresh publikuje niepełny facts map bez wymaganej ścieżki uzupełnienia albo kontrolowanego `partial/no_mutation`.
+- Scenario: listing nie zawiera literalnych etykiet dwóch regexów; run kończy sukcesem z brakującymi faktami i bez AI.
+- Recommendation: dostarczyć metrowany adapter AI w workerze albo terminalizować brak adaptera jako `partial/no_mutation`.
+- Missing test: realny worker z fixture adapterem oraz test braku adaptera.
+
+### P1 — `partial` nadal wykonuje fenced commit nowych faktów
+
+- File: `fieldnote-api/services/pipeline_service.py:57-61`, `fieldnote-api/worker.py:77-84`, `fieldnote-api/services/benchmark_commit_service.py:45-71`
+- Evidence: typed refresh ustawia `usage_complete=False`; worker zmienia status na `partial`, ale ponieważ istnieje `scoped_commit`, committer zapisuje snapshot zamiast ścieżki `no_mutation`.
+- Impact: niepełny run może nadpisać last-known-good.
+- Scenario: każdy obecny typed refresh przechodzi przez `usage_complete=False` i mimo terminalnego `partial` przekazuje snapshot do `complete_incremental`.
+- Recommendation: przekazywać pełne usage albo dla `partial` zawsze wymuszać fenced `no_mutation`.
+- Missing test: realny provider → pipeline → worker z `usage_complete=False` i asercją braku snapshotów.
+
+### P1 — Konflikt faktów z wielu źródeł zależy od kolejności
+
+- File: `fieldnote-api/services/product_refresh_service.py:226-229`
+- Evidence: `all_facts.update(facts)` bez akumulacji wartości i detekcji konfliktu; ostatnie źródło wygrywa.
+- Impact: zmiana kolejności wyników Firecrawl zmienia opublikowaną wartość i semantic hash bez oznaczenia `review`.
+- Scenario: dwie oferty podają odpowiednio 9 kg i 10 kg; wynik zależy od kolejności `items`.
+- Recommendation: grupować wartości per field, oznaczać konflikt jako unresolved/evidence i nie publikować go bez rozstrzygnięcia.
+- Missing test: permutacja dwóch sprzecznych ofert → konflikt i brak mutacji.
+
+### P2 — Anulowanie po ostatnim Scrape jest ignorowane przed publikacją
+
+- File: `fieldnote-api/services/product_refresh_service.py:197-258`
+- Evidence: brak `cancel_check` po ekstrakcji/storage i przed AI/scoped commit.
+- Impact: anulowanie w końcowym oknie może zakończyć się sukcesem i zapisem.
+- Recommendation: sprawdzić cancel przed AI i bezpośrednio przed envelope/commit.
+- Missing test: cancel po ostatnim Scrape → `cancelled`, bez AI i snapshotu.
+
+### P2 — Błąd adaptera AI kończy się `failed` po zapisaniu side effects
+
+- File: `fieldnote-api/services/product_refresh_service.py:240-264`
+- Evidence: wyjątek `ai_extractor` wpada do ogólnego `except Exception`, mimo że raw/clean i source history zostały już zapisane.
+- Impact: retry nie odróżnia kontrolowanego braku semantyki od awarii po częściowym zapisie.
+- Recommendation: mapować błąd AI do kontrolowanego `partial` bez mutacji semantycznej i zapisać metadane retry.
+- Missing test: fixture extractor rzucający timeout/rate-limit.
+
+### P2 — Historia nie testuje odmowy zapisu dla użytkownika must-change
+
+- File: `tests/test_supabase_runtime_contract.py:test_product_refresh_history_and_storage_roles`
+- Evidence: dodano read checks anon/must-change/viewer, ale POST dla must-change nie jest wykonywany na żadnej z trzech tabel historii.
+- Impact: regresja RLS dopuszczająca wymuszonemu użytkownikowi mutację provenance pozostałaby niewykryta.
+- Recommendation: użyć poprawnych payloadów FK i asercji 401/403 dla wszystkich tabel historii.
+- Missing test: opt-in PostgREST write denial dla must-change.
+
+### Wyniki i gate
+
+| Reviewer | Wynik | Przyjęte findings |
+|---|---|---:|
+| correctness_reviewer | 3 P1, 1 P2 | 4 |
+| security_reviewer | PASS | 0 |
+| test_reviewer | 0 P1, 3 P2 | 3 |
+| data fallback | potwierdzenie konfliktu i partial commit | scalone |
+
+- focused suite: **48 testów, 39 PASS, 9 opt-in skipped**;
+- `py_compile`: PASS;
+- `git diff --check 54e7a05^..54e7a05`: PASS;
+- pełny offline gate: brak końcowego wyniku w tym środowisku, nie oznaczono jako PASS;
+- brak wywołań płatnych API.
+
+**BLOKUJE — 3 P1, 3 P2, 0 P3.** Unit 8.5 pozostaje `partial`. Następny krok:
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie te sześć zaakceptowanych findings.

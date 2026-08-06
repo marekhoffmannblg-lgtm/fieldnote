@@ -9,7 +9,7 @@ from firecrawl_client import FirecrawlClient
 
 
 class Provider:
-    def __init__(self, text="Lionelo Amber 3w1 stroller"):
+    def __init__(self, text="Waga: 9,5 kg Maksymalne obciążenie: 22 kg"):
         self.text = text; self.searches = 0; self.scrapes = 0
     def search(self, query, *, limit):
         self.searches += 1
@@ -62,7 +62,7 @@ class ProductRefreshTests(unittest.TestCase):
 
     def test_real_firecrawl_response_shape_and_canonical_source(self):
         provider = Provider(); provider.search = lambda query, limit: Response({"items": [{"url": "https://allegro.pl/oferta/amber-123456", "title": "Lionelo Amber 3w1 stroller", "offer_id": "123456"}]})
-        provider.scrape = lambda url: Response({"markdown": "fixture"})
+        provider.scrape = lambda url: Response({"markdown": "Waga: 9,5 kg Maksymalne obciążenie: 22 kg"})
         service, history, _ = self.make(provider)
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         self.assertEqual(result["status"], "succeeded")
@@ -142,6 +142,46 @@ class ProductRefreshTests(unittest.TestCase):
         self.assertTrue(state["openai"]["requested"])
         self.assertLessEqual(len(calls[0][1]), 3)
         self.assertEqual({candidate["field"] for candidate in state["candidates"]}, {"waga_wozka_kg", "maksymalne_obciazenie_kg"})
+
+    def test_missing_ai_adapter_is_controlled_partial_without_semantic_commit(self):
+        service, _, _ = self.make(Provider("Waga: 9,5 kg"))
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["result"]["no_mutation"])
+        self.assertNotIn("scoped_commit", result["result"])
+
+    def test_conflicting_facts_are_not_selected_by_source_order(self):
+        provider = Provider()
+        provider.search = lambda query, limit: {"data": {"items": [
+            {"url": "https://allegro.pl/oferta/a", "title": "Lionelo Amber 3w1 stroller", "offer_id": "a"},
+            {"url": "https://allegro.pl/oferta/b", "title": "Lionelo Amber 3w1 stroller", "offer_id": "b"},
+        ]}}
+        texts = iter(("Waga: 9 kg Maksymalne obciążenie: 22 kg", "Waga: 10 kg Maksymalne obciążenie: 22 kg"))
+        provider.scrape = lambda url: {"data": {"markdown": next(texts)}}
+        service, _, _ = self.make(provider)
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(max_pages=2))
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["result"]["reason"], "unresolved_fields_without_ai_adapter")
+        self.assertTrue(any(candidate["field"] == "waga_wozka_kg" and candidate["status"] == "conflict" for candidate in result["result"]["candidates"]))
+
+    def test_ai_failure_is_partial_without_semantic_commit(self):
+        service, _, _ = self.make(Provider("Waga: 9,5 kg"))
+        service.ai_extractor = lambda **_: (_ for _ in ()).throw(TimeoutError("ai unavailable"))
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["result"]["reason"], "ai_extractor_error")
+        self.assertNotIn("scoped_commit", result["result"])
+
+    def test_cancel_after_last_scrape_prevents_semantic_commit(self):
+        provider = Provider("Waga: 9,5 kg")
+        checks = [0]
+        def cancel():
+            checks[0] += 1
+            return checks[0] == 4
+        service, _, _ = self.make(provider)
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", cancel_check=cancel)
+        self.assertEqual(result["status"], "cancelled")
+        self.assertNotIn("scoped_commit", result["result"])
 
 
 if __name__ == "__main__": unittest.main()

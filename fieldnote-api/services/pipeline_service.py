@@ -57,7 +57,8 @@ class PipelineService:
             status = str(result.get("status", "failed"))
             mapped = "succeeded" if status == "succeeded" else "partial" if status == "partial" else "cancelled" if status == "cancelled" else "failed"
             usage = {"pages": len(result.get("result", {}).get("sources", [])), "pages_known": True,
-                     "ai_tokens": None, "ai_tokens_known": False, "usage_complete": False}
+                     "ai_tokens": None, "ai_tokens_known": False,
+                     "usage_complete": bool(result.get("result", {}).get("usage_complete", status == "succeeded"))}
             return PipelineResult(mapped, usage, result.get("result", {}), str(result.get("result", {}).get("error", "")))
         limits = payload.get("limits") if isinstance(payload.get("limits"), dict) else {}
         selection = payload.get("selection") if isinstance(payload.get("selection"), dict) else {}

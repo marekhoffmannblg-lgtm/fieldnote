@@ -72,8 +72,15 @@ class ResearchWorker:
                 final = "partial"
                 result = PipelineResult("partial", result.usage,
                                         {**result.result, "no_mutation": True,
-                                         "reason": "product_refresh_scoped_commit_pending"},
+                                        "reason": "product_refresh_scoped_commit_pending"},
                                         "product_refresh_scoped_commit_pending")
+            if payload.get("job_type") == "product_refresh" and final == "partial" and result.result.get("scoped_commit"):
+                result = PipelineResult(
+                    "partial", result.usage,
+                    {key: value for key, value in result.result.items() if key != "scoped_commit"} |
+                    {"no_mutation": True, "last_known_good_preserved": True},
+                    result.error,
+                )
             if self.committer and final in {"succeeded", "partial"}:
                 try:
                     completed = self.committer.complete(job, token, final, result.result, result.usage, cost_number(result.usage.get("cost_used", 0)))

@@ -959,3 +959,33 @@ Unit 9 nie rozpoczęto.
   rozpoczął hygiene, ale nie dostarczył końcowego wyniku w tym środowisku;
   nie jest oznaczony jako PASS. Opt-in lokalny Supabase i niezależny re-review
   pozostają wymagane. Unit 8.5 ma status **partial**; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — ograniczony re-review `54e7a05^..54e7a05` (`2026-08-06`)
+
+Review ograniczono do ostatniej remediation. Correctness, security i tests
+wykonali read-only reviewerzy; data review wykonano jako single-agent fallback.
+Security: PASS. Focused suite: **48 testów, 39 PASS, 9 opt-in skipped**;
+`py_compile` i `git diff --check` PASS. Pełny offline gate nie dostarczył
+końcowego wyniku w tym środowisku. Skonsolidowano **3 P1 i 3 P2**: brak
+produkcyjnego adaptera AI, partial commitujący nowe fakty, konflikt faktów
+zależny od kolejności, cancel po ostatnim Scrape, błąd AI po side effects oraz
+brak must-change write denial w runtime RLS. Gate: **BLOKUJE**. Unit 8.5
+pozostaje partial; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — remediation po re-review `54e7a05` (`2026-08-06`)
+
+- Brak skonfigurowanego adaptera AI kończy refresh kontrolowanym
+  `partial/no_mutation`; nie publikuje niepełnego facts map. Wstrzykiwany
+  adapter nadal jest ograniczony do nierozstrzygniętych pól.
+- `PipelineService` przekazuje kompletność usage z refreshu, a worker usuwa
+  `scoped_commit` przed fenced completion dla każdego `partial`.
+- Fakty są akumulowane per pole; sprzeczne wartości otrzymują status
+  `conflict` i pozostają unresolved. Dodano cancel check po ekstrakcji oraz
+  przed publikacją, a błąd adaptera AI daje `partial/no_mutation`.
+- Runtime contract obejmuje odmowę POST użytkownika `must-change` dla każdej
+  tabeli historii refreshu.
+- Focused suite: **53 testy, 44 PASS, 9 opt-in skipped**; `py_compile` i
+  `git diff --check` PASS. Pełny `bash scripts/check_fieldnote.sh` przeszedł
+  backend i frontend typecheck, ale zatrzymał się bez końcowego wyniku podczas
+  frontendowego `node --test`; nie oznaczam pełnego gate jako PASS. Unit 8.5
+  pozostaje **partial** do review; Unit 9 nie rozpoczęto.

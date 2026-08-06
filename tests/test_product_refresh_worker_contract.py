@@ -51,7 +51,7 @@ class FixtureRefreshProvider:
         return {"data": {"items": [{"url": "https://allegro.pl/oferta/amber-real", "title": "Lionelo Amber 3w1 stroller", "offer_id": "real"}]}}
 
     def scrape(self, url):
-        return {"data": {"markdown": "Waga: 9,5 kg"}}
+        return {"data": {"markdown": "Waga: 9,5 kg Maksymalne obciążenie: 22 kg"}}
 
 
 class ProductRefreshWorkerContractTests(unittest.TestCase):
@@ -97,6 +97,19 @@ class ProductRefreshWorkerContractTests(unittest.TestCase):
         self.assertEqual(scope["participant_product_ids"], ["p1"])
         self.assertEqual([snapshot["scope_type"] for snapshot in snapshots], ["product"])
         self.assertEqual(snapshots[0]["payload"]["state"]["facts"]["waga_wozka_kg"], 9.5)
+
+    def test_real_partial_refresh_is_fenced_no_mutation(self):
+        queue = IncrementalQueue()
+        refresh = ProductRefreshService(ProviderWithoutCapacity(), MemoryRefreshStorage(), MemoryRefreshHistory())
+        self.assertTrue(ResearchWorker(queue, PipelineService(refresh_service=refresh)).process_one())
+        self.assertEqual(queue.incremental[0][2], "partial")
+        self.assertTrue(queue.incremental[0][6]["no_mutation"])
+        self.assertEqual(queue.incremental[0][7], [])
+
+
+class ProviderWithoutCapacity(FixtureRefreshProvider):
+    def scrape(self, url):
+        return {"data": {"markdown": "Waga: 9,5 kg"}}
 
 
 if __name__ == "__main__": unittest.main()

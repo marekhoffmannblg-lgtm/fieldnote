@@ -188,6 +188,7 @@ class ProductRefreshService:
             all_facts: dict[str, Any] = {}
             field_candidates: list[dict[str, Any]] = []
             unresolved_fields: set[str] = set()
+            fact_values: dict[str, list[Any]] = {}
             for url, title, item in accepted:
                 if cancel_check and cancel_check():
                     return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
@@ -224,32 +225,52 @@ class ProductRefreshService:
                 evidence = {"source_id": source_id, "url": url, "content_hash": content_hash,
                             "excerpt": text[:1000], "snapshot_id": persisted.get("id")}
                 facts, candidates, unresolved = _deterministic_facts(text, evidence)
-                all_facts.update(facts)
+                for field, value in facts.items():
+                    fact_values.setdefault(field, []).append(value)
                 field_candidates.extend(candidates)
                 unresolved_fields.update(unresolved)
                 fetched.append({**persisted, "duplicate_snapshot": not created, "evidence": evidence,
                                 "candidates": candidates})
             if not fetched:
                 return self._finish(started, "partial", {"reason": "no_content", "rejected": rejected})
+            for field, values in fact_values.items():
+                unique = {json.dumps(value, sort_keys=True, default=str) for value in values}
+                if len(unique) == 1:
+                    all_facts[field] = values[0]
+                else:
+                    unresolved_fields.add(field)
+                    for candidate in field_candidates:
+                        if candidate.get("field") == field:
+                            candidate["status"] = "conflict"
+            if cancel_check and cancel_check():
+                return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
             semantic_changed = any(not row["duplicate_snapshot"] for row in fetched)
             group_key = "|".join(part for part in (_canonical(brand), _canonical(model)) if part)
             ai_state: dict[str, Any] = {"requested": False, "unresolved_fields": sorted(unresolved_fields)}
             # There is intentionally no default OpenAI client here: workers
             # provide a metered adapter in production, while fixtures inject a
             # deterministic function. The cap keeps a bad page bounded.
+            if unresolved_fields and not self.ai_extractor:
+                return self._finish(started, "partial", {"reason": "unresolved_fields_without_ai_adapter", "sources": fetched, "facts": all_facts, "candidates": field_candidates, "openai": ai_state, "no_mutation": True, "last_known_good_preserved": True})
             if unresolved_fields and self.ai_extractor:
                 requested = sorted(unresolved_fields)[:3]
-                ai_values = self.ai_extractor(text="\n".join(row["evidence"]["excerpt"] for row in fetched), fields=requested)
+                try:
+                    ai_values = self.ai_extractor(text="\n".join(row["evidence"]["excerpt"] for row in fetched), fields=requested)
+                except Exception as exc:
+                    return self._finish(started, "partial", {"reason": "ai_extractor_error", "error": str(exc), "sources": fetched, "facts": all_facts, "candidates": field_candidates, "openai": {"requested": True, "fields": requested, "error": type(exc).__name__}, "no_mutation": True, "last_known_good_preserved": True})
                 if isinstance(ai_values, dict):
                     for field in requested:
                         if field in ai_values and ai_values[field] is not None:
                             all_facts[field] = ai_values[field]
                             field_candidates.append({"field": field, "value": ai_values[field], "evidence": [row["evidence"] for row in fetched], "status": "ai_fallback"})
                 ai_state = {"requested": True, "unresolved_fields": requested, "resolved_fields": sorted(field for field in requested if field in all_facts)}
+            if cancel_check and cancel_check():
+                return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
             semantic_state = {"facts": all_facts, "evidence": [row["evidence"] for row in fetched],
                               "sources": [row.get("source_id", "") for row in fetched],
                               "candidates": field_candidates, "openai": ai_state}
             result = {"sources": fetched, "rejected": rejected, "semantic_snapshot_created": semantic_changed,
+                      "usage_complete": True,
                       "last_known_good_preserved": False,
                       "scoped_commit": {"scope": {"product_id": product_id, "group_key": group_key,
                                                     "benchmark_group": benchmark_group, "configuration": configuration,
