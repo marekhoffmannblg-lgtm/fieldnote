@@ -17,6 +17,10 @@ class Provider:
         return {"data": {"markdown": self.text}}
 
 
+class Response:
+    def __init__(self, data): self.data = data
+
+
 class ProductRefreshTests(unittest.TestCase):
     def make(self, provider):
         history, storage = MemoryRefreshHistory(), MemoryRefreshStorage()
@@ -29,6 +33,7 @@ class ProductRefreshTests(unittest.TestCase):
         self.assertEqual(first["status"], "succeeded"); self.assertEqual(second["status"], "succeeded")
         self.assertEqual(len(history.runs), 4)  # running + terminal for each invocation
         self.assertEqual(len(history.sources), 1)
+        self.assertEqual(len(history.run_sources), 2)
         self.assertEqual(len(storage.objects), 2)
 
     def test_changed_content_hash_creates_new_source_snapshot(self):
@@ -50,6 +55,32 @@ class ProductRefreshTests(unittest.TestCase):
             def put(self, path, content, *, content_type): raise OSError("storage unavailable")
         result = ProductRefreshService(provider, Broken(), history).refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         self.assertEqual(result["status"], "failed"); self.assertTrue(result["result"]["last_known_good_preserved"])
+
+    def test_real_firecrawl_response_shape_and_canonical_source(self):
+        provider = Provider(); provider.search = lambda query, limit: Response({"items": [{"url": "https://allegro.pl/oferta/amber-123456", "title": "Lionelo Amber 3w1 stroller", "offer_id": "123456"}]})
+        provider.scrape = lambda url: Response({"markdown": "fixture"})
+        service, history, _ = self.make(provider)
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(history.sources[0]["source_id"], "allegro:123456")
+
+    def test_untrusted_exact_title_is_not_scraped(self):
+        provider = Provider(); provider.search = lambda query, limit: {"data": {"items": [{"url": "http://127.0.0.1/admin", "title": "Lionelo Amber 3w1 stroller", "offer_id": "123456"}]}}
+        service, history, _ = self.make(provider)
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(result["status"], "partial"); self.assertEqual(provider.scrapes, 0); self.assertEqual(history.sources, [])
+
+    def test_same_clean_text_different_raw_has_immutable_storage_paths(self):
+        provider = Provider("same"); calls = []
+        provider.scrape = lambda url: {"data": {"markdown": "same", "request_id": str(len(calls))}} or calls.append(1)
+        # Replace with two explicit payloads while retaining identical clean text.
+        payloads = iter(({"data": {"markdown": "same", "request_id": "a"}}, {"data": {"markdown": "same", "request_id": "b"}}))
+        provider.scrape = lambda url: next(payloads)
+        service, history, storage = self.make(provider)
+        service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(len(history.sources), 1)
+        self.assertEqual(len(storage.objects), 4)
 
 
 if __name__ == "__main__": unittest.main()

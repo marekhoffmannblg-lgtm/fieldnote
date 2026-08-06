@@ -12,6 +12,8 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlparse
+import ipaddress
 
 
 class RefreshProvider(Protocol):
@@ -43,6 +45,7 @@ class RefreshLimits:
 class MemoryRefreshHistory:
     runs: list[dict[str, Any]] = field(default_factory=list)
     sources: list[dict[str, Any]] = field(default_factory=list)
+    run_sources: list[dict[str, Any]] = field(default_factory=list)
 
     def append_run(self, value: dict[str, Any]) -> dict[str, Any]:
         self.runs.append(dict(value))
@@ -52,8 +55,12 @@ class MemoryRefreshHistory:
         key = (value.get("source_id"), value.get("content_hash"))
         for existing in self.sources:
             if (existing.get("source_id"), existing.get("content_hash")) == key:
-                return existing
+                return {**existing, "_created": False}
         self.sources.append(dict(value))
+        return {**value, "_created": True}
+
+    def append_run_source(self, value: dict[str, Any]) -> dict[str, Any]:
+        self.run_sources.append(dict(value))
         return value
 
 
@@ -66,6 +73,11 @@ class MemoryRefreshStorage:
 
 
 def _body(response: Any) -> dict[str, Any]:
+    # The shared client returns FirecrawlResponse, while fixture transports
+    # commonly return the underlying dict. Support both without coupling the
+    # service to a paid provider implementation.
+    if hasattr(response, "data"):
+        response = getattr(response, "data")
     if isinstance(response, dict):
         return response.get("data", response) if isinstance(response.get("data", response), dict) else {}
     return {}
@@ -129,18 +141,29 @@ class ProductRefreshService:
                 text = _text(scraped)
                 if not text:
                     continue
-                source_id = str(item.get("source_id") or item.get("offer_id") or url)
+                source_id = str(item.get("source_id") or "").strip()
+                if not source_id:
+                    offer_id = str(item.get("offer_id") or "").strip()
+                    source_id = f"allegro:{offer_id}" if offer_id else url
                 content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-                base = f"refresh/{product_id}/{source_id}/{content_hash}"
+                raw_hash = hashlib.sha256(json.dumps(scraped, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+                base = f"refresh/{product_id}/{source_id}/{content_hash}/{raw_hash}"
                 raw_path, clean_path = f"{base}/raw.json", f"{base}/clean.txt"
-                self.storage.put(raw_path, json.dumps(scraped, ensure_ascii=False, sort_keys=True).encode(), content_type="application/json")
+                self.storage.put(raw_path, json.dumps(scraped, ensure_ascii=False, sort_keys=True, default=str).encode(), content_type="application/json")
                 self.storage.put(clean_path, text.encode("utf-8"), content_type="text/plain")
                 source = {"run_id": run_id, "product_id": product_id, "source_id": source_id,
                           "url": url, "title": title, "content_hash": content_hash,
                           "raw_object_path": raw_path, "clean_object_path": clean_path,
                           "status": "stored"}
                 persisted = self.history.append_source(source)
-                fetched.append({**persisted, "duplicate_snapshot": persisted is not source})
+                created = bool(persisted.pop("_created", True))
+                run_source = {"run_id": run_id, "product_id": product_id,
+                              "source_id": source_id, "content_hash": content_hash,
+                              "raw_object_path": raw_path, "clean_object_path": clean_path}
+                append_link = getattr(self.history, "append_run_source", None)
+                if callable(append_link):
+                    append_link(run_source)
+                fetched.append({**persisted, "duplicate_snapshot": not created})
             if not fetched:
                 return self._finish(started, "partial", {"reason": "no_content", "rejected": rejected})
             semantic_changed = any(not row["duplicate_snapshot"] for row in fetched)
@@ -154,6 +177,15 @@ class ProductRefreshService:
         if self.identity_gate:
             return str(self.identity_gate(title=title, brand=brand, model=model, configuration=configuration, item=item))
         title_norm = _canonical(title)
+        parsed = urlparse(str(item.get("url") or item.get("link") or ""))
+        host = parsed.hostname or ""
+        allowed = host == "allegro.pl" or host.endswith(".allegro.pl")
+        try:
+            private = bool(ipaddress.ip_address(host).is_private)
+        except ValueError:
+            private = False
+        if parsed.scheme != "https" or not allowed or private:
+            return "untrusted_url"
         if not all(token in title_norm for token in (_canonical(brand), _canonical(model)) if token):
             return "brand_or_model_mismatch"
         if configuration and _canonical(configuration) not in title_norm:

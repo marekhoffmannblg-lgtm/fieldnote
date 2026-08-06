@@ -799,3 +799,29 @@
   job/worker, produkcyjny Storage adapter, deterministyczna ekstrakcja pól i
   ograniczone OpenAI, fenced incremental commit oraz pełne RLS/integration
   tests. Unit 8.5 ma status **partial**; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — pełny review `447673f..7ef02e5` (`2026-08-06`)
+
+- Review wykonali niezależnie `correctness_reviewer`, `security_reviewer`,
+  `test_reviewer` oraz, z racji migracji/provenance, `data_reviewer`. Nie
+  zmieniano kodu ani nie rozpoczęto Unit 9.
+- Weryfikacja: 11 focused testów offline PASS, `py_compile` i
+  `git diff --check 447673f..7ef02e5` PASS. Pełny offline gate nie ukończył się
+  przez istniejące zawieszenie hygiene na `git show :<tracked-path>`.
+- Gate: **BLOKUJE** — 3 P1, 5 P2, 0 P3. Kluczowe braki to niewpięty durable
+  flow, nieobsługiwany realny `FirecrawlResponse` oraz brak relacji drugiego
+  identycznego runu do deduplikowanego snapshotu. Szczegóły:
+  `review-unit-8.5.md`. Unit 8.5 pozostaje **partial**.
+
+### Unit 8.5 — remediation częściowa (`2026-08-06`)
+
+- Poprawiono obsługę obiektowego `FirecrawlResponse`, walidację HTTPS i
+  allowlistę Allegro przed scrape, kanoniczny prefiks `allegro:` dla ofert,
+  jawny znacznik create/reuse zamiast tożsamości obiektu oraz wersjonowanie raw
+  artefaktu po payload hash. Dodano pamięciowe relacje run-source i migrację
+  rozdzielającą snapshot od asocjacji runu.
+- Weryfikacja: **14 focused testów PASS**, `py_compile` i `git diff --check`
+  PASS. Nie wywołano płatnych API.
+- Nadal nie podłączono serwisu do API/durable worker/jobów i produkcyjnego
+  repozytorium Storage/źródeł, nie ma wykonawczego RLS testu ani transakcyjnego
+  FK upsertu. Unit 8.5 pozostaje **partial**; nie rozpoczynano Unit 9.

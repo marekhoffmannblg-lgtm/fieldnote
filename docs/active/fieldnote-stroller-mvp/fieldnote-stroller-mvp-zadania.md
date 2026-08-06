@@ -75,8 +75,8 @@
 
 ## Unit 8.5 — Trwałe, pełne odświeżenie danych produktu
 
-- [x] Implementacja: izolowany kontrakt `ProductRefreshService` wykonuje świeży Search/Scrape bez cache/resume, identity gate przed scrape, raw/clean storage przed publikacją, hash deduplikację snapshotów, historię runów i zachowanie last-known-good przy błędzie Storage; dodano migrację historii i RLS.
-- [x] Test: offline regresje pokrywają fresh fetch mimo wcześniejszego runu, exact-match rejection, zmianę i identyczność `content_hash` oraz błąd Storage.
+- [ ] Implementacja: fundament offline istnieje, lecz brakuje durable API/job/worker/Storage, poprawnej relacji run-source-snapshot, ekstrakcji i fenced incremental commit.
+- [ ] Test: testy pamięciowe przechodzą, ale brakuje integracji API→worker, realnego `FirecrawlResponse`, RLS, limitów/cancel/lease i trwałej historii.
 - [ ] Weryfikacja: dwa identyczne refresh runy pozostają w historii, lecz nie duplikują source/semantic snapshots; zmiana obejmuje wyłącznie produkt i jego istniejący scope benchmarkowy.
 - [ ] Operator: jeden limitowany live smoke produktu dopiero poza CI, bez masowego refreshu.
 - [ ] Review: brak otwartych P1/P2.
@@ -106,6 +106,24 @@
 ## Do poprawy po review
 
 <!-- Dodawaj findings pod właściwym unitem. -->
+
+### Unit 8.5 — pełny review `447673f..7ef02e5`
+
+- [ ] P1: podłączyć typed `product_refresh` przez router, trwałą kolejkę,
+  worker, repozytoria/Storage i fenced scoped commit; dodać offline API→worker
+  integration bez płatnych providerów.
+- [x] P1: obsłużyć `FirecrawlResponse.data` wspólnego klienta i dodać test
+  refreshu z jego fixture transportem.
+- [ ] P1: rozdzielić deduplikowany snapshot od per-run source association także
+  w produkcyjnym repozytorium i transakcji; fundament migracji dodany.
+- [x] P2: zastąpić deduplikację opartą o `is` jawnym wynikiem create/reuse.
+- [ ] P2: normalizować/upsertować kanoniczne `allegro:<offer_id>` wraz z linkiem
+  produktu przed insertem historii i testować FK.
+- [x] P2: walidować HTTPS allowlist URL-i przed scrape i odrzucać prywatne/
+  obce hosty.
+- [x] P2: wersjonować raw artefakt po hash payloadu, aby nie nadpisywać evidence
+  przy tym samym clean content.
+- [ ] P2: dodać kontrakt oraz opt-in wykonawczy test RLS nowych tabel historii.
 
 ### Unit 8 — ograniczony re-review `f5fca8c^..f5fca8c`
 
