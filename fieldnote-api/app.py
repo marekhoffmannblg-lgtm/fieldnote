@@ -2595,6 +2595,12 @@ def health() -> dict[str, bool]:
     return health_payload()
 
 
+@app.get("/health")
+def root_health() -> dict[str, bool]:
+    """Stable process health probe for local supervisors and containers."""
+    return health_payload()
+
+
 @app.post("/api/research/preview")
 def research_preview(request: PreviewRequest) -> dict[str, Any]:
     existing = product_for_group_key(f"{normalized(request.brand)}|{normalized(request.model)}")

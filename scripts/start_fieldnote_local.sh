@@ -6,11 +6,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_BIN="$ROOT/fieldnote-api/.venv/bin/uvicorn"
 VITE_BIN="$ROOT/fieldnote-frontend/node_modules/.bin/vite"
+FRONTEND_MODE="${FIELDNOTE_FRONTEND_MODE:-dist}"
 API_LOG="/tmp/fieldnote-api.log"
 FRONTEND_LOG="/tmp/fieldnote-frontend.log"
 API_PID_FILE="/tmp/fieldnote-api.pid"
 FRONTEND_PID_FILE="/tmp/fieldnote-frontend.pid"
 API_URL="http://127.0.0.1:8000"
+API_HEALTH_URL="$API_URL/health"
 FRONTEND_URL="http://127.0.0.1:5173"
 PRODUCT_URL="$FRONTEND_URL/products/cybex/orfeo/sources"
 PORTS=(5173 5174 8000)
@@ -49,7 +51,7 @@ stop_pid_file() {
   pid="$(tr -cd '0-9' < "$pid_file")"
   rm -f "$pid_file"
   [[ -n "$pid" ]] || return 0
-  if kill -0 "$pid" 2>/dev/null && owns_fieldnote_process "$pid"; then
+  if kill -0 "$pid" 2>/dev/null && [[ -f "$pid_file" ]]; then
     say "Zatrzymuję $name (PID $pid)…"
     kill "$pid" 2>/dev/null || true
   elif kill -0 "$pid" 2>/dev/null; then
@@ -62,7 +64,7 @@ owns_fieldnote_process() {
   local command cwd
   command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
   cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 || true)"
-  [[ "$command" == *"fieldnote-api"* || "$command" == *"fieldnote-frontend"* || "$command" == *"vite"* ]] && \
+  [[ "$command" == *"fieldnote-api"* || "$command" == *"fieldnote-frontend"* || "$command" == *"vite"* || "$command" == *"http.server"* || "$cwd" == *"fieldnote-api"* ]] && \
     [[ -z "$cwd" || "$cwd" == "$ROOT" || "$cwd" == "$ROOT/fieldnote-frontend" ]]
 }
 
@@ -174,7 +176,7 @@ status_services() {
   fi
   say "backend PID: ${api_pid:-—}"
   say "backend port: 8000"
-  if http_ok "$API_URL/openapi.json"; then
+  if http_ok "$API_HEALTH_URL"; then
     say "backend healthcheck: ok"
   else
     say "backend healthcheck: failed"
@@ -200,8 +202,12 @@ start_services() {
     say "Brakuje backendowych zależności FIELDNOTE." >&2
     exit 1
   fi
-  if [[ ! -x "$VITE_BIN" ]]; then
+  if [[ "$FRONTEND_MODE" == "dev" && ! -x "$VITE_BIN" ]]; then
     say "Brakuje zależności frontendu FIELDNOTE." >&2
+    exit 1
+  fi
+  if [[ "$FRONTEND_MODE" == "dist" && ! -f "$ROOT/fieldnote-frontend/dist/index.html" ]]; then
+    say "Brakuje buildu frontendu FIELDNOTE: fieldnote-frontend/dist/index.html." >&2
     exit 1
   fi
 
@@ -215,23 +221,25 @@ start_services() {
   rotate_log "$API_LOG"
   rotate_log "$FRONTEND_LOG"
 
-  local api_command=(env FIELDNOTE_SKIP_STARTUP_RECOVERY=1 "$API_BIN" app:app --app-dir fieldnote-api --host 127.0.0.1 --port 8000)
+  local api_command=(env FIELDNOTE_SKIP_STARTUP_RECOVERY=1 "$API_BIN" app:app --host 127.0.0.1 --port 8000)
   if [[ "$dev_mode" == "true" ]]; then
     api_command+=(--reload)
   fi
-  start_detached "$API_PID_FILE" "$API_LOG" "$ROOT" "${api_command[@]}"
-  start_detached "$FRONTEND_PID_FILE" "$FRONTEND_LOG" "$ROOT/fieldnote-frontend" \
-    "$VITE_BIN" \
-    --host 127.0.0.1 \
-    --port 5173 \
-    --strictPort
+  start_detached "$API_PID_FILE" "$API_LOG" "$ROOT/fieldnote-api" "${api_command[@]}"
+  local frontend_command
+  if [[ "$FRONTEND_MODE" == "dev" ]]; then
+    frontend_command=("$VITE_BIN" --host 127.0.0.1 --port 5173 --strictPort)
+  else
+    frontend_command=(python3 -m http.server 5173 --bind 127.0.0.1 --directory "$ROOT/fieldnote-frontend/dist")
+  fi
+  start_detached "$FRONTEND_PID_FILE" "$FRONTEND_LOG" "$ROOT/fieldnote-frontend" "${frontend_command[@]}"
   local api_pid frontend_pid
   api_pid="$(pid_from_file "$API_PID_FILE")"
   frontend_pid="$(pid_from_file "$FRONTEND_PID_FILE")"
 
   local elapsed
   for ((elapsed = 0; elapsed < WAIT_SECONDS; elapsed++)); do
-    if http_ok "$API_URL/openapi.json" && http_ok "$FRONTEND_URL"; then
+    if http_ok "$API_HEALTH_URL" && http_ok "$FRONTEND_URL"; then
       say "FIELDNOTE uruchomiony."
       say "backend PID: $api_pid"
       say "frontend PID: $frontend_pid"

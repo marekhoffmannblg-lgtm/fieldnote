@@ -20,6 +20,7 @@ interface AuthContextValue {
   changeInitialPassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  error: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -38,6 +39,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const [identity, setIdentity] = useState<AuthIdentity | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const getSessionWithTimeout = async () => {
+    if (!supabase) return { data: { session: null } };
+    return await Promise.race([
+      supabase.auth.getSession(),
+      new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("Supabase Auth nie odpowiedział w wymaganym czasie.")), 8_000)),
+    ]);
+  };
 
   const clearIdentity = () => {
     setIdentity(null);
@@ -46,9 +56,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async () => {
     if (!supabase) return;
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await getSessionWithTimeout();
     if (!session) {
       clearIdentity();
+      setError(null);
       return;
     }
     const profile = await loadProfile(session);
@@ -77,15 +88,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!active) return;
         setIdentity(profile.identity);
         setEmail(profile.email);
+        setError(null);
       } catch {
         if (!active) return;
         clearIdentity();
+        setError("Nie udało się sprawdzić sesji w lokalnym backendzie.");
       } finally {
         if (active) setState("configured");
       }
     };
 
-    void supabase.auth.getSession().then(({ data }) => sync(data.session));
+    void getSessionWithTimeout().then(({ data }) => sync(data.session)).catch((reason) => {
+      if (!active) return;
+      clearIdentity();
+      setError(reason instanceof Error ? reason.message : "Nie udało się wczytać sesji.");
+      setState("configuration-error");
+    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       void sync(session);
     });
@@ -99,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(() => ({
     identity,
     email,
+    error,
     screen: screenForAuth(state, identity),
     signIn: async (loginEmail, password) => {
       if (!supabase) throw new Error(authConfigurationError || "Supabase Auth nie jest skonfigurowany.");
@@ -115,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearIdentity();
     },
     refreshProfile,
-  }), [email, identity, state]);
+  }), [email, error, identity, state]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

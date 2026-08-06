@@ -58,6 +58,7 @@ class AuthRoleTests(unittest.TestCase):
         with patch.object(api, "DATA_MODE", "supabase"), patch.object(api, "get_gateway", return_value=Gateway()):
             client = TestClient(api.app)
             self.assertEqual(client.get("/api/health").status_code, 200)
+            self.assertEqual(client.get("/health").status_code, 200)
             self.assertEqual(client.get("/api/categories").status_code, 401)
             for token in ("viewer", "analyst", "admin"):
                 self.assertEqual(client.get("/api/categories", headers={"Authorization": f"Bearer {token}"}).status_code, 200)

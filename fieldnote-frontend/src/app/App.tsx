@@ -2651,9 +2651,9 @@ function FieldnoteApp() {
 }
 
 export default function App() {
-  const { screen } = useAuth();
+  const { screen, error } = useAuth();
   if (screen === "loading") return <AuthLoadingScreen />;
-  if (screen === "configuration-error") return <AuthLoadingScreen error={authConfigurationError} />;
+  if (screen === "configuration-error") return <AuthLoadingScreen error={error || authConfigurationError} />;
   if (screen === "login") return <LoginScreen />;
   if (screen === "change-password") return <ChangeInitialPasswordScreen />;
   return <FieldnoteApp />;
