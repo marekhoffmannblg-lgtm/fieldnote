@@ -877,6 +877,16 @@ egzekwowane, nadal brakuje faktów/OpenAI/fenced commit, regresji worker/cap/
 mid-run cancel oraz runtime PostgREST/Storage RLS. Unit 8.5 pozostaje partial;
 Unit 9 nie rozpoczęto.
 
+### Unit 8.5 — ograniczony re-review `3745c45..fe4253a` (`2026-08-06`)
+
+Correctness i test reviewer sprawdzili ograniczony diff; security i data
+wykonano jako single-agent fallback z powodu limitu agentów. Focused suite:
+**46 testów, 37 PASS, 9 skipped**, py_compile i diff-check PASS. Gate
+**BLOKUJE — 2 P1, 3 P2**. P1: rzeczywisty Firecrawl timeout jest mapowany na
+`failed`, a canonical facts/OpenAI fallback nadal nie istnieje. P2: brak
+regresji cancel między dwoma Scrape, realnego producer-to-committer scope testu
+i pełnej macierzy RLS historii. Unit 8.5 pozostaje partial; Unit 9 nie rozpoczęto.
+
 ### Unit 8.5 — remediation `3745c45..HEAD` (`2026-08-06`)
 
 Usunięto placeholderową projekcję benchmarku grupy: refresh zapisuje wyłącznie
@@ -929,3 +939,23 @@ Pełny gate zatrzymuje znane zawieszenie hygiene na `git show`. Runtime Supabase
 nie był dostępny (`supabase status` blokuje zapis telemetry poza workspace),
 więc Unit 8.5 pozostaje **partial** do wykonania opt-in runtime i re-review.
 Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — remediation po re-review `3745c45..fe4253a` (`2026-08-06`)
+
+- `FirecrawlError` rozróżnia teraz wyczerpany deadline transportu; refresh
+  terminalizuje ten jawny przypadek jako `partial/provider_timeout` z
+  zachowaniem last-known-good. Regresja używa rzeczywistego `FirecrawlClient`
+  i transportu fixture, a nie gołego `TimeoutError` providera testowego.
+- Refresh tworzy schema-named fakty (`waga_wozka_kg`,
+  `maksymalne_obciazenie_kg`) z kandydatem i evidence dla każdego pola.
+  Metrowany adapter AI jest wyłącznie opcjonalnym, wstrzykiwalnym fallbackiem
+  dla maksymalnie trzech nierozstrzygniętych pól; nie ma automatycznego
+  wywołania płatnego API.
+- Regresje pokrywają anulowanie przed drugim Scrape, rzeczywisty łańcuch
+  provider → refresh → pipeline → worker → fenced product-only snapshot oraz
+  anon/must-change/viewer read matrix trzech tabel historii refreshu.
+- Focused suite: **48 testów, 39 PASS, 9 skipped**; `py_compile` i
+  `git diff --check` PASS. `bash scripts/check_fieldnote.sh` ponownie
+  rozpoczął hygiene, ale nie dostarczył końcowego wyniku w tym środowisku;
+  nie jest oznaczony jako PASS. Opt-in lokalny Supabase i niezależny re-review
+  pozostają wymagane. Unit 8.5 ma status **partial**; Unit 9 nie rozpoczęto.

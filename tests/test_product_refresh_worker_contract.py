@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "fieldnote-api"))
 from services.pipeline_service import PipelineService
 from services.job_service import JobService
 from services.pipeline_service import PipelineResult
+from services.product_refresh_service import MemoryRefreshHistory, MemoryRefreshStorage, ProductRefreshService
 from worker import ResearchWorker
 
 
@@ -45,6 +46,14 @@ class Committer:
     def complete(self, job, token, status, result, usage, cost): self.calls.append((status, result)); return {"status": status}
 
 
+class FixtureRefreshProvider:
+    def search(self, query, *, limit):
+        return {"data": {"items": [{"url": "https://allegro.pl/oferta/amber-real", "title": "Lionelo Amber 3w1 stroller", "offer_id": "real"}]}}
+
+    def scrape(self, url):
+        return {"data": {"markdown": "Waga: 9,5 kg"}}
+
+
 class ProductRefreshWorkerContractTests(unittest.TestCase):
     def test_typed_refresh_bypasses_legacy_resume_and_returns_terminal_result(self):
         pipeline = PipelineService(refresh_service=RefreshDouble())
@@ -78,6 +87,16 @@ class ProductRefreshWorkerContractTests(unittest.TestCase):
         self.assertEqual(scope["product_id"], "p1"); self.assertEqual(scope["configuration"], "3w1")
         self.assertEqual(scope["participant_product_ids"], ["p1"])
         self.assertEqual([snapshot["scope_type"] for snapshot in snapshots], ["product"])
+
+    def test_real_refresh_service_output_commits_only_product_scope(self):
+        queue = IncrementalQueue()
+        refresh = ProductRefreshService(FixtureRefreshProvider(), MemoryRefreshStorage(), MemoryRefreshHistory())
+        self.assertTrue(ResearchWorker(queue, PipelineService(refresh_service=refresh)).process_one())
+        scope, snapshots = queue.incremental[0][6], queue.incremental[0][7]
+        self.assertEqual(scope["product_id"], "p1")
+        self.assertEqual(scope["participant_product_ids"], ["p1"])
+        self.assertEqual([snapshot["scope_type"] for snapshot in snapshots], ["product"])
+        self.assertEqual(snapshots[0]["payload"]["state"]["facts"]["waga_wozka_kg"], 9.5)
 
 
 if __name__ == "__main__": unittest.main()

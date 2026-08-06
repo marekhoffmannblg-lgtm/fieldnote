@@ -3,7 +3,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "fieldnote-api"))
+sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from services.product_refresh_service import MemoryRefreshHistory, MemoryRefreshStorage, ProductRefreshService, RefreshLimits
+from firecrawl_client import FirecrawlClient
 
 
 class Provider:
@@ -109,22 +111,37 @@ class ProductRefreshTests(unittest.TestCase):
             def search(self, query, *, limit): self.searches += 1; return {"data": {"items": self.items}}
             def scrape(self, url):
                 self.scrapes += 1
-                if self.scrapes == 1: self.cancel = True
                 return {"data": {"markdown": "same"}}
-        provider = Multi(); provider.cancel = False
+        provider = Multi(); checks = [0]
         service, history, _ = self.make(provider)
-        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(max_pages=1, max_candidates=10), cancel_check=lambda: provider.cancel)
+        def cancel_before_second_scrape():
+            checks[0] += 1
+            return checks[0] == 4  # search, first scrape, post-first-scrape, second scrape
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(max_pages=2, max_candidates=10), cancel_check=cancel_before_second_scrape)
         self.assertEqual(result["status"], "cancelled")
         self.assertEqual(provider.scrapes, 1)
+        self.assertEqual(len(history.sources), 1)
 
     def test_provider_timeout_preserves_last_known_good(self):
-        class Hanging(Provider):
-            def search(self, query, *, limit, timeout=None):
-                raise TimeoutError("fixture deadline")
-        service, _, _ = self.make(Hanging())
+        def transport(*_):
+            raise TimeoutError("fixture deadline")
+        client = FirecrawlClient(api_key="fixture", max_retries=0, backoff_seconds=0, transport=transport, sleep=lambda _: None)
+        service, _, _ = self.make(client)
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(timeout_seconds=0.01))
         self.assertEqual(result["status"], "partial")
         self.assertTrue(result["result"]["last_known_good_preserved"])
+
+    def test_schema_facts_have_field_evidence_and_limited_injected_ai_fallback(self):
+        provider = Provider("Waga: 9,5 kg")
+        calls = []
+        service, _, _ = self.make(provider)
+        service.ai_extractor = lambda *, text, fields: calls.append((text, fields)) or {"maksymalne_obciazenie_kg": 22}
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        state = result["result"]["scoped_commit"]["semantic_state"]
+        self.assertEqual(state["facts"], {"waga_wozka_kg": 9.5, "maksymalne_obciazenie_kg": 22})
+        self.assertTrue(state["openai"]["requested"])
+        self.assertLessEqual(len(calls[0][1]), 3)
+        self.assertEqual({candidate["field"] for candidate in state["candidates"]}, {"waga_wozka_kg", "maksymalne_obciazenie_kg"})
 
 
 if __name__ == "__main__": unittest.main()

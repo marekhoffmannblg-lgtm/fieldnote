@@ -519,3 +519,53 @@ Weryfikacja: **46 testów, 37 PASS, 9 skipped**, py_compile i git diff-check
 PASS. Pełny check_fieldnote.sh zatrzymał się na znanym hygiene `git show`.
 Unit pozostaje partial; następny krok: `$dev-docs-review
 docs/active/fieldnote-stroller-mvp 8.5`.
+
+---
+
+## Ograniczony re-review `3745c45..fe4253a` (`2026-08-06`)
+
+- **Tryb:** ograniczony re-review; kod nie był zmieniany, Unit 9 nie rozpoczęty.
+- **Reviewers:** correctness_reviewer, test_reviewer; security/data single-agent fallback.
+- **Gate:** `BLOKUJE`.
+
+### P1 — Deadline Firecrawl kończy się `failed`, nie `partial`
+
+- File: `scripts/firecrawl_client.py:100-108`; `fieldnote-api/services/product_refresh_service.py:221-224`.
+- Evidence: klient normalizuje wyczerpany timeout na `FirecrawlError`, lecz serwis traktuje go jako ogólny failure; test wstrzykuje bare `TimeoutError`, więc nie pokrywa produkcyjnego klienta.
+- Impact: poprawnie ograniczony timeout daje błędny terminal status joba.
+- Recommendation: rozpoznać timeoutową postać FirecrawlError i zwrócić `partial` z last-known-good; testować serwis przez fixture transport wspólnego klienta.
+
+### P1 — Brakuje canonical facts i ograniczonego fallbacku OpenAI
+
+- File: `fieldnote-api/services/product_refresh_service.py:106-112,204-213`.
+- Evidence: extractor rozpoznaje tylko wagę; candidate jest ogólnym opisem, a OpenAI jest trwale wyłączone bez wykrywania braków/konfliktów.
+- Impact: sukces może utrwalić pusty lub niepełny facts map bez ścieżki uzupełnienia danych.
+- Recommendation: schema-driven ekstrakcja, evidence/candidates per field i limitowany/injectable fallback tylko dla unresolved fields.
+
+### P2 — Cancel test nie wykonuje branchu przed drugim Scrape
+
+- File: `tests/test_product_refresh_pipeline.py:103-118`.
+- Evidence: `max_pages=1` uniemożliwia drugie pobranie; test ćwiczy wyłącznie cancel po pierwszym Scrape.
+- Recommendation: dwa listingi, cap=2, cancel po pierwszym Scrape i asercja braku drugiego.
+
+### P2 — Scoped commit testuje ręczny envelope, nie output refreshu
+
+- File: `tests/test_product_refresh_worker_contract.py:72-80`.
+- Evidence: RefreshDouble podaje skonstruowany envelope; ProductRefreshService nie jest częścią łańcucha testowego.
+- Recommendation: przeprowadzić fixture provider → real service → pipeline → worker/committer i asercję tylko product snapshotu.
+
+### P2 — Niepełna macierz RLS dla tabel historii
+
+- File: `tests/test_supabase_runtime_contract.py:322+`.
+- Evidence: bucket raw/clean jest pokryty, ale tabele historii nie testują anon/must-change/read viewer dla wszystkich trzech tabel.
+- Recommendation: rozszerzyć requesty PostgREST o pełną macierz ról oraz select.
+
+### Weryfikacja i gate
+
+- focused suite: **46 testów, 37 PASS, 9 skipped**;
+- py_compile i `git diff --check 3745c45..fe4253a`: PASS;
+- pełny check_fieldnote.sh: nieukończony na znanym hygiene `git show`.
+
+**BLOKUJE — 2 P1, 3 P2, 0 P3.** Unit 8.5 pozostaje partial. Następny krok:
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie
+pięć findings z tej sekcji.

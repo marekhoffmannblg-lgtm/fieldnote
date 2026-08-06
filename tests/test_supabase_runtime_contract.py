@@ -350,6 +350,16 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
         self.assertIn(viewer_link[0], {401, 403}, viewer_link[1])
         analyst_link = rest_request("POST", f"{rest_url}/product_refresh_run_sources", analyst, api_key, link)
         self.assertIn(analyst_link[0], {200, 201}, analyst_link[1])
+        # Every refresh-history table has the same executable boundary: anon
+        # and a forced-password user cannot read or write; viewer can read but
+        # cannot mutate; analyst can write the valid FK-shaped payload above.
+        for table in ("product_refresh_runs", "product_refresh_snapshots", "product_refresh_run_sources"):
+            anon_read = rest_request("GET", f"{rest_url}/{table}?select=*&limit=1", None, api_key)
+            must_change_read = rest_request("GET", f"{rest_url}/{table}?select=*&limit=1", must_change, api_key)
+            viewer_read = rest_request("GET", f"{rest_url}/{table}?select=*&limit=1", viewer, api_key)
+            self.assertIn(anon_read[0], {401, 403}, anon_read[1])
+            self.assertIn(must_change_read[0], {401, 403}, must_change_read[1])
+            self.assertEqual(viewer_read[0], 200, viewer_read[1])
         for bucket in ("source-raw", "source-clean"):
             object_url = environment["API_URL"] + f"/storage/v1/object/{bucket}/runtime-refresh-{suffix}.txt"
             self.assertTrue(is_storage_denied(storage_request("POST", object_url, None, api_key, b"anon")))

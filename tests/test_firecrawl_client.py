@@ -61,6 +61,7 @@ class FirecrawlClientTests(unittest.TestCase):
         with self.assertRaises(FirecrawlError) as error:
             FirecrawlClient(api_key="fixture-key", max_retries=1, backoff_seconds=0, transport=always_timeout, sleep=lambda _: None).scrape("https://example.test")
         self.assertEqual(error.exception.attempts, 2)
+        self.assertTrue(error.exception.timeout)
 
 
 if __name__ == "__main__":

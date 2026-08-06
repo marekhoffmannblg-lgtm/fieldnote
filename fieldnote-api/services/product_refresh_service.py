@@ -103,13 +103,32 @@ def _canonical(value: str) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
-def _deterministic_facts(text: str) -> dict[str, Any]:
-    """Extract only unambiguous, unit-normalized facts from fetched text."""
+_FACT_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("waga_wozka_kg", re.compile(r"(?:waga|weight)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*kg", re.I)),
+    ("maksymalne_obciazenie_kg", re.compile(r"(?:maksymaln(?:e\s+)?obci[ąa]żenie|load capacity|max(?:imum)? load)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*kg", re.I)),
+)
+
+
+def _deterministic_facts(text: str, evidence: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
+    """Extract schema-named facts with field-level provenance.
+
+    The compact rules are deliberately conservative.  Every unrecognised
+    schema field is explicit so a later, injectable AI pass can work only on
+    the unresolved set rather than inventing values from a whole document.
+    """
     facts: dict[str, Any] = {}
-    weight = re.search(r"(?:waga|weight)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*kg", text, re.I)
-    if weight:
-        facts["waga_wozka_kg"] = float(weight.group(1).replace(",", "."))
-    return facts
+    candidates: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    for field, pattern in _FACT_RULES:
+        matches = pattern.findall(text)
+        values = {str(match).replace(",", ".") for match in matches}
+        if len(values) != 1:
+            unresolved.append(field)
+            continue
+        value = float(next(iter(values)))
+        facts[field] = value
+        candidates.append({"field": field, "value": value, "evidence": evidence, "status": "deterministic"})
+    return facts, candidates, unresolved
 
 
 def _provider_call(method: Callable[..., Any], *args: Any, timeout: float, **kwargs: Any) -> Any:
@@ -132,6 +151,7 @@ class ProductRefreshService:
     storage: RefreshStorage
     history: RefreshHistory
     identity_gate: Any | None = None
+    ai_extractor: Callable[..., dict[str, Any]] | None = None
 
     def refresh(self, *, product_id: str, product_slug: str, brand: str, model: str,
                 configuration: str = "", limits: RefreshLimits | None = None,
@@ -166,6 +186,8 @@ class ProductRefreshService:
 
             fetched = []
             all_facts: dict[str, Any] = {}
+            field_candidates: list[dict[str, Any]] = []
+            unresolved_fields: set[str] = set()
             for url, title, item in accepted:
                 if cancel_check and cancel_check():
                     return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
@@ -201,16 +223,32 @@ class ProductRefreshService:
                     append_link(run_source)
                 evidence = {"source_id": source_id, "url": url, "content_hash": content_hash,
                             "excerpt": text[:1000], "snapshot_id": persisted.get("id")}
-                all_facts.update(_deterministic_facts(text))
+                facts, candidates, unresolved = _deterministic_facts(text, evidence)
+                all_facts.update(facts)
+                field_candidates.extend(candidates)
+                unresolved_fields.update(unresolved)
                 fetched.append({**persisted, "duplicate_snapshot": not created, "evidence": evidence,
-                                "candidates": [{"field": "product_description", "value": text[:1000], "evidence": evidence}]})
+                                "candidates": candidates})
             if not fetched:
                 return self._finish(started, "partial", {"reason": "no_content", "rejected": rejected})
             semantic_changed = any(not row["duplicate_snapshot"] for row in fetched)
             group_key = "|".join(part for part in (_canonical(brand), _canonical(model)) if part)
+            ai_state: dict[str, Any] = {"requested": False, "unresolved_fields": sorted(unresolved_fields)}
+            # There is intentionally no default OpenAI client here: workers
+            # provide a metered adapter in production, while fixtures inject a
+            # deterministic function. The cap keeps a bad page bounded.
+            if unresolved_fields and self.ai_extractor:
+                requested = sorted(unresolved_fields)[:3]
+                ai_values = self.ai_extractor(text="\n".join(row["evidence"]["excerpt"] for row in fetched), fields=requested)
+                if isinstance(ai_values, dict):
+                    for field in requested:
+                        if field in ai_values and ai_values[field] is not None:
+                            all_facts[field] = ai_values[field]
+                            field_candidates.append({"field": field, "value": ai_values[field], "evidence": [row["evidence"] for row in fetched], "status": "ai_fallback"})
+                ai_state = {"requested": True, "unresolved_fields": requested, "resolved_fields": sorted(field for field in requested if field in all_facts)}
             semantic_state = {"facts": all_facts, "evidence": [row["evidence"] for row in fetched],
                               "sources": [row.get("source_id", "") for row in fetched],
-                              "openai": {"requested": False, "reason": "no_unresolved_deterministic_candidates"}}
+                              "candidates": field_candidates, "openai": ai_state}
             result = {"sources": fetched, "rejected": rejected, "semantic_snapshot_created": semantic_changed,
                       "last_known_good_preserved": False,
                       "scoped_commit": {"scope": {"product_id": product_id, "group_key": group_key,
@@ -221,6 +259,8 @@ class ProductRefreshService:
         except TimeoutError as exc:
             return self._finish(started, "partial", {"error": str(exc), "reason": "provider_timeout", "last_known_good_preserved": True})
         except Exception as exc:
+            if bool(getattr(exc, "timeout", False)):
+                return self._finish(started, "partial", {"error": str(exc), "reason": "provider_timeout", "last_known_good_preserved": True})
             return self._finish(started, "failed", {"error": str(exc), "last_known_good_preserved": True})
 
     def _identity(self, title: str, brand: str, model: str, configuration: str, item: dict[str, Any]) -> str:

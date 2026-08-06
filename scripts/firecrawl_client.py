@@ -17,10 +17,14 @@ from urllib.request import Request, urlopen
 
 
 class FirecrawlError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int | None = None, attempts: int = 0) -> None:
+    def __init__(self, message: str, *, status_code: int | None = None, attempts: int = 0,
+                 timeout: bool = False) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.attempts = attempts
+        # Callers need to distinguish a bounded provider deadline (a safe
+        # partial result) from an ordinary transport/API failure.
+        self.timeout = timeout
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,7 @@ class FirecrawlClient:
                     raise FirecrawlError(
                         f"Firecrawl transport failed after {attempt} attempts: {type(exc).__name__}",
                         attempts=attempt,
+                        timeout=isinstance(exc, TimeoutError),
                     ) from exc
                 self.sleep(min(self.backoff_seconds * (2 ** (attempt - 1)), max(0.0, deadline - time.monotonic()) if deadline is not None else self.backoff_seconds * (2 ** (attempt - 1))))
                 continue

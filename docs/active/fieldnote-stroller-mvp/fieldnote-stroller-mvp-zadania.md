@@ -283,6 +283,14 @@
 - [x] Opt-in runtime test obejmuje anon/viewer/must-change/analyst i buckety `source-raw`/`source-clean`.
 - [ ] Weryfikacja opt-in lokalnego Supabase oraz końcowy review PASS.
 
+### Unit 8.5 — ograniczony re-review `3745c45..fe4253a`
+
+- [x] P1: exhausted deadline wspólnego FirecrawlClient kończy refresh jako kontrolowany `partial`, nie `failed`; regresja używa rzeczywistego klienta z fixture transportem.
+- [x] P1: dodano schema-named canonical facts, evidence/candidates per field oraz ograniczony, wstrzykiwalny fallback AI wyłącznie dla nierozstrzygniętych pól (bez domyślnego płatnego klienta).
+- [x] P2: regresja cancel między dwoma Scrape wykonuje branch przed drugim pobraniem.
+- [x] P2: scope commit przechodzi przez rzeczywisty output ProductRefreshService → pipeline → worker, bez ręcznie zbudowanego envelope.
+- [x] P2: opt-in RLS obejmuje anon/viewer/must-change read oraz analyst write dla każdej tabeli `product_refresh_*`; wykonanie lokalnego runtime pozostaje wymagane.
+
 ### Unit 8.5 — remediation `8b766a5..HEAD` (`2026-08-06`)
 
 - [x] Typed job utrwala `configuration`, a pipeline przekazuje ją do refreshu.
