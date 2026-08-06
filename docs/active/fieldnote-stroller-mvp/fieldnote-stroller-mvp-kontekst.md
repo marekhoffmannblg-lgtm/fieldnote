@@ -630,3 +630,66 @@
   endpointy legacy pozostały bez zmiany zachowania.
 - Status: implementacja zakończona, Unit 8 oczekuje niezależnego
   `$dev-docs-review`. Unit 9 nie rozpoczęto.
+
+### Planowanie Unit 8.5 — trwałe odświeżenie produktu (`2026-08-06`)
+
+- Uzgodniony kierunek: ręczne odświeżenie pojedynczego produktu ma zawsze
+  uruchamiać nowy Firecrawl Search Allegro i fresh Scrape, a następnie
+  deterministyczną ekstrakcję oraz ograniczone OpenAI dla brakujących lub
+  niejednoznacznych pól. Każdy run i jego źródła mają pozostać w historii.
+- Audyt istniejącego flow wykazał, że obecne `--resume` może użyć starego
+  listingu/snapshotu i pominąć AI dla zmienionej treści tego samego źródła.
+  Dlatego nie rozszerzamy kosmetycznie starego refreshu, tylko planujemy
+  trwały kontrakt `product_refresh` oparty o job, `content_hash`, PostgreSQL
+  i prywatny Supabase Storage.
+- Bezpieczna semantyka: historia i raw evidence są zapisywane zawsze; bieżące
+  dane produktu są publikowane dopiero po quality gate. Konflikt, błąd,
+  cancel lub partial zachowuje last-known-good. Identyczny refresh tworzy nowy
+  wpis historii, lecz nie duplikuje source ani semantic snapshotu.
+- Unit 8.5 został umieszczony po Unit 8 i przed Unit 9. UI przycisku oraz
+  widoku historii pozostaje w Unit 9; Unit 8.5 dostarcza trwałe API/job/worker
+  i kontrakt danych. Wykonanie nie może ruszyć przed końcowym PASS Unit 8.
+- W tej sesji nie zmieniano kodu, nie uruchamiano Firecrawl/OpenAI ani innych
+  płatnych providerów. Zmieniono wyłącznie dokumentację planu i aktywnego
+  zadania.
+
+### Unit 8 — pełny review `b71a991^..b71a991` (`2026-08-06`)
+
+- Zakres: schema 21 atrybutów, offline audit, scoring, serwisy benchmarków i
+  cen, kontrakty/snapshot envelope oraz testy Unit 8. Użyto niezależnie
+  `correctness_reviewer`, `security_reviewer`, `test_reviewer` i
+  `data_reviewer`; UI review nie był wymagany. Nie zmieniano kodu ani nie
+  rozpoczęto Unit 8.5.
+- Security: PASS. Correctness i data potwierdziły dwa P1: scoring/ceny nie są
+  podłączone do runtime ani trwałych snapshotów oraz brak atrybutu zaniża
+  utility score jak zero. Przyjęto także cztery P2: brak spójnego gate'u
+  konfiguracji, niesprawne scored `suspension`, brak aliasów PL/EN/konwersji
+  w schema i niewystarczające regresje core scoringu/cen/audytu.
+- Weryfikacja: focused Unit 8 — 15 PASS; `git diff --check b71a991^..b71a991`
+  — PASS. Pełny `bash scripts/check_fieldnote.sh` nie został ukończony:
+  hygiene zatrzymał się w `git show :<tracked-path>` podczas skanowania
+  śledzonych plików, więc nie oznaczono go jako PASS.
+- Gate: **BLOKUJE** — 2 P1, 4 P2, 0 P3. Unit 8 pozostaje nieukończony;
+  naprawić wyłącznie findings z `review-unit-8.md`, a potem wykonać ograniczony
+  re-review. Unit 8.5 i Unit 9 pozostają poza zakresem.
+
+### Unit 8 — wykonanie remediation P1/P2 (`2026-08-06`)
+
+- Naprawiono wyłącznie findings z `review-unit-8.md`: runtime benchmark
+  endpointy i pipeline scoped commit otrzymały projection scoringu/ceny;
+  utility score używa per-product denominator; internal/competitive/manifests
+  respektują konfigurację; `suspension` ma deterministyczną normalizację;
+  schema ma aliasy PL/EN, collision checks i wersjonowane konwersje.
+- Dodano regresje rankingu, missing-data, konfiguracji, suspension, aliasów,
+  mediany/najnowszej ceny oraz dokładnego corpus 34 specyfikacji. Zmienione
+  pliki kodu obejmują `app.py`, kontrakty/storage, usługi benchmarków,
+  `benchmark_relative_scoring.py`, pipeline oraz testy Unit 8.
+- Weryfikacja: focused Unit 8 — **20 PASS**; py_compile touched modules —
+  PASS; `git diff --check` — PASS. FastAPI-dependent tests nie mogły zostać
+  ukończone w globalnym interpreterze bez `fastapi`; uruchomienie z lokalnym
+  venv zatrzymało się na odczycie dużego lokalnego corpus. Pełna bramka
+  zatrzymała się w istniejącym hygiene `git show :<tracked-path>`; nie
+  oznaczono jej jako PASS.
+- Status: remediation zakończone, ale Unit 8 ma stan **partial** i oczekuje
+  ograniczonego re-review. Zapisano jeden logiczny commit `feat: complete unit
+  8 scoring integration`. Nie rozpoczęto Unit 8.5 ani Unit 9.

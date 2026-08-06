@@ -19,5 +19,15 @@ class PricingAggregationTests(unittest.TestCase):
     def test_invalid_and_empty_prices_are_ignored(self):
         self.assertEqual(aggregate_prices([{"seller":"x", "price":"N/D"}])["status"], "no_data")
 
+    def test_latest_observation_per_seller_drives_median(self):
+        result = aggregate_prices([
+            {"seller_id": "shop-a", "price": 900, "observed_at": "2026-07-01T00:00:00Z", "source_id": "old"},
+            {"seller_id": "shop-a", "price": 1000, "observed_at": "2026-08-01T00:00:00Z", "source_id": "new"},
+            {"seller_id": "shop-b", "price": 1200, "observed_at": "2026-08-01T00:00:00Z", "source_id": "b"},
+            {"seller_id": "shop-c", "price": 1400, "observed_at": "2026-08-01T00:00:00Z", "source_id": "c"},
+        ])
+        self.assertEqual(result["median"], 1200)
+        self.assertEqual(result["min"], 1000)
+
 
 if __name__ == "__main__": unittest.main()

@@ -129,6 +129,7 @@ class CompetitiveBenchmarkCreateRequest(BaseModel):
     benchmark_group_key: str
     anchor_product_id: str
     participant_product_ids: list[str]
+    configuration: str = ""
     title: str = Field(min_length=1, max_length=160)
     status: Literal["draft", "active", "archived"] = "draft"
 
@@ -142,6 +143,8 @@ class CompetitiveBenchmarkSummary(BaseModel):
     participant_count: int
     created_at: str
     updated_at: str
+    semantic_benchmark: dict[str, Any] | None = None
+    price_summary: dict[str, Any] | None = None
 
 
 class BenchmarkProductRef(BaseModel):
@@ -167,6 +170,8 @@ class CompetitiveBenchmarkDetail(BaseModel):
     anchor: BenchmarkProductRef
     participants: list[BenchmarkProductRef] = Field(default_factory=list)
     participant_count: int
+    semantic_benchmark: dict[str, Any] | None = None
+    price_summary: dict[str, Any] | None = None
 
 
 class InternalBenchmarkSummary(BaseModel):
@@ -178,6 +183,8 @@ class InternalBenchmarkSummary(BaseModel):
     status: Literal["dynamic"] = "dynamic"
     participant_count: int
     has_comparison: bool
+    semantic_benchmark: dict[str, Any] | None = None
+    price_summary: dict[str, Any] | None = None
 
 
 class InternalBenchmarkDetail(BaseModel):
@@ -191,6 +198,8 @@ class InternalBenchmarkDetail(BaseModel):
     participant_count: int
     created_at: None = None
     updated_at: str | None = None
+    semantic_benchmark: dict[str, Any] | None = None
+    price_summary: dict[str, Any] | None = None
 
 
 class BenchmarkScoreV1(V1Model):

@@ -2,7 +2,7 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from audit_stroller_attributes import audit_attributes
+from audit_stroller_attributes import audit_attributes, load_products
 
 
 class StrollerAttributeAuditTests(unittest.TestCase):
@@ -15,6 +15,11 @@ class StrollerAttributeAuditTests(unittest.TestCase):
     def test_empty_source_is_reported_as_zero_coverage(self):
         report = audit_attributes([])
         self.assertTrue(all(item["coverage"] == 0 for item in report["decisions"]))
+
+    def test_canonical_internal_corpus_has_exactly_34_products(self):
+        report = audit_attributes(load_products())
+        self.assertEqual(report["product_count"], 34)
+        self.assertEqual(len({item["product_id"] for item in load_products()}), 34)
 
 
 if __name__ == "__main__": unittest.main()

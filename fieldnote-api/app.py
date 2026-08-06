@@ -80,8 +80,12 @@ from benchmark_storage import (  # noqa: E402
     create_manifest as create_competitive_benchmark_manifest,
     list_manifests as list_competitive_benchmark_manifests,
     normalized_brand as normalized_benchmark_brand,
+    normalized_configuration as normalized_benchmark_configuration,
     read_manifest as read_competitive_benchmark_manifest,
 )
+from services.internal_benchmark_service import build_internal_benchmark  # noqa: E402
+from services.competitive_benchmark_service import build_competitive_benchmark  # noqa: E402
+from services.pricing_service import aggregate_prices  # noqa: E402
 from visual_snapshots import artifact_id, artifact_relative, read_jsonl as read_visual_jsonl, source_visual_paths  # noqa: E402
 from provenance_v1 import load_product_provenance  # noqa: E402
 from product_profile import get_profile, generate_or_load_profile  # noqa: E402
@@ -1662,6 +1666,54 @@ def analysis_status_payload(product_slug: str) -> dict[str, Any]:
     }
 
 
+def runtime_benchmark_products(benchmark_group: str) -> list[dict[str, Any]]:
+    """Project persisted legacy model groups into the Unit 8 scorer input."""
+    values: list[dict[str, Any]] = []
+    for path in sorted((PROJECT_ROOT / "output" / "model_groups").glob("*/group.json")):
+        group = read_json(path, {})
+        if not isinstance(group, dict) or str(group.get("benchmark_group", "")).strip() != str(benchmark_group).strip():
+            continue
+        state = read_json(path.parent / "model_state.json", {})
+        state = state if isinstance(state, dict) else {}
+        fields = state.get("fields", {}) if isinstance(state.get("fields"), dict) else {}
+        product = next((item for item in load_products() if str(item.get("group_key", "")).strip() == str(group.get("group_key", "")).strip()), {})
+        values.append({
+            "product_id": str(group.get("product_id") or product.get("product_id") or group.get("group_key") or path.parent.name),
+            "brand": str(group.get("brand") or state.get("brand") or product.get("brand") or ""),
+            "model": str(group.get("model") or state.get("model") or product.get("model") or ""),
+            "configuration": group.get("configuration", state.get("configuration", product.get("configuration", ""))),
+            "group_key": str(group.get("group_key") or product.get("group_key") or "").strip(),
+            "benchmark_group": str(group.get("benchmark_group", benchmark_group)).strip(),
+            "attributes": fields,
+        })
+    return values
+
+
+def runtime_semantic_benchmark(product_slug: str, benchmark_group: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    products = runtime_benchmark_products(benchmark_group)
+    anchor = next((item for item in products if product_slug_for(item.get("brand", ""), item.get("model", ""), item.get("configuration", "")) == product_slug), None)
+    if anchor is None:
+        return {"status": "insufficient_data", "reason": "no_scored_runtime_products", "participants": []}, {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0, "observations": []}
+    candidates = [item for item in products if item is not anchor]
+    if normalized_benchmark_brand(anchor.get("brand")) == "lionelo":
+        benchmark = build_internal_benchmark(products, benchmark_group)
+    else:
+        benchmark = build_competitive_benchmark(anchor, candidates)
+    observations: list[dict[str, Any]] = []
+    for item in products:
+        if item is not anchor and normalized_benchmark_configuration(item.get("configuration")) != normalized_benchmark_configuration(anchor.get("configuration")):
+            continue
+        source_group = next((path.parent for path in (PROJECT_ROOT / "output" / "model_groups").glob("*/group.json") if str(read_json(path, {}).get("group_key", "")) == str(item.get("group_key", ""))), None)
+        if source_group:
+            group = read_json(source_group / "group.json", {})
+            for offer in group.get("sources", group.get("offers", [])) if isinstance(group, dict) else []:
+                if not isinstance(offer, dict):
+                    continue
+                if offer.get("price") is not None:
+                    observations.append({"seller_id": offer.get("seller_id") or offer.get("seller") or offer.get("domain"), "price": offer.get("price"), "observed_at": offer.get("observed_at") or offer.get("fetched_at"), "source_id": offer.get("source_id")})
+    return benchmark, aggregate_prices(observations)
+
+
 def benchmark_payload(product_slug: str) -> dict[str, Any]:
     """Return a category-level matrix, never a copy of a single product card."""
     group_dir = group_dir_for_slug(product_slug)
@@ -1717,6 +1769,7 @@ def benchmark_payload(product_slug: str) -> dict[str, Any]:
             "values": values,
         })
     models.sort(key=lambda item: (item["slug"] != product_slug, str(item["brand"]).lower(), str(item["model"]).lower()))
+    semantic_benchmark, price_summary = runtime_semantic_benchmark(product_slug, benchmark_group)
     return {
         "product_slug": product_slug,
         "benchmark_category": category,
@@ -1728,6 +1781,8 @@ def benchmark_payload(product_slug: str) -> dict[str, Any]:
         "models": models,
         "fields": fields_order,
         "has_comparison": len(models) > 1,
+        "semantic_benchmark": semantic_benchmark,
+        "price_summary": price_summary,
     }
 
 
@@ -2726,6 +2781,7 @@ def competitive_benchmark_detail(manifest: dict[str, Any]) -> dict[str, Any]:
         resolve_benchmark_product(product_id, products=products, states=states, links_by_slug=links_by_slug)
         for product_id in participant_ids
     ]
+    semantic, price_summary = runtime_semantic_benchmark(str(anchor.get("product_slug", "")), str(manifest.get("benchmark_group_key", "")))
     return {
         "benchmark_id": str(manifest.get("benchmark_id", "")),
         "benchmark_type": "competitive",
@@ -2737,6 +2793,8 @@ def competitive_benchmark_detail(manifest: dict[str, Any]) -> dict[str, Any]:
         "participant_count": len(participants),
         "created_at": str(manifest.get("created_at", "")),
         "updated_at": str(manifest.get("updated_at", "")),
+        "semantic_benchmark": semantic,
+        "price_summary": price_summary,
     }
 
 
@@ -2749,7 +2807,19 @@ def internal_benchmark_groups() -> dict[str, list[dict[str, Any]]]:
         group_key = str(product.get("benchmark_group", "")).strip()
         if group_key:
             groups.setdefault(group_key, []).append(product)
-    return {group_key: products for group_key, products in groups.items() if len(products) >= 2}
+    filtered: dict[str, list[dict[str, Any]]] = {}
+    for group_key, products in groups.items():
+        if len(products) < 2:
+            continue
+        counts: dict[str, int] = {}
+        for product in products:
+            config = normalized_benchmark_configuration(product.get("configuration", product.get("stroller_configuration", "")))
+            counts[config] = counts.get(config, 0) + 1
+        target = sorted(counts, key=lambda key: (-counts[key], key))[0]
+        scoped = [product for product in products if normalized_benchmark_configuration(product.get("configuration", product.get("stroller_configuration", ""))) == target]
+        if len(scoped) >= 2:
+            filtered[group_key] = scoped
+    return filtered
 
 
 def internal_benchmark_label(products: list[dict[str, Any]], group_key: str) -> str:
@@ -2846,6 +2916,7 @@ def get_internal_benchmark(benchmark_group_key: str) -> dict[str, Any]:
         if product_slug:
             links_by_slug.setdefault(product_slug, []).append(link)
     participants = [benchmark_product_ref(product, states=states, links_by_slug=links_by_slug) for product in products]
+    semantic = build_internal_benchmark(runtime_benchmark_products(benchmark_group_key), benchmark_group_key)
     return {
         "benchmark_id": None,
         "benchmark_type": "internal",
@@ -2857,6 +2928,8 @@ def get_internal_benchmark(benchmark_group_key: str) -> dict[str, Any]:
         "participant_count": len(participants),
         "created_at": None,
         "updated_at": internal_benchmark_updated_at(products, states),
+        "semantic_benchmark": semantic,
+        "price_summary": {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0},
     }
 
 

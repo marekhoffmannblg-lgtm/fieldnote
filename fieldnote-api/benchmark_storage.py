@@ -45,6 +45,12 @@ def normalized_brand(value: object) -> str:
     return " ".join(str(value or "").split()).casefold()
 
 
+def normalized_configuration(value: object) -> str:
+    raw = " ".join(str(value or "").split()).casefold()
+    compact = raw.replace(" ", "").replace("-", "")
+    return {"2in1": "2w1", "2w1": "2w1", "3in1": "3w1", "3w1": "3w1", "4in1": "4w1", "4w1": "4w1"}.get(compact, raw)
+
+
 def manifest_path(root: Path, benchmark_id: str) -> Path:
     if not BENCHMARK_ID_PATTERN.fullmatch(str(benchmark_id)):
         raise BenchmarkNotFoundError("Nie znaleziono benchmarku.")
@@ -82,6 +88,10 @@ def validate_relationship(payload: dict[str, Any], products: list[dict[str, Any]
     requested_group = str(payload.get("benchmark_group_key", "")).strip()
     if requested_group != anchor_group:
         raise BenchmarkValidationError(f"benchmark_group_key musi być równy grupie anchora: {anchor_group}.")
+    anchor_configuration = normalized_configuration(anchor.get("configuration", anchor.get("stroller_configuration", "")))
+    requested_configuration = normalized_configuration(payload.get("configuration", anchor_configuration))
+    if requested_configuration != anchor_configuration:
+        raise BenchmarkValidationError(f"configuration musi być zgodne z anchorem: {anchor_configuration or '[brak]'}.")
 
     participant_ids = [str(value).strip() for value in payload.get("participant_product_ids", [])]
     if not participant_ids:
@@ -103,12 +113,16 @@ def validate_relationship(payload: dict[str, Any], products: list[dict[str, Any]
             raise BenchmarkValidationError(f"Uczestnik {product_id} nie ma przypisanej grupy benchmarkowej.")
         if group != anchor_group:
             raise BenchmarkValidationError(f"Uczestnik {product_id} należy do grupy {group}, a anchor do {anchor_group}.")
+        participant_configuration = normalized_configuration(participant.get("configuration", participant.get("stroller_configuration", "")))
+        if participant_configuration != anchor_configuration:
+            raise BenchmarkValidationError(f"Uczestnik {product_id} ma konfigurację {participant_configuration or '[brak]'}, a anchor {anchor_configuration or '[brak]'}.")
         participants.append(participant)
     return anchor, participants
 
 
 def create_manifest(root: Path, payload: dict[str, Any], products: list[dict[str, Any]]) -> dict[str, Any]:
     anchor, _participants = validate_relationship(payload, products)
+    anchor_configuration = normalized_configuration(anchor.get("configuration", anchor.get("stroller_configuration", "")))
     benchmark_id = f"benchmark_{uuid.uuid4()}"
     path = manifest_path(root, benchmark_id)
     if path.exists():
@@ -118,6 +132,7 @@ def create_manifest(root: Path, payload: dict[str, Any], products: list[dict[str
         "benchmark_id": benchmark_id,
         "benchmark_type": "competitive",
         "benchmark_group_key": str(anchor.get("benchmark_group", "")).strip(),
+        "configuration": anchor_configuration,
         "anchor_product_id": str(anchor.get("product_id", "")).strip(),
         "participant_product_ids": [str(value).strip() for value in payload["participant_product_ids"]],
         "title": str(payload.get("title", "")).strip(),

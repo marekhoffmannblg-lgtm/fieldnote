@@ -19,6 +19,16 @@ class RelativeScoringTests(unittest.TestCase):
         self.assertGreater(rows["b"]["completeness"], 0)
         self.assertGreaterEqual(rows["b"]["score"], 0)
         self.assertLess(rows["b"]["completeness"], rows["a"]["completeness"])
+        self.assertEqual(rows["a"]["score"], rows["b"]["score"])
+
+    def test_lower_direction_and_binary_suspension_are_deterministic(self):
+        better = product("better", weight="4")
+        worse = product("worse", weight="8")
+        better["attributes"].append({"key": "suspension", "value": "Tak"})
+        worse["attributes"].append({"key": "suspension", "value": "Nie"})
+        result = score_products([better, worse], group_key="light_stroller")
+        rows = {item["product_id"]: item for item in result["participants"]}
+        self.assertGreater(rows["better"]["score"], rows["worse"]["score"])
 
     def test_price_is_not_an_input_to_utility_score(self):
         base = [product("a", weight="5"), product("b", weight="6")]
@@ -29,6 +39,12 @@ class RelativeScoringTests(unittest.TestCase):
         result = build_internal_benchmark([product("a"), product("b"), product("c"), product("x", group="stroller_2in1")], "light_stroller")
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["participant_count"], 3)
+
+    def test_internal_excludes_other_configuration(self):
+        products = [product("a", configuration="2w1"), product("b", configuration="2w1"), product("c", configuration="2w1"), product("wrong", configuration="3w1")]
+        result = build_internal_benchmark(products, "light_stroller")
+        self.assertEqual(result["participant_count"], 3)
+        self.assertEqual(result["configuration"], "2w1")
 
     def test_competitive_filters_configuration_and_group_and_caps_six(self):
         anchor = product("anchor", configuration="2w1")

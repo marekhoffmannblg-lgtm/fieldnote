@@ -142,6 +142,34 @@ def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benc
     # semantic envelope so a 5% durable price transition remains observable.
     price_median = source_price_median({"sources": raw_sources})
     semantic_state = {"group": group_data, "model_state": state_data, "benchmark": benchmark, "coverage": coverage_for_group(group_key)}
+    # Include the deterministic Unit 8 projection in the same scoped envelope
+    # consumed by the durable commit RPC.  This remains an adapter around the
+    # legacy model-group files and never triggers a global rebuild.
+    try:
+        from benchmark_relative_scoring import score_products
+        candidates: list[dict[str, object]] = []
+        for candidate_path in sorted((ROOT / "output" / "model_groups").glob("*/group.json")):
+            candidate_group = read_json(candidate_path, {})
+            if not isinstance(candidate_group, dict) or str(candidate_group.get("benchmark_group", "")).strip() != scope["benchmark_group"]:
+                continue
+            candidate_state = read_json(candidate_path.parent / "model_state.json", {})
+            if not isinstance(candidate_state, dict):
+                continue
+            candidate_fields = candidate_state.get("fields", {}) if isinstance(candidate_state.get("fields"), dict) else {}
+            candidates.append({
+                "product_id": str(candidate_group.get("product_id") or candidate_state.get("product_id") or candidate_group.get("group_key") or candidate_path.parent.name),
+                "brand": candidate_group.get("brand", candidate_state.get("brand", "")),
+                "model": candidate_group.get("model", candidate_state.get("model", "")),
+                "configuration": candidate_group.get("configuration", candidate_state.get("configuration", "")),
+                "benchmark_group": candidate_group.get("benchmark_group", ""),
+                "attributes": candidate_fields,
+            })
+        if candidates:
+            semantic_state["semantic_benchmark"] = score_products(candidates, group_key=str(scope["benchmark_group"]), profile="urban")
+    except (ImportError, ValueError, TypeError):
+        # Legacy runs must still commit their existing domain state if a
+        # historical model state cannot be projected into the v1 schema.
+        pass
     if price_median is not None:
         semantic_state["price_median"] = price_median
     return {"scope": scope, "price_median": price_median, "semantic_state": semantic_state}

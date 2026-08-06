@@ -2,7 +2,7 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from benchmark_relative_scoring import normalize_attribute, load_schema
+from benchmark_relative_scoring import normalize_attribute, load_schema, score_products
 
 
 class AttributeNormalizationTests(unittest.TestCase):
@@ -21,6 +21,14 @@ class AttributeNormalizationTests(unittest.TestCase):
 
     def test_schema_has_21_fields(self):
         self.assertEqual(len(load_schema()["attributes"]), 21)
+
+    def test_polish_and_english_aliases_normalize_identically(self):
+        products = [
+            {"product_id": "pl", "benchmark_group": "g", "attributes": [{"key": "waga stelaża", "value": "1850", "unit": "g"}]},
+            {"product_id": "en", "benchmark_group": "g", "attributes": [{"key": "frame weight", "value": "1.85", "unit": "kg"}]},
+        ]
+        result = score_products(products, group_key="g")
+        self.assertEqual(result["participants"][0]["score"], result["participants"][1]["score"])
 
 
 if __name__ == "__main__": unittest.main()

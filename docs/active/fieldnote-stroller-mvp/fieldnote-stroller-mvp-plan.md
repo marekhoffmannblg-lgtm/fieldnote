@@ -64,14 +64,20 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 3 — Unit 8: Audyt atrybutów i względny scoring wózków
 
-- Status: `implemented; awaiting review`
+- Status: `implemented; remediation complete; awaiting re-review`
 - Zależności: Unit 3, Unit 7
 - Kryterium ukończenia: raport obejmuje 21 pól, scoring jest deterministyczny w czterech segmentach, a cena nie wpływa na wynik użytkowy.
+
+### Faza 3 — Unit 8.5: Trwałe, pełne odświeżenie danych produktu
+
+- Status: `pending`
+- Zależności: Unit 5–8; wykonanie dopiero po końcowym review PASS Unit 8
+- Kryterium ukończenia: ręczny refresh jednego produktu zawsze wykonuje świeży Firecrawl Search i Scrape, utrwala raw snapshots/evidence/run history, bezpiecznie aktualizuje fakty przez deterministyczną ekstrakcję i OpenAI oraz przelicza wyłącznie istniejący scope produktu. Identyczne dane tworzą historię runu, ale nie duplikują snapshotu semantycznego.
 
 ### Faza 4 — Unit 9: UI produkcyjne i import administratora
 
 - Status: `pending`
-- Zależności: Unit 4–8
+- Zależności: Unit 4–8.5
 - Kryterium ukończenia: UI działa wyłącznie przez API, import XLSX ma preview/commit, a role ograniczają akcje.
 
 ### Faza 5 — Unit 10: Render staging/production i security gate

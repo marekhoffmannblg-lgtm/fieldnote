@@ -9,6 +9,14 @@ def aggregate_prices(observations: list[Mapping[str, Any]]) -> dict[str, Any]:
     """Return median/min/max over one deterministic observation per seller."""
     chosen: dict[str, Mapping[str, Any]] = {}
     for observation in observations:
+        if observation.get("available") is False:
+            continue
+        availability = str(observation.get("availability", "")).strip().casefold()
+        if availability in {"unavailable", "out_of_stock", "out of stock", "niedostępny", "niedostepny"}:
+            continue
+        condition = str(observation.get("condition", "new")).strip().casefold()
+        if condition in {"used", "używany", "uzywany", "refurbished", "powystawowy", "open_box"}:
+            continue
         try: price = float(observation.get("price"))
         except (TypeError, ValueError): continue
         if price <= 0: continue

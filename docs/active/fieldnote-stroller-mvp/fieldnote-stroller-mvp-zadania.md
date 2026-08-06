@@ -68,8 +68,17 @@
 ## Unit 8 — Audyt atrybutów i względny scoring
 
 - [x] Implementacja: wersjonowany schema wózków, audyt 21 pól, scoring względny, internal/competitive benchmark i agregacja cen.
-- [x] Test: atrybuty, normalizacja, scoring, ceny i semantyczne snapshoty bez AI — 15 PASS.
-- [x] Weryfikacja: raport obejmuje 21 pól i 34 specyfikacje Lionelo; usługi filtrują segment/konfigurację, wymagają minimum 3 produktów internal, limitują competitive do 6 i oddzielają ceny od score.
+- [x] Implementacja remediation: runtime endpointy i scoped snapshot projection używają scoringu/ceny; brak danych nie zaniża utility score; konfiguracja, `suspension`, aliasy i konwersje są deterministyczne.
+- [x] Test: atrybuty, aliasy, normalizacja, scoring, ceny, konfiguracja, corpus 34 i semantyczne snapshoty bez AI — 20 PASS.
+- [ ] Weryfikacja: focused i py_compile przechodzą; pełny `bash scripts/check_fieldnote.sh` zatrzymuje się na `test_repository_hygiene.py`/`git show`, a testy FastAPI wymagają środowiska z zależnością `fastapi`.
+- [ ] Review: brak otwartych P1/P2.
+
+## Unit 8.5 — Trwałe, pełne odświeżenie danych produktu
+
+- [ ] Implementacja: durable `product_refresh` dla jednego produktu; świeży Firecrawl Search/Scrape, identity gate, prywatne raw/clean snapshots, ekstrakcja deterministyczna + ograniczone OpenAI, evidence/candidates i fenced incremental commit.
+- [ ] Test: offline fixtures pokrywają fresh fetch mimo cache, exact-match, zmianę `content_hash`, błędy providerów/Storage, RLS, limity, cancel/lease oraz zachowanie last-known-good.
+- [ ] Weryfikacja: dwa identyczne refresh runy pozostają w historii, lecz nie duplikują source/semantic snapshots; zmiana obejmuje wyłącznie produkt i jego istniejący scope benchmarkowy.
+- [ ] Operator: jeden limitowany live smoke produktu dopiero poza CI, bez masowego refreshu.
 - [ ] Review: brak otwartych P1/P2.
 
 ## Unit 9 — UI produkcyjne i import administratora
@@ -120,6 +129,15 @@
 - [x] P2: w Supabase `POST /api/products` używa repozytorium bez legacy odczytu/zapisu i zachowuje rekord w list/detail.
 - [x] P2: detail w Supabase nie odczytuje legacy provenance.
 - [x] P2: dodano wersjonowany fixture oraz wykonywalny entrypoint migracji i audytu.
+
+### Unit 8
+
+- [x] P1: podłączyć scoring, ceny i semantic snapshoty do endpointów oraz przyrostowego commitu runtime.
+- [x] P1: liczyć utility score wyłącznie z wag prawidłowych pól danego produktu; brak ma obniżać tylko completeness.
+- [x] P2: wymusić zgodność konfiguracji w internal benchmarku i competitive manifeście.
+- [x] P2: naprawić boolean/deterministyczną normalizację scored pola `suspension`.
+- [x] P2: dodać do schema aliasy PL/EN oraz wersjonowane konwersje i normalizację kluczy.
+- [x] P2: dodać regresje rankingu, granic participantów/konfiguracji, mediany/recency cen oraz audytu corpus 34 specyfikacji.
 - [x] P2: audit wymaga dokładnie 34 distinct produktów Lionelo, niezależnie od konkurentów i duplikatów.
 - [x] P1: fixture/audit używa dokładnego zatwierdzonego zbioru 34 realnych Lionelo ze śledzonych specyfikacji, nie syntetycznych `00..33`.
 - [x] P1: zapis katalogu przez API z service-role jest wyłączony w Unit 3 do czasu autoryzacji Unit 4.

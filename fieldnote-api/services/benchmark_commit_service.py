@@ -98,7 +98,7 @@ class BenchmarkCommitService:
             # create a misleading benchmark_group snapshot.  The pipeline may
             # provide an explicit internal projection; otherwise there is no
             # group snapshot to persist for this bounded commit.
-            internal = state.get("internal_benchmark", state.get("internal_benchmarks"))
+            internal = state.get("semantic_benchmark", state.get("internal_benchmark", state.get("internal_benchmarks")))
             if isinstance(internal, Mapping):
                 internal_projection: Any = dict(internal)
             elif isinstance(internal, list):
