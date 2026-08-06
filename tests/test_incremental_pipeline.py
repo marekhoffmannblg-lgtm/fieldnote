@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import tempfile
 import unittest
 from argparse import Namespace
@@ -85,6 +86,26 @@ class IncrementalPipelineTests(unittest.TestCase):
                 )
         self.assertEqual(payload["price_median"], 102.5)
         self.assertEqual(payload["semantic_state"]["price_median"], 102.5)
+
+    def test_scoped_commit_payload_isolates_configuration_and_participants(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, product_id, configuration in (("orfeo", "orf", "2w1"), ("cleo", "cleo", "3w1")):
+                model_dir = root / "output" / "model_groups" / name
+                model_dir.mkdir(parents=True)
+                (model_dir / "group.json").write_text(
+                    json.dumps({"group_key": f"lionelo|{name}", "product_id": product_id, "brand": "Lionelo", "model": name, "configuration": configuration, "benchmark_group": "compact", "sources": []}),
+                    encoding="utf-8",
+                )
+                (model_dir / "model_state.json").write_text(json.dumps({"group_key": f"lionelo|{name}", "configuration": configuration, "fields": {}}), encoding="utf-8")
+            with patch.object(research_pipeline, "ROOT", root):
+                payload = research_pipeline.scoped_commit_payload(
+                    "lionelo|orfeo", {"product_id": "orf", "configuration": "2in1"}, {"benchmark_group": "compact"}
+                )
+        semantic = payload["semantic_state"]["semantic_benchmark"]
+        self.assertEqual(semantic["configuration"], "2w1")
+        self.assertEqual(semantic["participant_product_ids"], ["orf"])
+        self.assertEqual(payload["scope"]["participant_product_ids"], ["orf"])
 
     def test_direct_cli_without_context_keeps_derived_stages_scoped(self):
         calls = []

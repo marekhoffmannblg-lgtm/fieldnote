@@ -75,14 +75,28 @@ class BenchmarkCommitService:
         product_id = str(scope.get("product_id") or job.get("product_id") or "").strip()
         group_key = str(scope.get("group_key", "")).strip()
         benchmark_group = str(scope.get("benchmark_group", "")).strip()
+        configuration = str(scope.get("configuration", "")).strip()
         if not product_id or not group_key:
             raise BenchmarkCommitError("Scoped commit requires product_id and group_key.")
         state = _mapping(scoped.get("semantic_state"))
         if not state:
             raise BenchmarkCommitError("Scoped commit has no semantic domain state.")
+        semantic_benchmark = _mapping(state.get("semantic_benchmark"))
+        if not configuration:
+            configuration = str(semantic_benchmark.get("configuration", "")).strip()
+        participant_ids = [
+            str(value).strip()
+            for value in scope.get("participant_product_ids", semantic_benchmark.get("participant_product_ids", []))
+            if str(value).strip()
+        ]
         price = _price(scoped.get("price_median"))
         product_domain = {key: value for key, value in state.items() if key != "price_median"}
-        product_payload = {"scope": {"product_id": product_id, "group_key": group_key}, "state": state}
+        product_scope = {"product_id": product_id, "group_key": group_key}
+        if configuration:
+            product_scope["configuration"] = configuration
+        if participant_ids:
+            product_scope["participant_product_ids"] = participant_ids
+        product_payload = {"scope": product_scope, "state": state}
         snapshots = [{
             "scope_type": "product",
             "scope_id": product_id,
@@ -106,7 +120,12 @@ class BenchmarkCommitService:
             else:
                 internal_projection = None
             if internal_projection:
-                group_payload = {"scope": {"group_key": group_key, "benchmark_group": benchmark_group}, "state": internal_projection}
+                group_scope = {"group_key": group_key, "benchmark_group": benchmark_group}
+                if configuration:
+                    group_scope["configuration"] = configuration
+                if participant_ids:
+                    group_scope["participant_product_ids"] = participant_ids
+                group_payload = {"scope": group_scope, "state": internal_projection}
                 snapshots.append({
                     "scope_type": "benchmark_group",
                     "scope_id": benchmark_group,
@@ -130,4 +149,14 @@ class BenchmarkCommitService:
             })
         if len(snapshots) > 16:
             raise BenchmarkCommitError("Scoped commit exceeds snapshot limit.")
-        return snapshots, {"product_id": product_id, "group_key": group_key, "benchmark_group": benchmark_group, "scope_version": "1"}
+        result_scope: dict[str, Any] = {
+            "product_id": product_id,
+            "group_key": group_key,
+            "benchmark_group": benchmark_group,
+            "scope_version": "1",
+        }
+        if configuration:
+            result_scope["configuration"] = configuration
+        if participant_ids:
+            result_scope["participant_product_ids"] = participant_ids
+        return snapshots, result_scope

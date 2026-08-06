@@ -693,3 +693,41 @@
 - Status: remediation zakończone, ale Unit 8 ma stan **partial** i oczekuje
   ograniczonego re-review. Zapisano jeden logiczny commit `feat: complete unit
   8 scoring integration`. Nie rozpoczęto Unit 8.5 ani Unit 9.
+
+### Unit 8 — ograniczony re-review `0b985d0^..0b985d0` (`2026-08-06`)
+
+- Zakres obejmował wyłącznie remediation poprzednich findings. Użyto
+  `correctness_reviewer`, `security_reviewer`, `test_reviewer` i
+  `data_reviewer`; UI review nie był wymagany. Nie zmieniano kodu ani nie
+  rozpoczęto Unit 8.5.
+- Security: PASS. Correctness, tests i data potwierdziły dwa P1: scoped
+  semantic snapshot nie filtruje konfiguracji oraz competitive detail liczy
+  inny skład niż manifest. Przyjęto P2 dla fałszywego `no_data` ceny internal
+  i braku wykonawczych regresji API/commit/config-manifest.
+- Weryfikacja: focused Unit 8 — 20 PASS; py_compile i
+  `git diff --check 0b985d0^..0b985d0` — PASS. Pełna offline bramka nie została
+  oznaczona jako PASS, ponieważ istniejący hygiene zatrzymuje się na
+  `git show :<tracked-path>` w tym środowisku.
+- Gate: **BLOKUJE** — 2 P1, 2 P2, 0 P3. Naprawić wyłącznie findings z
+  `review-unit-8.md`, a potem wykonać kolejny ograniczony re-review. Unit 8.5
+  i Unit 9 pozostają poza zakresem.
+
+### Unit 8 — remediation po ograniczonym re-review (`2026-08-06`)
+
+- Naprawiono wyłącznie cztery zaakceptowane findings: scoped pipeline filtruje
+  konfigurację i zapisuje ją wraz z participant IDs; durable snapshot niesie
+  ten sam scope; competitive detail przekazuje manifest participant IDs do
+  scoringu i agregacji ceny; internal detail używa runtime price summary
+  zamiast stałego `no_data`.
+- Dodano regresje `scoped_commit_payload` dla mieszanego 2w1/3w1 oraz testy
+  kontraktów detail przekazujące manifest scope i ceny internal. Zmieniono
+  `scripts/run_model_research_pipeline.py`, `fieldnote-api/app.py`,
+  `fieldnote-api/services/benchmark_commit_service.py` i testy Unit 8.
+- Weryfikacja: focused pipeline/snapshot suite — **10 PASS**; kompilacja
+  wszystkich zmienionych modułów i testów — PASS. Uruchomienie testów API w
+  `fieldnote-api/.venv` zatrzymało się na istniejącym odczycie dużego corpus;
+  pełny `check_fieldnote.sh` nie został oznaczony jako PASS z powodu znanego
+  zawieszenia hygiene na `git show :<tracked-path>`.
+- Status: **partial**, oczekuje ograniczonego re-review Unit 8. Nie rozpoczęto
+  Unit 8.5 ani Unit 9. Następny krok:
+  `$dev-docs-review docs/active/fieldnote-stroller-mvp 8`.

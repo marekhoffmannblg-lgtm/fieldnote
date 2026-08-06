@@ -1689,19 +1689,80 @@ def runtime_benchmark_products(benchmark_group: str) -> list[dict[str, Any]]:
     return values
 
 
-def runtime_semantic_benchmark(product_slug: str, benchmark_group: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def runtime_semantic_benchmark(
+    product_slug: str,
+    benchmark_group: str,
+    participant_product_ids: list[str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     products = runtime_benchmark_products(benchmark_group)
     anchor = next((item for item in products if product_slug_for(item.get("brand", ""), item.get("model", ""), item.get("configuration", "")) == product_slug), None)
     if anchor is None:
         return {"status": "insufficient_data", "reason": "no_scored_runtime_products", "participants": []}, {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0, "observations": []}
-    candidates = [item for item in products if item is not anchor]
-    if normalized_benchmark_brand(anchor.get("brand")) == "lionelo":
-        benchmark = build_internal_benchmark(products, benchmark_group)
+    anchor_id = str(anchor.get("product_id", "")).strip()
+    requested_ids = [str(value).strip() for value in (participant_product_ids or []) if str(value).strip()]
+    if requested_ids:
+        by_id = {str(item.get("product_id", "")).strip(): item for item in products}
+        missing_ids = [product_id for product_id in requested_ids if product_id not in by_id]
+        if missing_ids:
+            return (
+                {
+                    "status": "insufficient_data",
+                    "reason": "manifest_participants_unavailable",
+                    "missing_product_ids": missing_ids,
+                    "participant_product_ids": requested_ids,
+                    "participants": [],
+                },
+                {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0, "observations": []},
+            )
+        candidates = [by_id[product_id] for product_id in requested_ids if product_id != anchor_id]
     else:
-        benchmark = build_competitive_benchmark(anchor, candidates)
+        candidates = [item for item in products if item is not anchor]
+    if normalized_benchmark_brand(anchor.get("brand")) == "lionelo":
+        benchmark = build_internal_benchmark(
+            products,
+            benchmark_group,
+            configuration=normalized_benchmark_configuration(anchor.get("configuration")),
+        )
+    else:
+        benchmark = build_competitive_benchmark(anchor, candidates, max_participants=max(len(candidates), 1))
+    if requested_ids and normalized_benchmark_brand(anchor.get("brand")) != "lionelo":
+        # The manifest is the source of truth; never substitute another
+        # compatible runtime product when a requested participant is absent or
+        # filtered by the service's group/configuration guard.
+        actual_ids = [str(value).strip() for value in benchmark.get("participant_product_ids", [])]
+        if set(actual_ids) != set(requested_ids) or len(actual_ids) != len(requested_ids):
+            return (
+                {
+                    "status": "insufficient_data",
+                    "reason": "manifest_participants_incompatible",
+                    "participant_product_ids": requested_ids,
+                    "available_participant_product_ids": actual_ids,
+                    "participants": [],
+                },
+                {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0, "observations": []},
+            )
+        benchmark["participant_product_ids"] = requested_ids
+    selected_ids: set[str]
+    if normalized_benchmark_brand(anchor.get("brand")) == "lionelo":
+        selected_ids = {
+            str(item.get("product_id", "")).strip()
+            for item in products
+            if normalized_benchmark_brand(item.get("brand")) == "lionelo"
+            and normalized_benchmark_configuration(item.get("configuration")) == normalized_benchmark_configuration(anchor.get("configuration"))
+        }
+    elif requested_ids:
+        selected_ids = set(requested_ids)
+    else:
+        selected_ids = {
+            str(value).strip()
+            for value in benchmark.get("participant_product_ids", [])
+            if str(value).strip()
+        }
+    selected_ids.add(anchor_id)
     observations: list[dict[str, Any]] = []
     for item in products:
-        if item is not anchor and normalized_benchmark_configuration(item.get("configuration")) != normalized_benchmark_configuration(anchor.get("configuration")):
+        item_id = str(item.get("product_id", "")).strip()
+        if item_id not in selected_ids:
             continue
         source_group = next((path.parent for path in (PROJECT_ROOT / "output" / "model_groups").glob("*/group.json") if str(read_json(path, {}).get("group_key", "")) == str(item.get("group_key", ""))), None)
         if source_group:
@@ -2781,7 +2842,11 @@ def competitive_benchmark_detail(manifest: dict[str, Any]) -> dict[str, Any]:
         resolve_benchmark_product(product_id, products=products, states=states, links_by_slug=links_by_slug)
         for product_id in participant_ids
     ]
-    semantic, price_summary = runtime_semantic_benchmark(str(anchor.get("product_slug", "")), str(manifest.get("benchmark_group_key", "")))
+    semantic, price_summary = runtime_semantic_benchmark(
+        str(anchor.get("product_slug", "")),
+        str(manifest.get("benchmark_group_key", "")),
+        participant_product_ids=participant_ids,
+    )
     return {
         "benchmark_id": str(manifest.get("benchmark_id", "")),
         "benchmark_type": "competitive",
@@ -2916,7 +2981,15 @@ def get_internal_benchmark(benchmark_group_key: str) -> dict[str, Any]:
         if product_slug:
             links_by_slug.setdefault(product_slug, []).append(link)
     participants = [benchmark_product_ref(product, states=states, links_by_slug=links_by_slug) for product in products]
-    semantic = build_internal_benchmark(runtime_benchmark_products(benchmark_group_key), benchmark_group_key)
+    anchor_product = products[0]
+    semantic, price_summary = runtime_semantic_benchmark(
+        product_slug_for(
+            str(anchor_product.get("brand", "")),
+            str(anchor_product.get("model", "")),
+            str(anchor_product.get("configuration", "")),
+        ),
+        benchmark_group_key,
+    )
     return {
         "benchmark_id": None,
         "benchmark_type": "internal",
@@ -2929,7 +3002,7 @@ def get_internal_benchmark(benchmark_group_key: str) -> dict[str, Any]:
         "created_at": None,
         "updated_at": internal_benchmark_updated_at(products, states),
         "semantic_benchmark": semantic,
-        "price_summary": {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0},
+        "price_summary": price_summary,
     }
 
 

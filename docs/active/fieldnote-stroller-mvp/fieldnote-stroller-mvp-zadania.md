@@ -138,6 +138,10 @@
 - [x] P2: naprawić boolean/deterministyczną normalizację scored pola `suspension`.
 - [x] P2: dodać do schema aliasy PL/EN oraz wersjonowane konwersje i normalizację kluczy.
 - [x] P2: dodać regresje rankingu, granic participantów/konfiguracji, mediany/recency cen oraz audytu corpus 34 specyfikacji.
+- [x] P1: scoped semantic benchmark i durable snapshot filtrują dokładnie konfigurację produktu researchu oraz zapisują ją wraz z participant IDs.
+- [x] P1: detail competitive benchmarku liczy score i cenę dokładnie dla anchora oraz `participant_product_ids` zapisanego manifestu.
+- [x] P2: internal benchmark detail agreguje ceny dokładnego participant scope zamiast raportować stałe `no_data`.
+- [x] P2: dodano wykonawcze regresje scope konfiguracji, manifest participant set, cen internal i snapshot scope; pełna suite API nadal wymaga osobnego uruchomienia w venv.
 - [x] P2: audit wymaga dokładnie 34 distinct produktów Lionelo, niezależnie od konkurentów i duplikatów.
 - [x] P1: fixture/audit używa dokładnego zatwierdzonego zbioru 34 realnych Lionelo ze śledzonych specyfikacji, nie syntetycznych `00..33`.
 - [x] P1: zapis katalogu przez API z service-role jest wyłączony w Unit 3 do czasu autoryzacji Unit 4.

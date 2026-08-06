@@ -38,6 +38,20 @@ def normalized(value: str) -> str:
     return " ".join(value.lower().split())
 
 
+def normalized_configuration(value: object) -> str:
+    """Canonicalize stroller configurations for scoped benchmark projections."""
+    raw = " ".join(str(value or "").split()).casefold()
+    compact = raw.replace(" ", "").replace("-", "")
+    return {
+        "2in1": "2w1",
+        "2w1": "2w1",
+        "3in1": "3w1",
+        "3w1": "3w1",
+        "4in1": "4w1",
+        "4w1": "4w1",
+    }.get(compact, raw)
+
+
 def path_slug(value: str) -> str:
     import re
     import unicodedata
@@ -136,7 +150,25 @@ def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benc
             state_data = {"group_key": state.get("group_key", ""), "brand": state.get("brand", ""), "model": state.get("model", ""), "fields": {key: {name: value.get(name) for name in ("value", "status", "confidence", "validation_status")} for key, value in state.get("fields", {}).items() if isinstance(value, dict)}}
         break
     benchmark = next((row for row in read_csv(ROOT / "output" / "model_benchmark.csv") if row.get("group_key") == group_key), {})
-    scope = {"product_id": str(product_scope.get("product_id", group_key)), "group_key": group_key, "benchmark_group": str(benchmark_group_scope.get("benchmark_group", product_scope.get("benchmark_group", group_data.get("benchmark_group", ""))))}
+    target_product = next(
+        (item for item in product_scope.get("products", []) if isinstance(item, dict)),
+        {},
+    )
+    target_configuration = normalized_configuration(
+        product_scope.get(
+            "configuration",
+            target_product.get(
+                "configuration",
+                target_product.get("stroller_configuration", ""),
+            ),
+        )
+    )
+    scope = {
+        "product_id": str(product_scope.get("product_id", group_key)),
+        "group_key": group_key,
+        "benchmark_group": str(benchmark_group_scope.get("benchmark_group", product_scope.get("benchmark_group", group_data.get("benchmark_group", "")))),
+        "configuration": target_configuration,
+    }
     # Compute the median from the original records before the identifier-only
     # source projection above.  This value is carried separately in the
     # semantic envelope so a 5% durable price transition remains observable.
@@ -156,16 +188,36 @@ def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benc
             if not isinstance(candidate_state, dict):
                 continue
             candidate_fields = candidate_state.get("fields", {}) if isinstance(candidate_state.get("fields"), dict) else {}
+            candidate_configuration = normalized_configuration(
+                candidate_group.get(
+                    "configuration",
+                    candidate_state.get(
+                        "configuration",
+                        candidate_state.get("stroller_configuration", ""),
+                    ),
+                )
+            )
+            if candidate_configuration != target_configuration:
+                continue
             candidates.append({
                 "product_id": str(candidate_group.get("product_id") or candidate_state.get("product_id") or candidate_group.get("group_key") or candidate_path.parent.name),
                 "brand": candidate_group.get("brand", candidate_state.get("brand", "")),
                 "model": candidate_group.get("model", candidate_state.get("model", "")),
-                "configuration": candidate_group.get("configuration", candidate_state.get("configuration", "")),
+                "configuration": candidate_configuration,
                 "benchmark_group": candidate_group.get("benchmark_group", ""),
                 "attributes": candidate_fields,
             })
         if candidates:
-            semantic_state["semantic_benchmark"] = score_products(candidates, group_key=str(scope["benchmark_group"]), profile="urban")
+            semantic_benchmark = score_products(candidates, group_key=str(scope["benchmark_group"]), profile="urban")
+            participant_ids = [
+                str(item.get("product_id", "")).strip()
+                for item in semantic_benchmark.get("participants", [])
+                if isinstance(item, dict) and str(item.get("product_id", "")).strip()
+            ]
+            semantic_benchmark["configuration"] = target_configuration
+            semantic_benchmark["participant_product_ids"] = participant_ids
+            scope["participant_product_ids"] = participant_ids
+            semantic_state["semantic_benchmark"] = semantic_benchmark
     except (ImportError, ValueError, TypeError):
         # Legacy runs must still commit their existing domain state if a
         # historical model state cannot be projected into the v1 schema.

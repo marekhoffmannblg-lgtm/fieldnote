@@ -78,6 +78,25 @@ class CompetitiveBenchmarkTests(unittest.TestCase):
         self.assertNotIn("participant_product_ids", manifest)
         self.assertEqual(manifest["anchor"]["product_id"], ANCHOR)
         self.assertEqual(manifest["participants"][0]["product_id"], COMPETITOR)
+
+    def test_detail_passes_manifest_participants_to_runtime_projection(self) -> None:
+        manifest = {**payload(), "benchmark_id": "benchmark_test", "created_at": "", "updated_at": ""}
+        captured: dict[str, object] = {}
+
+        def fake_runtime(slug: str, group: str, participant_product_ids=None):
+            captured["ids"] = participant_product_ids
+            return ({"status": "ok", "participant_product_ids": list(participant_product_ids or [])}, {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0})
+
+        with patch.object(api, "runtime_semantic_benchmark", side_effect=fake_runtime):
+            result = api.competitive_benchmark_detail(manifest)
+        self.assertEqual(captured["ids"], [COMPETITOR])
+        self.assertEqual(result["semantic_benchmark"]["participant_product_ids"], [COMPETITOR])
+
+    def test_internal_detail_exposes_runtime_price_summary(self) -> None:
+        expected = {"status": "ok", "median": 110.0, "min": 100.0, "max": 120.0, "seller_count": 2}
+        with patch.object(api, "runtime_semantic_benchmark", return_value=({"status": "ok"}, expected)):
+            result = api.get_internal_benchmark("light_stroller")
+        self.assertEqual(result["price_summary"], expected)
         self.assertEqual(manifest["participant_count"], 1)
         forbidden = {"evidence", "snapshot", "profile", "coverage", "fields", "parameters"}
         self.assertTrue(forbidden.isdisjoint(manifest))
