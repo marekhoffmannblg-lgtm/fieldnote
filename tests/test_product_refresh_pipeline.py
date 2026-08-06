@@ -135,7 +135,7 @@ class ProductRefreshTests(unittest.TestCase):
         provider = Provider("Waga: 9,5 kg")
         calls = []
         service, _, _ = self.make(provider)
-        service.ai_extractor = lambda *, text, fields: calls.append((text, fields)) or {"maksymalne_obciazenie_kg": 22}
+        service.ai_extractor = lambda *, text, fields, max_tokens: calls.append((text, fields, max_tokens)) or {"facts": {"maksymalne_obciazenie_kg": 22}, "usage": {"total_tokens": 3, "complete": True}}
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         state = result["result"]["scoped_commit"]["semantic_state"]
         self.assertEqual(state["facts"], {"waga_wozka_kg": 9.5, "maksymalne_obciazenie_kg": 22})
@@ -170,6 +170,14 @@ class ProductRefreshTests(unittest.TestCase):
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["result"]["reason"], "ai_extractor_error")
+        self.assertNotIn("scoped_commit", result["result"])
+
+    def test_incomplete_ai_response_is_partial_without_semantic_commit(self):
+        service, _, _ = self.make(Provider("Waga: 9,5 kg"))
+        service.ai_extractor = lambda **_: {"facts": {}, "usage": {"total_tokens": 3, "complete": True}}
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["result"]["reason"], "ai_response_incomplete")
         self.assertNotIn("scoped_commit", result["result"])
 
     def test_cancel_after_last_scrape_prevents_semantic_commit(self):

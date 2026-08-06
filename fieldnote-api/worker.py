@@ -22,7 +22,7 @@ from repositories.supabase_client import SupabaseClient
 from services.job_service import cost_number
 from services.pipeline_service import PipelineResult, PipelineService
 from services.benchmark_commit_service import BenchmarkCommitService
-from services.product_refresh_service import ProductRefreshService
+from services.product_refresh_service import OpenAIRefreshExtractor, ProductRefreshService
 from repositories.refresh_repository import SupabaseRefreshHistory, SupabaseRefreshStorage
 from firecrawl_client import FirecrawlClient
 
@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true"); parser.add_argument("--poll-seconds", type=float, default=2.0)
     args = parser.parse_args(argv)
     client = SupabaseClient.from_env()
-    refresh = ProductRefreshService(FirecrawlClient(), SupabaseRefreshStorage(client), SupabaseRefreshHistory(client))
+    refresh = ProductRefreshService(FirecrawlClient(), SupabaseRefreshStorage(client), SupabaseRefreshHistory(client), ai_extractor=OpenAIRefreshExtractor.from_env())
     worker = ResearchWorker(JobRepository(client), PipelineService(refresh_service=refresh), lease_seconds=int(os.getenv("FIELDNOTE_JOB_LEASE_SECONDS", "60")))
     while True:
         worked = worker.process_one()

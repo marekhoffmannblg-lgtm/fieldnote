@@ -264,6 +264,22 @@
 - [x] 32 focused testy, py_compile i git diff --check PASS; pełny gate zatrzymuje znane zawieszenie hygiene.
 - [ ] Review końcowy PASS.
 
+### Unit 8.5 — ograniczony re-review `dd1df6a^..dd1df6a`
+
+- [ ] P1: podłączyć do produkcyjnego workera metrowany adapter OpenAI z wersjonowanym schema i bezpłatnym fixture contractem.
+- [ ] P1: odrzucać pustą, niekompletną lub błędnie typowaną odpowiedź AI jako `partial/no_mutation`.
+- [ ] P1: agregować usage Firecrawl/AI i nie publikować snapshotu przy nieznanym usage.
+- [ ] P2: dodać wykonawczą regresję `succeeded + usage_complete=False + scoped_commit` → fenced no-mutation.
+- [ ] P2: dodać cancel po udanym fallbacku AI, tuż przed publikacją.
+- [ ] P2: uruchomić opt-in lokalny PostgREST RLS dla historii refreshu.
+
+### Unit 8.5 — końcowa remediation workflow
+
+- [x] Produkcyjny worker przekazuje metrowany adapter OpenAI, a brak konfiguracji kończy się `partial/no_mutation`.
+- [x] Pusta, niekompletna lub błędnie typowana odpowiedź AI nie publikuje snapshotu.
+- [x] Usage Firecrawl/AI jest wymagane do semantic commit; nieznane usage daje partial.
+- [ ] Uruchomić lokalny Supabase RLS runtime i końcowy review PASS.
+
 ### Unit 8.5 — ograniczony re-review `54e7a05^..54e7a05`
 
 - [x] P1: worker produkcyjny kończy brak adaptera AI jako `partial/no_mutation`; pełny adapter pozostaje osobnym krokiem produkcyjnym.

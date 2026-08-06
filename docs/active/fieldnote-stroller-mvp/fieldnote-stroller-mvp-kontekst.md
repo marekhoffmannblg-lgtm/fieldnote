@@ -989,3 +989,24 @@ pozostaje partial; Unit 9 nie rozpoczęto.
   backend i frontend typecheck, ale zatrzymał się bez końcowego wyniku podczas
   frontendowego `node --test`; nie oznaczam pełnego gate jako PASS. Unit 8.5
   pozostaje **partial** do review; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — ograniczony re-review `dd1df6a^..dd1df6a` (`2026-08-06`)
+
+Review ostatniej remediation wykonali correctness, security i tests; data
+wykonano jako single-agent fallback. Security: PASS. Focused suite: **53
+testy, 44 PASS, 9 opt-in skipped**; `py_compile` i diff-check PASS. Gate
+**BLOKUJE — 3 P1, 3 P2**. Pozostaje produkcyjny adapter OpenAI, walidacja
+niepełnej odpowiedzi AI, pełne usage/cost gate, regresje fence i cancel po AI
+oraz uruchomienie lokalnego runtime RLS. Unit 8.5 pozostaje partial; Unit 9
+nie rozpoczęto.
+
+### Unit 8.5 — końcowa remediation workflow (`2026-08-06`)
+
+- Worker tworzy teraz metrowany `OpenAIRefreshExtractor` wyłącznie z
+  `OPENAI_API_KEY`; brak klucza pozostaje bezpiecznym `partial/no_mutation`.
+  Adapter używa wersjonowanego schema, ograniczonego promptu i limitu tokenów.
+- Refresh odrzuca pustą/niekompletną odpowiedź AI oraz nieznane usage jako
+  `partial/no_mutation`; pipeline przekazuje pages/tokens/usage_complete.
+- Focused testy refresh/worker/Firecrawl/runtime contracts: **37 testów,
+  28 PASS, 9 opt-in skipped**; `git diff --check` PASS. Unit 8.5 pozostaje
+  partial do pełnego review i lokalnego runtime RLS; Unit 9 nie rozpoczęto.

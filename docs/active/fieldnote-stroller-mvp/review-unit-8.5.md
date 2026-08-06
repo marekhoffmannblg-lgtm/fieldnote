@@ -645,3 +645,72 @@ pięć findings z tej sekcji.
 
 **BLOKUJE — 3 P1, 3 P2, 0 P3.** Unit 8.5 pozostaje `partial`. Następny krok:
 `$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie te sześć zaakceptowanych findings.
+
+---
+
+## Ograniczony re-review `dd1df6a^..dd1df6a` (`2026-08-06`)
+
+- **Tryb:** wyłącznie ostatnia remediation; kod nie był zmieniany, Unit 9 nie rozpoczęty.
+- **Reviewers:** correctness_reviewer, security_reviewer, test_reviewer; data review jako single-agent fallback z powodu limitu agentów.
+
+### P1 — Produkcyjny worker nie realizuje fallbacku OpenAI
+
+- File: `fieldnote-api/worker.py:119`, `fieldnote-api/services/product_refresh_service.py:253-254`
+- Evidence: worker tworzy `ProductRefreshService` bez `ai_extractor`; unresolved field kończy się zawsze `partial/no_mutation`.
+- Impact: pełny workflow refreshu nie może uzupełnić danych, które nie pasują do dwóch regexów deterministycznych.
+- Scenario: poprawna oferta nie zawiera literalnego „waga” albo „maksymalne obciążenie”; raw/history zapisują się, ale nie ma odświeżonych wartości.
+- Recommendation: dodać metrowany adapter OpenAI z wersjonowanym schema, limitami i walidacją; obecny partial zachować dla braku konfiguracji lub błędu adaptera.
+- Missing test: realny worker z fixture adapterem i bezpłatnym kontraktem konfiguracji.
+
+### P1 — Niepełna odpowiedź AI może opublikować fałszywy sukces
+
+- File: `fieldnote-api/services/product_refresh_service.py:261-279`
+- Evidence: `{}` albo mapping bez requested field nie wywołuje błędu; serwis buduje `scoped_commit` i zwraca `succeeded`.
+- Impact: nowy, niepełny facts map może nadpisać last-known-good.
+- Scenario: extractor nie zwraca `maksymalne_obciazenie_kg`; refresh kończy sukcesem bez tej wartości.
+- Recommendation: walidować kompletność i typy odpowiedzi wobec wersjonowanego schema; brak/nieprawidłowy field ma kończyć się `partial/no_mutation`.
+- Missing test: pusty mapping, brak jednego pola i błędny typ bez scoped commit.
+
+### P1 — Usage jest deklarowane jako kompletne bez danych Firecrawl/AI
+
+- File: `fieldnote-api/services/product_refresh_service.py:272-274`, `fieldnote-api/services/pipeline_service.py:59-61`
+- Evidence: sukces ustawia `usage_complete: True`, lecz kod nie agreguje `FirecrawlResponse.usage`, a pipeline zwraca `ai_tokens=None` i `ai_tokens_known=False`.
+- Impact: job może ominąć cost/usage gate i zostać oznaczony `succeeded` mimo nieznanych credits/tokenów.
+- Scenario: provider nie zwraca usage lub używany jest AI; semantic snapshot jest publikowany bez danych dla limitu.
+- Recommendation: agregować Search/Scrape/AI usage i przy nieznanych danych kończyć `partial/no_mutation`.
+- Missing test: Firecrawl bez usage oraz AI bez usage nie publikują snapshotu.
+
+### P2 — Brak regresji fence `partial` z envelope
+
+- File: `tests/test_product_refresh_worker_contract.py:101-108`, `fieldnote-api/worker.py:77-83`
+- Evidence: test partial używa serwisu, który już nie zwraca `scoped_commit`; usunięcie nowej gałęzi fence nadal pozostawiłoby go zielonym.
+- Recommendation: zasymulować `succeeded + usage_complete=False + scoped_commit` i potwierdzić `no_mutation`/puste snapshoty.
+
+### P2 — Cancel test nie dociera do kontroli po fallbacku AI
+
+- File: `tests/test_product_refresh_pipeline.py:175-184`, `fieldnote-api/services/product_refresh_service.py:245,267`
+- Evidence: obecna fixture bez adaptera kończy się na pierwszym nowym cancel check; nie wykonuje gałęzi bezpośrednio przed publikacją.
+- Recommendation: fixture AI rozwiązuje field, a cancel staje się true dopiero po wywołaniu AI.
+
+### P2 — Lokalny test RLS historii pozostaje niewykonany
+
+- File: `tests/test_supabase_runtime_contract.py:test_product_refresh_history_and_storage_roles`
+- Evidence: 9 testów opt-in zostało pominiętych; nowy POST denial jest zapisany, ale nie został wykonany przeciw lokalnemu PostgREST.
+- Recommendation: uruchomić lokalny Supabase runtime contract przed końcowym PASS.
+
+### Wyniki i gate
+
+| Reviewer | Wynik | Przyjęte findings |
+|---|---|---:|
+| correctness_reviewer | 3 P1 | 3 |
+| security_reviewer | PASS | 0 |
+| test_reviewer | 3 P2 | 2 + runtime gate |
+| data fallback | potwierdzenie usage/provenance | scalone |
+
+- focused suite: **53 testy, 44 PASS, 9 opt-in skipped**;
+- `py_compile`: PASS;
+- `git diff --check dd1df6a^..dd1df6a`: PASS;
+- brak płatnych wywołań API.
+
+**BLOKUJE — 3 P1, 3 P2, 0 P3.** Unit 8.5 pozostaje `partial`. Następny krok:
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie te sześć zaakceptowanych findings.

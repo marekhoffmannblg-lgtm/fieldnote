@@ -45,6 +45,7 @@ class PipelineService:
                 max_pages=max(0, int(limits_payload.get("max_pages", 10) or 10)),
                 max_candidates=max(0, int(limits_payload.get("max_candidates", 20) or 20)),
                 timeout_seconds=max(1, int(limits_payload.get("timeout_seconds", 900) or 900)),
+                max_ai_tokens=max(1, int(limits_payload.get("max_ai_tokens", 20_000) or 20_000)),
             )
             result = self.refresh_service.refresh(
                 product_id=str(job.get("product_id", "")), product_slug=str(payload.get("product_slug", "")),
@@ -56,8 +57,9 @@ class PipelineService:
             )
             status = str(result.get("status", "failed"))
             mapped = "succeeded" if status == "succeeded" else "partial" if status == "partial" else "cancelled" if status == "cancelled" else "failed"
-            usage = {"pages": len(result.get("result", {}).get("sources", [])), "pages_known": True,
-                     "ai_tokens": None, "ai_tokens_known": False,
+            refresh_usage = result.get("result", {}).get("usage", {}) if isinstance(result.get("result", {}).get("usage"), dict) else {}
+            usage = {"pages": int(refresh_usage.get("pages", len(result.get("result", {}).get("sources", [])))), "pages_known": True,
+                     "ai_tokens": refresh_usage.get("ai_tokens"), "ai_tokens_known": refresh_usage.get("ai_tokens") is not None,
                      "usage_complete": bool(result.get("result", {}).get("usage_complete", status == "succeeded"))}
             return PipelineResult(mapped, usage, result.get("result", {}), str(result.get("result", {}).get("error", "")))
         limits = payload.get("limits") if isinstance(payload.get("limits"), dict) else {}

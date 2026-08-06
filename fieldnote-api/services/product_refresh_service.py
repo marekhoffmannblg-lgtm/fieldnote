@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import re
 import uuid
@@ -16,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 import ipaddress
+from urllib.request import Request, urlopen
 
 
 class RefreshProvider(Protocol):
@@ -36,11 +38,38 @@ class RefreshError(RuntimeError):
     pass
 
 
+class OpenAIRefreshExtractor:
+    """Metered, schema-limited production fallback; never used by tests."""
+    schema_version = "product-refresh-facts-v1"
+
+    def __init__(self, api_key: str, *, model: str | None = None) -> None:
+        self.api_key = api_key
+        self.model = model or os.getenv("FIELDNOTE_REFRESH_OPENAI_MODEL", "gpt-4.1-mini")
+
+    @classmethod
+    def from_env(cls) -> "OpenAIRefreshExtractor | None":
+        key = os.getenv("OPENAI_API_KEY", "").strip()
+        return cls(key) if key else None
+
+    def __call__(self, *, text: str, fields: list[str], max_tokens: int = 2000) -> dict[str, Any]:
+        prompt = {"schema_version": self.schema_version, "fields": fields, "source_text": text[:16000], "rules": "Return only confirmed numeric kg values; do not infer."}
+        body = {"model": self.model, "temperature": 0, "max_tokens": max(1, min(int(max_tokens), 8000)), "response_format": {"type": "json_object"}, "messages": [{"role": "system", "content": "Extract only source-backed facts as JSON object {facts:{field:number}}."}, {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}]}
+        request = Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
+        with urlopen(request, timeout=120) as response:
+            raw = json.loads(response.read().decode())
+        content = raw.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        value = json.loads(content) if isinstance(content, str) else {}
+        usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+        total = usage.get("total_tokens")
+        return {"facts": value.get("facts", value) if isinstance(value, dict) else {}, "usage": {"total_tokens": total, "complete": isinstance(total, int)}}
+
+
 @dataclass(frozen=True)
 class RefreshLimits:
     max_pages: int = 10
     max_candidates: int = 20
     timeout_seconds: int = 900
+    max_ai_tokens: int = 20_000
 
 
 @dataclass
@@ -189,12 +218,14 @@ class ProductRefreshService:
             field_candidates: list[dict[str, Any]] = []
             unresolved_fields: set[str] = set()
             fact_values: dict[str, list[Any]] = {}
+            provider_usage_complete = bool(getattr(getattr(search, "usage", None), "usage_complete", True))
             for url, title, item in accepted:
                 if cancel_check and cancel_check():
                     return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 # No cache/resume is passed to the provider; storage is written
                 # before any semantic value can be committed.
                 scraped = _provider_call(self.provider.scrape, url, timeout=deadline - time.monotonic())
+                provider_usage_complete = provider_usage_complete and bool(getattr(getattr(scraped, "usage", None), "usage_complete", True))
                 if cancel_check and cancel_check():
                     return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 text = _text(scraped)
@@ -255,22 +286,28 @@ class ProductRefreshService:
             if unresolved_fields and self.ai_extractor:
                 requested = sorted(unresolved_fields)[:3]
                 try:
-                    ai_values = self.ai_extractor(text="\n".join(row["evidence"]["excerpt"] for row in fetched), fields=requested)
+                    ai_values = self.ai_extractor(text="\n".join(row["evidence"]["excerpt"] for row in fetched), fields=requested, max_tokens=limits.max_ai_tokens)
                 except Exception as exc:
                     return self._finish(started, "partial", {"reason": "ai_extractor_error", "error": str(exc), "sources": fetched, "facts": all_facts, "candidates": field_candidates, "openai": {"requested": True, "fields": requested, "error": type(exc).__name__}, "no_mutation": True, "last_known_good_preserved": True})
-                if isinstance(ai_values, dict):
+                ai_usage = ai_values.get("usage", {}) if isinstance(ai_values, dict) else {}
+                values = ai_values.get("facts", ai_values) if isinstance(ai_values, dict) else {}
+                if isinstance(values, dict):
                     for field in requested:
-                        if field in ai_values and ai_values[field] is not None:
-                            all_facts[field] = ai_values[field]
-                            field_candidates.append({"field": field, "value": ai_values[field], "evidence": [row["evidence"] for row in fetched], "status": "ai_fallback"})
+                        value = values.get(field)
+                        if isinstance(value, (int, float)) and not isinstance(value, bool):
+                            all_facts[field] = float(value)
+                            field_candidates.append({"field": field, "value": float(value), "evidence": [row["evidence"] for row in fetched], "status": "ai_fallback"})
                 ai_state = {"requested": True, "unresolved_fields": requested, "resolved_fields": sorted(field for field in requested if field in all_facts)}
+                if set(requested) - set(ai_state["resolved_fields"]) or not bool(ai_usage.get("complete", False)):
+                    return self._finish(started, "partial", {"reason": "ai_response_incomplete", "sources": fetched, "facts": all_facts, "candidates": field_candidates, "openai": ai_state, "no_mutation": True, "last_known_good_preserved": True})
             if cancel_check and cancel_check():
                 return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
             semantic_state = {"facts": all_facts, "evidence": [row["evidence"] for row in fetched],
                               "sources": [row.get("source_id", "") for row in fetched],
                               "candidates": field_candidates, "openai": ai_state}
             result = {"sources": fetched, "rejected": rejected, "semantic_snapshot_created": semantic_changed,
-                      "usage_complete": True,
+                      "usage": {"pages": len(fetched), "ai_tokens": ai_usage.get("total_tokens") if unresolved_fields else 0, "usage_complete": provider_usage_complete and (not unresolved_fields or bool(ai_usage.get("complete", False)))},
+                      "usage_complete": provider_usage_complete and (not unresolved_fields or bool(ai_usage.get("complete", False))),
                       "last_known_good_preserved": False,
                       "scoped_commit": {"scope": {"product_id": product_id, "group_key": group_key,
                                                     "benchmark_group": benchmark_group, "configuration": configuration,
