@@ -135,6 +135,14 @@
   lub cancelled bez przekroczenia budżetu.
 - [ ] P2: uruchomić opt-in lokalny PostgREST/Storage RLS test historii refreshu.
 
+### Unit 8.5 — ograniczony re-review `0c8ec07..8b766a5`
+
+- [ ] P1: utrwalać kanoniczną `configuration` w typed job payload i wymuszać ją w discovery/identity refreshu.
+- [ ] P1: egzekwować timeout i cancellation także w trakcie/po wywołaniu providera; anulowanie ma kończyć się `cancelled`.
+- [ ] P1: dokończyć deterministyczną ekstrakcję faktów, ograniczone OpenAI i fenced scoped commit tylko dla istniejącego scope produktu.
+- [ ] P2: dodać regresję workerową typed refresh `partial/no_mutation`, pozytywny `max_pages` i anulowanie między dwoma Scrape.
+- [ ] P2: uruchomić opt-in lokalny PostgREST/Storage RLS test historii refreshu.
+
 ### Unit 8 — ograniczony re-review `f5fca8c^..f5fca8c`
 
 - [x] P1: propagować kanoniczną konfigurację przez job/run context i
@@ -254,4 +262,14 @@
 - [x] Snapshot zwraca deterministyczne evidence/excerpt i kandydata pola.
 - [ ] Pełne fakty, ograniczone OpenAI, fenced scoped commit i runtime RLS.
 - [x] 32 focused testy, py_compile i git diff --check PASS; pełny gate zatrzymuje znane zawieszenie hygiene.
+- [ ] Review końcowy PASS.
+
+### Unit 8.5 — remediation `8b766a5..HEAD` (`2026-08-06`)
+
+- [x] Typed job utrwala `configuration`, a pipeline przekazuje ją do refreshu.
+- [x] Provider Search/Scrape działa pod deadline; cancel po Scrape kończy się `cancelled` bez publikacji.
+- [x] Refresh buduje deterministyczne fakty/evidence oraz ograniczony `scoped_commit` produktu bez płatnego OpenAI.
+- [x] Dodano regresje workerowego `partial/no_mutation`, dodatniego `max_pages`, cancel między Scrape i timeoutu.
+- [x] Dodano opt-in PostgREST test trzech tabel historii i Storage; wymaga uruchomionego Supabase.
+- [ ] Weryfikacja runtime PostgREST/Storage oraz pełny offline gate.
 - [ ] Review końcowy PASS.

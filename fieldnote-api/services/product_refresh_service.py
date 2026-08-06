@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
+import threading
+import time
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
@@ -101,6 +105,40 @@ def _canonical(value: str) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _deterministic_facts(text: str) -> dict[str, Any]:
+    """Extract only unambiguous, unit-normalized facts from fetched text."""
+    facts: dict[str, Any] = {}
+    weight = re.search(r"(?:waga|weight)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*kg", text, re.I)
+    if weight:
+        facts["waga_wozka_kg"] = float(weight.group(1).replace(",", "."))
+    return facts
+
+
+def _bounded_call(callback: Callable[[], Any], timeout: float) -> Any:
+    """Run an external provider call with a hard caller deadline.
+
+    Provider transports are isolated behind a daemon thread so a hung network
+    request cannot keep the worker's refresh orchestration blocked forever.
+    """
+    result: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+    def invoke() -> None:
+        try:
+            result.put((True, callback()))
+        except BaseException as exc:  # propagate provider failures to refresh
+            result.put((False, exc))
+
+    thread = threading.Thread(target=invoke, name="fieldnote-refresh-provider", daemon=True)
+    thread.start()
+    try:
+        ok, value = result.get(timeout=max(0.01, timeout))
+    except queue.Empty as exc:
+        raise TimeoutError("product refresh provider timeout") from exc
+    if not ok:
+        raise value
+    return value
+
+
 @dataclass
 class ProductRefreshService:
     provider: RefreshProvider
@@ -110,19 +148,21 @@ class ProductRefreshService:
 
     def refresh(self, *, product_id: str, product_slug: str, brand: str, model: str,
                 configuration: str = "", limits: RefreshLimits | None = None,
-                cancel_check: Callable[[], bool] | None = None) -> dict[str, Any]:
+                cancel_check: Callable[[], bool] | None = None,
+                benchmark_group: str = "") -> dict[str, Any]:
         limits = limits or RefreshLimits()
         run_id = str(uuid.uuid4())
         started = {"run_id": run_id, "product_id": product_id, "product_slug": product_slug,
                    "status": "running", "configuration": configuration, "sources": []}
         self.history.append_run(started)
         query = " ".join(part for part in (brand, model, configuration) if part).strip()
+        deadline = time.monotonic() + max(0.01, float(limits.timeout_seconds))
         try:
             if cancel_check and cancel_check():
                 return self._finish(started, "partial", {"reason": "cancel_requested", "last_known_good_preserved": True})
             # Explicitly omit cache/resume arguments: every invocation is fresh.
             candidate_limit = max(0, min(limits.max_candidates, limits.max_pages))
-            search = self.provider.search(query, limit=candidate_limit)
+            search = _bounded_call(lambda: self.provider.search(query, limit=candidate_limit), deadline - time.monotonic())
             candidates = _items(search)[:candidate_limit]
             accepted = []
             rejected = []
@@ -138,12 +178,15 @@ class ProductRefreshService:
                 return self._finish(started, "partial", {"reason": "no_exact_match", "rejected": rejected})
 
             fetched = []
+            all_facts: dict[str, Any] = {}
             for url, title, item in accepted:
                 if cancel_check and cancel_check():
                     return self._finish(started, "partial", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 # No cache/resume is passed to the provider; storage is written
                 # before any semantic value can be committed.
-                scraped = self.provider.scrape(url)
+                scraped = _bounded_call(lambda: self.provider.scrape(url), deadline - time.monotonic())
+                if cancel_check and cancel_check():
+                    return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 text = _text(scraped)
                 if not text:
                     continue
@@ -171,14 +214,25 @@ class ProductRefreshService:
                     append_link(run_source)
                 evidence = {"source_id": source_id, "url": url, "content_hash": content_hash,
                             "excerpt": text[:1000], "snapshot_id": persisted.get("id")}
+                all_facts.update(_deterministic_facts(text))
                 fetched.append({**persisted, "duplicate_snapshot": not created, "evidence": evidence,
                                 "candidates": [{"field": "product_description", "value": text[:1000], "evidence": evidence}]})
             if not fetched:
                 return self._finish(started, "partial", {"reason": "no_content", "rejected": rejected})
             semantic_changed = any(not row["duplicate_snapshot"] for row in fetched)
+            group_key = "|".join(part for part in (_canonical(brand), _canonical(model)) if part)
+            semantic_state = {"facts": all_facts, "evidence": [row["evidence"] for row in fetched],
+                              "sources": [row.get("source_id", "") for row in fetched],
+                              "semantic_benchmark": {"configuration": configuration, "participant_product_ids": [product_id]}}
             result = {"sources": fetched, "rejected": rejected, "semantic_snapshot_created": semantic_changed,
-                      "last_known_good_preserved": False}
+                      "last_known_good_preserved": False,
+                      "scoped_commit": {"scope": {"product_id": product_id, "group_key": group_key,
+                                                    "benchmark_group": benchmark_group, "configuration": configuration,
+                                                    "participant_product_ids": [product_id]},
+                                        "semantic_state": semantic_state}}
             return self._finish(started, "succeeded", result)
+        except TimeoutError as exc:
+            return self._finish(started, "partial", {"error": str(exc), "reason": "provider_timeout", "last_known_good_preserved": True})
         except Exception as exc:
             return self._finish(started, "failed", {"error": str(exc), "last_known_good_preserved": True})
 

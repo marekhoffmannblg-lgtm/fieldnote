@@ -52,9 +52,10 @@ class PipelineService:
                 configuration=str(payload.get("configuration", "")),
                 limits=refresh_limits,
                 cancel_check=lambda: self._cancel_requested(cancel_check_file),
+                benchmark_group=str(payload.get("benchmark_group", "")),
             )
             status = str(result.get("status", "failed"))
-            mapped = "succeeded" if status == "succeeded" else "partial" if status == "partial" else "failed"
+            mapped = "succeeded" if status == "succeeded" else "partial" if status == "partial" else "cancelled" if status == "cancelled" else "failed"
             usage = {"pages": len(result.get("result", {}).get("sources", [])), "pages_known": True,
                      "ai_tokens": None, "ai_tokens_known": False, "usage_complete": False}
             return PipelineResult(mapped, usage, result.get("result", {}), str(result.get("result", {}).get("error", "")))

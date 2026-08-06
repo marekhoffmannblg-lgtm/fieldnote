@@ -71,6 +71,7 @@ class JobService:
                 "product_slug": product_slug,
                 "brand": str(product.get("brand", "")),
                 "model": str(product.get("model", "")),
+                "configuration": str(product.get("configuration", "")),
                 "category_key": str(product.get("category_key", "")),
                 "benchmark_group": str(product.get("benchmark_group_key", product.get("benchmark_group", ""))),
                 "limits": normalized_limits(limits),

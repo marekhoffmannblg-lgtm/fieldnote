@@ -319,6 +319,41 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
         )
         self.assertIn(admin_profile_manage[0], {200, 201}, admin_profile_manage[1])
 
+    def test_product_refresh_history_and_storage_roles(self) -> None:
+        """Exercise the three refresh-history tables through PostgREST."""
+        environment = local_supabase_env()
+        rest_url = environment["API_URL"] + "/rest/v1"
+        api_key = environment["ANON_KEY"]
+        viewer = jwt_for("00000000-0000-0000-0000-000000000101", environment["JWT_SECRET"])
+        analyst = jwt_for("00000000-0000-0000-0000-000000000102", environment["JWT_SECRET"])
+        service = environment["SERVICE_ROLE_KEY"]
+        suffix = hashlib.sha256(os.urandom(12)).hexdigest()[:10]
+        run_id = f"runtime-refresh-{suffix}"
+        source_id = f"runtime-refresh-source-{suffix}"
+        product_id = "product:lionelo:seed-stroller:"
+        query(f"insert into public.sources (source_id) values ('{source_id}') on conflict do nothing")
+        run = {"run_id": run_id, "product_id": product_id, "requested_by": "00000000-0000-0000-0000-000000000102", "status": "running", "configuration": "3w1", "result": {}}
+        viewer_run = rest_request("POST", f"{rest_url}/product_refresh_runs", viewer, api_key, run)
+        self.assertIn(viewer_run[0], {401, 403}, viewer_run[1])
+        analyst_run = rest_request("POST", f"{rest_url}/product_refresh_runs", analyst, api_key, run)
+        self.assertIn(analyst_run[0], {200, 201}, analyst_run[1])
+        snapshot = {"product_id": product_id, "source_id": source_id, "canonical_url": "https://allegro.pl/oferta/runtime-refresh", "content_hash": suffix, "raw_object_path": f"refresh/{suffix}/raw.json", "clean_object_path": f"refresh/{suffix}/clean.txt"}
+        viewer_snapshot = rest_request("POST", f"{rest_url}/product_refresh_snapshots", viewer, api_key, snapshot)
+        self.assertIn(viewer_snapshot[0], {401, 403}, viewer_snapshot[1])
+        analyst_snapshot = rest_request("POST", f"{rest_url}/product_refresh_snapshots", analyst, api_key, snapshot)
+        self.assertIn(analyst_snapshot[0], {200, 201}, analyst_snapshot[1])
+        snapshot_rows = json.loads(analyst_snapshot[1] or "[]")
+        snapshot_id = snapshot_rows[0]["id"] if snapshot_rows else ""
+        link = {"run_id": run_id, "snapshot_id": snapshot_id, "product_id": product_id, "raw_object_path": snapshot["raw_object_path"], "clean_object_path": snapshot["clean_object_path"]}
+        viewer_link = rest_request("POST", f"{rest_url}/product_refresh_run_sources", viewer, api_key, link)
+        self.assertIn(viewer_link[0], {401, 403}, viewer_link[1])
+        analyst_link = rest_request("POST", f"{rest_url}/product_refresh_run_sources", analyst, api_key, link)
+        self.assertIn(analyst_link[0], {200, 201}, analyst_link[1])
+        rest_request("DELETE", f"{rest_url}/product_refresh_run_sources?run_id=eq.{run_id}", service, service)
+        rest_request("DELETE", f"{rest_url}/product_refresh_snapshots?content_hash=eq.{suffix}", service, service)
+        rest_request("DELETE", f"{rest_url}/product_refresh_runs?run_id=eq.{run_id}", service, service)
+        query(f"delete from public.sources where source_id = '{source_id}'")
+
     def test_durable_queue_rpc_concurrency_fencing_and_rls(self) -> None:
         """Exercise the real queue RPCs through the local PostgREST boundary."""
         environment = local_supabase_env()

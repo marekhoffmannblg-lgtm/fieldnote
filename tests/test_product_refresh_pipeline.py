@@ -100,5 +100,31 @@ class ProductRefreshTests(unittest.TestCase):
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", cancel_check=lambda: cancelled[0])
         self.assertEqual(result["status"], "partial"); self.assertEqual(provider.searches, 1)
 
+    def test_positive_page_cap_and_cancel_between_scrapes(self):
+        class Multi(Provider):
+            def __init__(self): super().__init__(); self.items = [
+                {"url": "https://allegro.pl/oferta/a", "title": "Lionelo Amber 3w1 stroller", "offer_id": "a"},
+                {"url": "https://allegro.pl/oferta/b", "title": "Lionelo Amber 3w1 stroller", "offer_id": "b"},
+            ]
+            def search(self, query, *, limit): self.searches += 1; return {"data": {"items": self.items}}
+            def scrape(self, url):
+                self.scrapes += 1
+                if self.scrapes == 1: self.cancel = True
+                return {"data": {"markdown": "same"}}
+        provider = Multi(); provider.cancel = False
+        service, history, _ = self.make(provider)
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(max_pages=1, max_candidates=10), cancel_check=lambda: provider.cancel)
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(provider.scrapes, 1)
+
+    def test_provider_timeout_preserves_last_known_good(self):
+        class Hanging(Provider):
+            def search(self, query, *, limit):
+                import time; time.sleep(0.2); return {"data": {"items": []}}
+        service, _, _ = self.make(Hanging())
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(timeout_seconds=0.01))
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["result"]["last_known_good_preserved"])
+
 
 if __name__ == "__main__": unittest.main()

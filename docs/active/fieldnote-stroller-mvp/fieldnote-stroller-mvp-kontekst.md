@@ -863,6 +863,20 @@
   failed po zapisaniu side effects; brakuje ekstrakcji/evidence/scoped commit,
   limitów/cancel i runtime RLS testu. Szczegóły w `review-unit-8.5.md`.
 
+### Unit 8.5 — ograniczony re-review `0c8ec07..8b766a5` (`2026-08-06`)
+
+Zakres obejmował tylko workerowy terminal status, limity/cancel i ich regresje.
+Użyto correctness_reviewer oraz test_reviewer; security wykonano jako
+single-agent fallback, ponieważ limit aktywnych subagentów uniemożliwił osobną
+falę. Data review nie był wymagany dla tego diffu.
+
+Focused refresh/worker/Firecrawl/schema/RLS contracts: **33 PASS**;
+`py_compile` i `git diff --check 0c8ec07..8b766a5`: PASS. Gate **BLOKUJE**:
+3 P1 i 2 P2 — configuration nie trafia do jobu, timeout/cancel nie są
+egzekwowane, nadal brakuje faktów/OpenAI/fenced commit, regresji worker/cap/
+mid-run cancel oraz runtime PostgREST/Storage RLS. Unit 8.5 pozostaje partial;
+Unit 9 nie rozpoczęto.
+
 ### Unit 8.5 — remediation `0c8ec07..HEAD` (`2026-08-06`)
 
 Serwis przyjmuje limity i `cancel_check`, ogranicza Search oraz sprawdza
@@ -872,3 +886,19 @@ fałszywego `failed` po zapisaniu źródeł. 32 focused testy, py_compile i diff
 check PASS; pełny gate zatrzymał się na znanym zawieszeniu hygiene. Nadal
 brakuje pełnych faktów/OpenAI, fenced scoped commit i runtime RLS. Unit 8.5
 pozostaje **partial**; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — remediation `8b766a5..HEAD` (`2026-08-06`)
+
+Typed job przenosi kanoniczną konfigurację produktu. Refresh egzekwuje
+deadline Search/Scrape przez bounded provider call, sprawdza cancel przed i po
+Scrape i zwraca `cancelled` bez publikacji. Deterministycznie wyekstrahowane
+fakty, evidence i `scoped_commit` są ograniczone do produktu oraz konfiguracji;
+OpenAI nie jest wywoływane automatycznie. Dodano regresje workerowego
+`partial/no_mutation`, dodatni limit, cancel między Scrape i timeout oraz
+opt-in PostgREST/Storage test historii.
+
+Focused suite: **45 testów, 36 PASS, 9 skipped**; py_compile i diff-check PASS.
+Pełny gate zatrzymuje znane zawieszenie hygiene na `git show`. Runtime Supabase
+nie był dostępny (`supabase status` blokuje zapis telemetry poza workspace),
+więc Unit 8.5 pozostaje **partial** do wykonania opt-in runtime i re-review.
+Unit 9 nie rozpoczęto.

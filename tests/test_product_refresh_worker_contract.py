@@ -5,6 +5,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "fieldnote-api"))
 from services.pipeline_service import PipelineService
 from services.job_service import JobService
+from services.pipeline_service import PipelineResult
+from worker import ResearchWorker
 
 
 class RefreshDouble:
@@ -17,7 +19,20 @@ class Jobs:
 
 
 class Products:
-    def product(self, slug): return {"product_id": "p1", "brand": "Lionelo", "model": "Amber", "category_key": "stroller", "benchmark_group": "stroller"}
+    def product(self, slug): return {"product_id": "p1", "brand": "Lionelo", "model": "Amber", "configuration": "3w1", "category_key": "stroller", "benchmark_group": "stroller"}
+
+
+class Queue:
+    def __init__(self): self.done = []
+    def claim(self, worker_id, lease_seconds, max_active): return {"job_id": "r1", "product_id": "p1", "lease_token": "tok", "payload": {"job_type": "product_refresh"}}
+    def start(self, job_id, token): return {"job_id": job_id, "product_id": "p1", "lease_token": token, "payload": {"job_type": "product_refresh"}}
+    def heartbeat(self, job_id, token, lease_seconds): return {"job_id": job_id}
+    def complete(self, *args): self.done.append(args); return {"job_id": "r1", "status": args[2]}
+
+
+class Committer:
+    def __init__(self): self.calls = []
+    def complete(self, job, token, status, result, usage, cost): self.calls.append((status, result)); return {"status": status}
 
 
 class ProductRefreshWorkerContractTests(unittest.TestCase):
@@ -35,6 +50,14 @@ class ProductRefreshWorkerContractTests(unittest.TestCase):
     def test_job_service_persists_typed_refresh_payload(self):
         job = JobService(Jobs(), Products()).enqueue(product_slug="lionelo__amber", requested_by="u1", job_type="product_refresh")
         self.assertEqual(job["payload"]["job_type"], "product_refresh")
+        self.assertEqual(job["payload"]["configuration"], "3w1")
+
+    def test_worker_terminalizes_refresh_without_scoped_commit_as_partial(self):
+        queue, committer = Queue(), Committer()
+        pipeline = type("Pipeline", (), {"execute": lambda self, job, cancel_check_file: PipelineResult("succeeded", {"usage_complete": True}, {"sources": []})})()
+        self.assertTrue(ResearchWorker(queue, pipeline, committer=committer).process_one())
+        self.assertEqual(committer.calls[0][0], "partial")
+        self.assertTrue(committer.calls[0][1]["no_mutation"])
 
 
 if __name__ == "__main__": unittest.main()

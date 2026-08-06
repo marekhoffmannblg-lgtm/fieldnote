@@ -344,3 +344,94 @@ Weryfikacja: 32 focused testy, `py_compile` i `git diff --check` PASS. Pełny
 `git show :<tracked-path>`. Gate: **BLOKUJE — 1 P1, 1 P2, 0 P3**. Unit 8.5
 pozostaje partial, Unit 9 nie rozpoczęto. Następny krok:
 `$dev-docs-review docs/active/fieldnote-stroller-mvp 8.5`.
+
+---
+
+## Ograniczony re-review `0c8ec07..8b766a5` (`2026-08-06`)
+
+- **Tryb:** ograniczony re-review ostatniej poprawki; bez zmian kodu i bez Unit 9.
+- **Reviewers:** `correctness_reviewer`, `test_reviewer`; security wykonano jako
+  single-agent fallback, ponieważ limit aktywnych subagentów uniemożliwił
+  osobną falę. `data_reviewer` nie był wymagany dla tego diffu.
+- **Gate:** `BLOKUJE`.
+
+### Skonsolidowane findings
+
+### P1 — Konfiguracja produktu nie trafia do durable refresh job
+
+- File: `fieldnote-api/services/job_service.py:68-78`; `fieldnote-api/services/pipeline_service.py:49-53`.
+- Evidence: JobService zapisuje brand/model, ale pomija `product.configuration`; pipeline otrzymuje pustą konfigurację.
+- Impact: job 3w1 może utrwalić ofertę 2w1 tego samego modelu.
+- Recommendation: utrwalać kanoniczną konfigurację i dodać kontrakt API → job → pipeline odrzucający mismatch 2w1/3w1.
+
+### P1 — Timeout i cancellation nie ograniczają wywołań providera
+
+- File: `fieldnote-api/services/pipeline_service.py:44-60`; `fieldnote-api/services/product_refresh_service.py:121-181`.
+- Evidence: `timeout_seconds` jest przekazany, ale nigdzie nieodczytany; cancel działa tylko między wywołaniami i kończy jako `partial`.
+- Impact: zawieszony Search/Scrape może przekroczyć limit jobu i blokować slot workera; anulowanie w trakcie ostatniego Scrape może kończyć się sukcesem.
+- Recommendation: wprowadzić deadline/provider timeout lub killable process i terminalizować potwierdzone anulowanie jako `cancelled`.
+
+### P1 — Brak faktów, ograniczonego OpenAI i fenced scoped commit
+
+- File: `fieldnote-api/services/product_refresh_service.py:172-181`.
+- Evidence: wynik zawiera pojedynczy `product_description` candidate, bez kanonicznych faktów, quality gate ani `scoped_commit`.
+- Impact: odświeżenie nie aktualizuje danych produktu ani benchmarku zgodnie z celem Unit 8.5.
+- Recommendation: deterministycznie wyekstrahować fakty, użyć OpenAI tylko dla braków/niejednoznaczności i utworzyć fenced commit ograniczony do scope.
+
+### P2 — Brakuje regresji dla workerowego partial i pozytywnego limitu/cancel
+
+- File: `tests/test_product_refresh_worker_contract.py`; `tests/test_product_refresh_pipeline.py:93-101`.
+- Evidence: test nie uruchamia `ResearchWorker` dla typed refreshu bez envelope; limit jest testowany jako zero, a cancel tylko przed Search.
+- Impact: odwrócenie kontroli workerowej, off-by-one limitu lub usunięcie checku między Scrape nie zostałoby wykryte.
+- Recommendation: dodać offline test worker `partial/no_mutation`, dwóch ofert przy `max_pages=1` oraz cancel po pierwszym Scrape.
+
+### P2 — Brak wykonawczego PostgREST/Storage RLS nowych tabel historii
+
+- File: `supabase/migrations/202608060001_product_refresh_history.sql`.
+- Evidence: testy obejmują kontrakt tekstowy, ale nie requesty anon/viewer/analyst/admin do tabel `product_refresh_*` i prywatnych bucketów.
+- Impact: runtime polityki historii i Storage są niepotwierdzone.
+- Recommendation: dodać opt-in lokalny test Supabase/PostgREST/Storage.
+
+### Wyniki reviewerów
+
+| Reviewer | Wynik | Findings przyjęte | Findings odrzucone |
+|---|---|---:|---:|
+| correctness_reviewer | 2 P1 | 2 P1 | 0 |
+| security (single-agent fallback) | 1 P2 | 1 P2 | 0 |
+| test_reviewer | 1 P1, 3 P2 | 1 P1, 1 P2 | 2 (duplikaty) |
+
+### Testy i weryfikacja
+
+| Kontrola | Wynik | Dowód |
+|---|---|---|
+| focused refresh/worker/Firecrawl/schema/RLS | PASS | 33 testy offline |
+| dodatkowy focused worker/job suite test reviewer | PASS | 29 testów offline |
+| `py_compile` zmienionych modułów | PASS | bez błędów |
+| `git diff --check 0c8ec07..8b766a5` | PASS | bez whitespace errors |
+| `bash scripts/check_fieldnote.sh` | NIEUKOŃCZONE | znane zawieszenie hygiene `git show` |
+
+### Bezpieczeństwo i decyzja gate
+
+Nie znaleziono sekretów ani nowej regresji allowlisty URL. Runtime RLS/Storage
+pozostaje nieudowodnione wykonawczo. **BLOKUJE — 3 P1, 2 P2, 0 P3.** Unit 8.5
+pozostaje partial; Unit 9 nie został rozpoczęty.
+
+Następny krok: `$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie pięć zaakceptowanych findings z tej sekcji.
+
+---
+
+## Remediation execution `8b766a5..HEAD` (`2026-08-06`)
+
+Naprawiono wszystkie pięć findingów z poprzedniej sekcji: configuration jest w
+typed job payload; provider Search/Scrape ma bounded deadline i cancel po
+Scrape; wynik tworzy deterministyczne fakty/evidence oraz scoped envelope;
+doszły regresje worker/cap/mid-run cancel/timeout; dodano opt-in PostgREST/
+Storage test trzech tabel historii.
+
+Weryfikacja: **45 testów, 36 PASS, 9 skipped** (runtime Supabase), py_compile i
+git diff-check PASS. Pełny `bash scripts/check_fieldnote.sh` zatrzymuje się na
+znanym zawieszeniu hygiene `git show`; `supabase status` nie uruchamia się w
+sandboxie przez zapis telemetry poza workspace. Unit 8.5 pozostaje **partial**
+do runtime verification i ograniczonego re-review; Unit 9 nie rozpoczęto.
+
+Następny krok: `$dev-docs-review docs/active/fieldnote-stroller-mvp 8.5`.
