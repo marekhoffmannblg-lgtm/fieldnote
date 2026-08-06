@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "fieldnote-api"))
-from auth.dependencies import require_roles
+from auth.dependencies import SupabaseAuthGateway, require_roles
 from auth.roles import Principal
 from services.user_service import UserService
 import app as api
@@ -19,6 +19,18 @@ class FakeClient:
     def select(self, *_args, **_kwargs): return [{"role": "analyst"}]
 
 class AuthRoleTests(unittest.TestCase):
+    def test_supabase_auth_gateway_builds_urllib_request(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return None
+            def read(self): return b'{"id":"user-1","email":"user@test"}'
+
+        with patch("auth.dependencies.urlopen", return_value=Response()) as opener:
+            gateway = SupabaseAuthGateway("http://supabase.test", "anon-key", FakeClient())
+            self.assertEqual(gateway.user("access-token"), {"id": "user-1", "email": "user@test"})
+            request = opener.call_args.args[0]
+            self.assertEqual(request.full_url, "http://supabase.test/auth/v1/user")
+
     def test_viewer_is_denied_analyst_action(self):
         with self.assertRaises(HTTPException) as raised: require_roles("analyst")(Principal("u", "a@b.test", "viewer", False))
         self.assertEqual(raised.exception.status_code, 403)
@@ -51,5 +63,14 @@ class AuthRoleTests(unittest.TestCase):
                 self.assertEqual(client.get("/api/categories", headers={"Authorization": f"Bearer {token}"}).status_code, 200)
             self.assertEqual(client.get("/api/categories", headers={"Authorization": "Bearer initial"}).status_code, 403)
             self.assertEqual(client.post("/api/research/preview", headers={"Authorization": "Bearer viewer"}, json={}).status_code, 403)
+
+    def test_local_frontend_ports_are_allowed_by_api_cors(self):
+        client = TestClient(api.app)
+        for origin in ("http://127.0.0.1:3000", "http://localhost:3000", "http://127.0.0.1:5173"):
+            response = client.options(
+                "/api/health",
+                headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
+            )
+            self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
 
 if __name__ == "__main__": unittest.main()

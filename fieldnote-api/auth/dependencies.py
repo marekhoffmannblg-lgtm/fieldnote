@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any, Callable
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from auth.roles import Principal, Role
@@ -19,7 +19,7 @@ class SupabaseAuthGateway:
     def from_env(cls) -> "SupabaseAuthGateway":
         return cls(os.getenv("SUPABASE_URL", ""), os.getenv("SUPABASE_ANON_KEY", ""), SupabaseClient.from_env())
     def user(self, token: str) -> dict[str, Any]:
-        request = Request(f"{self.url}/auth/v1/user", headers={"apikey": self.anon_key, "Authorization": f"Bearer {token}"})
+        request = UrlRequest(f"{self.url}/auth/v1/user", headers={"apikey": self.anon_key, "Authorization": f"Bearer {token}"})
         try:
             with urlopen(request, timeout=5) as response: value = json.loads(response.read().decode())
         except HTTPError as exc: raise HTTPException(status_code=401, detail="Nieprawidłowa sesja.") from exc

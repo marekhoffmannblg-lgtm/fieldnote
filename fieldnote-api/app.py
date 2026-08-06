@@ -126,7 +126,12 @@ if DATA_MODE not in {"legacy_readonly", "supabase"}:
 PRODUCT_SERVICE = ProductService(
     CatalogRepository(SupabaseClient.from_env()) if DATA_MODE == "supabase" else SnapshotRepository(FRONTEND_SNAPSHOT_ROOT)
 )
-LOCAL_ORIGINS = ("http://127.0.0.1:5173", "http://localhost:5173")
+LOCAL_ORIGINS = (
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
+)
 MAX_LOG_LINES = 240
 MAX_LOG_CHARS = 18_000
 RUN_TIMEOUT_SECONDS = DEFAULT_STAGE_TIMEOUTS["pipeline"]
