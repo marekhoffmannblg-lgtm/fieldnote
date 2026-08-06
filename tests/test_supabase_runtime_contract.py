@@ -47,6 +47,46 @@ def query(sql: str, *, expect_success: bool = True) -> subprocess.CompletedProce
     return result
 
 
+def local_psql(sql: str) -> subprocess.CompletedProcess[str]:
+    """Run one transactional SQL script directly against the local DB.
+
+    `supabase db query` prepares its input and rejects multiple commands. The
+    cleanup contract intentionally uses psql so BEGIN/COMMIT and SET LOCAL
+    are executed in one PostgreSQL session.
+    """
+    containers = subprocess.run(
+        ["docker", "ps", "--filter", "name=supabase_db_", "--format", "{{.Names}}"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=5,
+    )
+    container = next((line.strip() for line in containers.stdout.splitlines() if line.strip()), None)
+    if not container:
+        raise AssertionError("local Supabase database container not found")
+    result = subprocess.run(
+        [
+            "docker", "exec", container, "psql", "-U", "postgres", "-d", "postgres",
+            "-v", "ON_ERROR_STOP=1", "-v", "statement_timeout=3000", "-v", "lock_timeout=1000",
+            "-A", "-t", "-F", "|", "-c", sql,
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    if result.returncode:
+        raise AssertionError(result.stderr or result.stdout)
+    return result
+
+
+def assert_rest_delete(result: tuple[int, str], label: str) -> None:
+    """Fail immediately instead of hiding a failed prerequisite cleanup."""
+    if result[0] not in {200, 204}:
+        raise AssertionError(f"{label} DELETE failed with HTTP {result[0]}: {result[1]}")
+
+
 def run_seed(path: Path) -> None:
     sql = "\n".join(
         line for line in path.read_text(encoding="utf-8").splitlines()
@@ -383,11 +423,72 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             self.assertTrue(is_storage_denied(storage_request("POST", object_url, must_change, api_key, b"must-change")))
             self.assertIn(storage_request("POST", object_url, analyst, api_key, b"analyst")[0], {200, 201})
             self.assertTrue(is_storage_denied(storage_request("GET", object_url, viewer, api_key)))
-            storage_request("DELETE", environment["API_URL"] + f"/storage/v1/object/{bucket}", service, api_key, json.dumps({"prefixes": [f"runtime-refresh-{suffix}.txt"]}).encode())
-        rest_request("DELETE", f"{rest_url}/product_refresh_run_sources?run_id=eq.{run_id}", service, service)
-        rest_request("DELETE", f"{rest_url}/product_refresh_snapshots?content_hash=eq.{suffix}", service, service)
-        rest_request("DELETE", f"{rest_url}/product_refresh_runs?run_id=eq.{run_id}", service, service)
-        query(f"delete from public.sources where source_id = '{source_id}'")
+            storage_delete = storage_request(
+                "DELETE",
+                environment["API_URL"] + f"/storage/v1/object/{bucket}",
+                service,
+                api_key,
+                json.dumps({"prefixes": [f"runtime-refresh-{suffix}.txt"]}).encode(),
+            )
+            self.assertIn(storage_delete[0], {200, 204}, storage_delete[1])
+        # This opt-in test never starts a worker; no producer can race the
+        # cleanup below. Check every prerequisite REST deletion explicitly.
+        assert_rest_delete(
+            rest_request("DELETE", f"{rest_url}/product_refresh_run_sources?run_id=eq.{run_id}", analyst, api_key),
+            "product_refresh_run_sources",
+        )
+        assert_rest_delete(
+            rest_request("DELETE", f"{rest_url}/product_refresh_snapshots?content_hash=eq.{suffix}", analyst, api_key),
+            "product_refresh_snapshots",
+        )
+        assert_rest_delete(
+            rest_request("DELETE", f"{rest_url}/product_refresh_runs?run_id=eq.{run_id}", analyst, api_key),
+            "product_refresh_runs",
+        )
+
+        def cleanup_sql() -> dict[str, int]:
+            result = local_psql(
+                f"""
+                BEGIN;
+                SET LOCAL statement_timeout = '3000ms';
+                SET LOCAL lock_timeout = '1000ms';
+                WITH deleted AS (
+                    DELETE FROM public.product_refresh_run_sources WHERE run_id = '{run_id}' RETURNING 1
+                ) SELECT 'product_refresh_run_sources', count(*) FROM deleted;
+                WITH deleted AS (
+                    DELETE FROM public.product_refresh_snapshots WHERE content_hash = '{suffix}' RETURNING 1
+                ) SELECT 'product_refresh_snapshots', count(*) FROM deleted;
+                WITH deleted AS (
+                    DELETE FROM public.product_refresh_runs WHERE run_id = '{run_id}' RETURNING 1
+                ) SELECT 'product_refresh_runs', count(*) FROM deleted;
+                WITH deleted AS (
+                    DELETE FROM public.sources WHERE source_id = '{source_id}' RETURNING 1
+                ) SELECT 'sources', count(*) FROM deleted;
+                COMMIT;
+                """
+            )
+            counts: dict[str, int] = {}
+            for line in result.stdout.splitlines():
+                if "|" in line:
+                    table, count = line.split("|", 1)
+                    if table in {"product_refresh_run_sources", "product_refresh_snapshots", "product_refresh_runs", "sources"}:
+                        counts[table] = int(count)
+            expected_tables = {"product_refresh_run_sources", "product_refresh_snapshots", "product_refresh_runs", "sources"}
+            self.assertEqual(set(counts), expected_tables, result.stdout)
+            return counts
+
+        first_cleanup = cleanup_sql()
+        second_cleanup = cleanup_sql()
+        self.assertEqual(second_cleanup, {table: 0 for table in first_cleanup})
+        remaining = local_psql(
+            f"""
+            SELECT count(*) FROM public.product_refresh_run_sources WHERE run_id = '{run_id}';
+            SELECT count(*) FROM public.product_refresh_snapshots WHERE content_hash = '{suffix}';
+            SELECT count(*) FROM public.product_refresh_runs WHERE run_id = '{run_id}';
+            SELECT count(*) FROM public.sources WHERE source_id = '{source_id}';
+            """
+        )
+        self.assertEqual([line.strip() for line in remaining.stdout.splitlines() if line.strip()], ["0", "0", "0", "0"])
 
     def test_durable_queue_rpc_concurrency_fencing_and_rls(self) -> None:
         """Exercise the real queue RPCs through the local PostgREST boundary."""
