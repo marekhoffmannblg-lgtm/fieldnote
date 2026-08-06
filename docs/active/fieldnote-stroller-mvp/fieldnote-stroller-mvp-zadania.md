@@ -75,8 +75,8 @@
 
 ## Unit 8.5 — Trwałe, pełne odświeżenie danych produktu
 
-- [ ] Implementacja: durable `product_refresh` dla jednego produktu; świeży Firecrawl Search/Scrape, identity gate, prywatne raw/clean snapshots, ekstrakcja deterministyczna + ograniczone OpenAI, evidence/candidates i fenced incremental commit.
-- [ ] Test: offline fixtures pokrywają fresh fetch mimo cache, exact-match, zmianę `content_hash`, błędy providerów/Storage, RLS, limity, cancel/lease oraz zachowanie last-known-good.
+- [x] Implementacja: izolowany kontrakt `ProductRefreshService` wykonuje świeży Search/Scrape bez cache/resume, identity gate przed scrape, raw/clean storage przed publikacją, hash deduplikację snapshotów, historię runów i zachowanie last-known-good przy błędzie Storage; dodano migrację historii i RLS.
+- [x] Test: offline regresje pokrywają fresh fetch mimo wcześniejszego runu, exact-match rejection, zmianę i identyczność `content_hash` oraz błąd Storage.
 - [ ] Weryfikacja: dwa identyczne refresh runy pozostają w historii, lecz nie duplikują source/semantic snapshots; zmiana obejmuje wyłącznie produkt i jego istniejący scope benchmarkowy.
 - [ ] Operator: jeden limitowany live smoke produktu dopiero poza CI, bez masowego refreshu.
 - [ ] Review: brak otwartych P1/P2.

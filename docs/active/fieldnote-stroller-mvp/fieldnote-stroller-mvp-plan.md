@@ -70,7 +70,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 3 — Unit 8.5: Trwałe, pełne odświeżenie danych produktu
 
-- Status: `pending`
+- Status: `partial` — kontrakt offline i migracja historii są gotowe; integracja z durable workerem, produkcyjnym Storage i fenced commit pozostaje do wykonania.
 - Zależności: Unit 5–8; wykonanie dopiero po końcowym review PASS Unit 8
 - Kryterium ukończenia: ręczny refresh jednego produktu zawsze wykonuje świeży Firecrawl Search i Scrape, utrwala raw snapshots/evidence/run history, bezpiecznie aktualizuje fakty przez deterministyczną ekstrakcję i OpenAI oraz przelicza wyłącznie istniejący scope produktu. Identyczne dane tworzą historię runu, ale nie duplikują snapshotu semantycznego.
 

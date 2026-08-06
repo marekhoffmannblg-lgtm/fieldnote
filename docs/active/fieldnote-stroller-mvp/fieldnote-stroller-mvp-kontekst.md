@@ -781,3 +781,21 @@
   hygiene na `git show :<tracked-path>`.
 - Gate: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 8 jest ukończony;
   dokument źródłowy wyniku: `review-unit-8.md`.
+
+### Unit 8.5 — wykonanie częściowe (`2026-08-06`)
+
+- Dodano `ProductRefreshService` jako dependency-injected kontrakt dla jednego
+  produktu. Każde wywołanie wykonuje świeży Search i Scrape bez cache/resume,
+  odrzuca niezgodne listingi przed pobraniem, zapisuje raw/clean obiekty przed
+  historią źródła i deduplikuje snapshot po `(source_id, content_hash)`.
+- Dodano migrację `202608060001_product_refresh_history.sql` z historią runów,
+  relacją run–source, unikalnością snapshotu i prywatnymi politykami RLS.
+- Offline testy: **4 PASS** (`tests/test_product_refresh_pipeline.py`),
+  `py_compile` i `git diff --check` PASS. Nie wywołano Firecrawl/OpenAI.
+- Próba pełnego `bash scripts/check_fieldnote.sh` została przerwana po 20 s;
+  istniejąca bramka zatrzymuje się w hygiene na odczycie `git show
+  :<tracked-path>`, więc nie oznaczam pełnego gate jako PASS.
+- Poza zakresem tej części implementacji pozostają: podłączenie do durable
+  job/worker, produkcyjny Storage adapter, deterministyczna ekstrakcja pól i
+  ograniczone OpenAI, fenced incremental commit oraz pełne RLS/integration
+  tests. Unit 8.5 ma status **partial**; Unit 9 nie rozpoczęto.
