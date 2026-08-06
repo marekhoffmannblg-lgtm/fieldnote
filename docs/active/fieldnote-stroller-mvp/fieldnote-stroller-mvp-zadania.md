@@ -71,7 +71,7 @@
 - [x] Implementacja remediation: runtime endpointy i scoped snapshot projection używają scoringu/ceny; brak danych nie zaniża utility score; konfiguracja, `suspension`, aliasy i konwersje są deterministyczne.
 - [x] Test: atrybuty, aliasy, normalizacja, scoring, ceny, konfiguracja, corpus 34 i semantyczne snapshoty bez AI — 20 PASS.
 - [ ] Weryfikacja: focused i py_compile przechodzą; pełny `bash scripts/check_fieldnote.sh` zatrzymuje się na `test_repository_hygiene.py`/`git show`, a testy FastAPI wymagają środowiska z zależnością `fastapi`.
-- [ ] Review: brak otwartych P1/P2.
+- [x] Review: PASS po ograniczonym re-review `ab1941d^..ab1941d`; brak otwartych P1/P2. Szczegóły w `review-unit-8.md`.
 
 ## Unit 8.5 — Trwałe, pełne odświeżenie danych produktu
 
@@ -109,13 +109,13 @@
 
 ### Unit 8 — ograniczony re-review `f5fca8c^..f5fca8c`
 
-- [ ] P1: propagować kanoniczną konfigurację przez job/run context i
+- [x] P1: propagować kanoniczną konfigurację przez job/run context i
   partycjonować durable benchmark snapshot/RPC per `benchmark_group + configuration`.
-- [ ] P1: competitive detail z anchorem Lionelo ma używać dokładnie manifestowych
+- [x] P1: competitive detail z anchorem Lionelo ma używać dokładnie manifestowych
   competitor participants dla scoringu oraz price observations, nie internal cohort.
-- [ ] P2: zasilić internal price summary realnymi price observations pipeline,
+- [x] P2: zasilić internal price summary realnymi price observations pipeline,
   nie tylko nieobecnym polem w `group.json`.
-- [ ] P2: naprawić czerwony test API i dodać niemockowane regresje scope
+- [x] P2: naprawić czerwony test API i dodać niemockowane regresje scope
   manifestu, ceny internal oraz HTTP 422 dla 2w1 ↔ 3w1.
 
 ### Unit 1

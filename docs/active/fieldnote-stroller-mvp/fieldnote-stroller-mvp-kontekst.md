@@ -767,3 +767,17 @@
 - Status: **partial**, oczekuje ograniczonego re-review wyłącznie tych zmian.
   Unit 8.5 i Unit 9 nie zostały rozpoczęte. Następny krok:
   `$dev-docs-review docs/active/fieldnote-stroller-mvp 8`.
+
+### Unit 8 — końcowy ograniczony re-review `ab1941d^..ab1941d` (`2026-08-06`)
+
+- Zakres: wyłącznie config scope, competitive manifest mode, internal price
+  source oraz regresje z commitu `ab1941d`. Correctness, security i data
+  review: PASS. Test reviewer nie odpowiedział w dostępnej fali, więc zakres
+  testowy zweryfikowano jako single-agent fallback przez wykonanie focused
+  suites; nie zmieniano kodu ani nie rozpoczęto Unit 8.5/9.
+- Weryfikacja: focused API runtime **6 PASS**, scoring/pipeline/snapshots
+  **38 PASS**, `py_compile` i `git diff --check ab1941d^..ab1941d` — PASS.
+  Pełny offline gate pozostaje nieukończony przez istniejące zawieszenie
+  hygiene na `git show :<tracked-path>`.
+- Gate: **GOTOWE DO KONTYNUACJI** — 0 P1, 0 P2, 0 P3. Unit 8 jest ukończony;
+  dokument źródłowy wyniku: `review-unit-8.md`.
