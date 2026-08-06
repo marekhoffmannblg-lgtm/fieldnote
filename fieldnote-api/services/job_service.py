@@ -55,7 +55,7 @@ class JobService:
     def __init__(self, jobs: JobRepository, products: ProductLookup) -> None:
         self.jobs, self.products = jobs, products
 
-    def enqueue(self, *, product_slug: str, requested_by: str, limits: dict[str, Any] | None = None, selection: dict[str, Any] | None = None, cost_limit: float | None = None) -> dict[str, Any]:
+    def enqueue(self, *, product_slug: str, requested_by: str, limits: dict[str, Any] | None = None, selection: dict[str, Any] | None = None, cost_limit: float | None = None, job_type: str = "research") -> dict[str, Any]:
         product = self.products.product(product_slug)
         product_id = str(product.get("product_id", "")).strip()
         if not product_id:
@@ -67,6 +67,7 @@ class JobService:
             "cost_limit": cost_number(cost_limit) if cost_limit is not None else None,
             "payload": {
                 "schema_version": "1",
+                "job_type": job_type if job_type in {"research", "product_refresh"} else "research",
                 "product_slug": product_slug,
                 "brand": str(product.get("brand", "")),
                 "model": str(product.get("model", "")),

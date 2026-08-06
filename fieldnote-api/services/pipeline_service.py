@@ -31,11 +31,22 @@ class PipelineResult:
 
 
 class PipelineService:
-    def __init__(self, runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> None:
-        self.runner = runner
+    def __init__(self, runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run, refresh_service: Any | None = None) -> None:
+        self.runner, self.refresh_service = runner, refresh_service
 
     def execute(self, job: dict[str, Any], *, cancel_check_file: Path) -> PipelineResult:
         payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+        if payload.get("job_type") == "product_refresh":
+            if self.refresh_service is None:
+                return PipelineResult("failed", {"usage_complete": False}, {}, "product_refresh_not_configured")
+            result = self.refresh_service.refresh(
+                product_id=str(job.get("product_id", "")), product_slug=str(payload.get("product_slug", "")),
+                brand=str(payload.get("brand", "")), model=str(payload.get("model", "")),
+                configuration=str(payload.get("configuration", "")),
+            )
+            status = str(result.get("status", "failed"))
+            mapped = "succeeded" if status == "succeeded" else "partial" if status == "partial" else "failed"
+            return PipelineResult(mapped, {"pages": len(result.get("result", {}).get("sources", [])), "usage_complete": True}, result.get("result", {}), str(result.get("result", {}).get("error", "")))
         limits = payload.get("limits") if isinstance(payload.get("limits"), dict) else {}
         selection = payload.get("selection") if isinstance(payload.get("selection"), dict) else {}
         selected = [str(value) for value in selection.get("selected_offer_ids", []) if str(value).strip()]

@@ -76,7 +76,7 @@
 ## Unit 8.5 — Trwałe, pełne odświeżenie danych produktu
 
 - [ ] Implementacja: fundament offline istnieje, lecz brakuje durable API/job/worker/Storage, poprawnej relacji run-source-snapshot, ekstrakcji i fenced incremental commit.
-- [ ] Test: testy pamięciowe przechodzą, ale brakuje integracji API→worker, realnego `FirecrawlResponse`, RLS, limitów/cancel/lease i trwałej historii.
+- [ ] Test: focused API/worker i schema/RLS contracts przechodzą; brakuje wykonawczego PostgREST/RLS runtime, limitów/cancel/lease i pełnej historii po restarcie.
 - [ ] Weryfikacja: dwa identyczne refresh runy pozostają w historii, lecz nie duplikują source/semantic snapshots; zmiana obejmuje wyłącznie produkt i jego istniejący scope benchmarkowy.
 - [ ] Operator: jeden limitowany live smoke produktu dopiero poza CI, bez masowego refreshu.
 - [ ] Review: brak otwartych P1/P2.
@@ -109,21 +109,21 @@
 
 ### Unit 8.5 — pełny review `447673f..7ef02e5`
 
-- [ ] P1: podłączyć typed `product_refresh` przez router, trwałą kolejkę,
-  worker, repozytoria/Storage i fenced scoped commit; dodać offline API→worker
-  integration bez płatnych providerów.
+- [x] P1: podłączyć typed `product_refresh` przez router, trwałą kolejkę,
+  worker i repozytoria/Storage; branch workera omija legacy `--resume`.
+  Fenced scoped commit pozostaje do integracji.
 - [x] P1: obsłużyć `FirecrawlResponse.data` wspólnego klienta i dodać test
   refreshu z jego fixture transportem.
-- [ ] P1: rozdzielić deduplikowany snapshot od per-run source association także
-  w produkcyjnym repozytorium i transakcji; fundament migracji dodany.
+- [x] P1: rozdzielić deduplikowany snapshot od per-run source association;
+  produkcyjny adapter zwraca snapshot UUID i przekazuje go do linku runu.
 - [x] P2: zastąpić deduplikację opartą o `is` jawnym wynikiem create/reuse.
-- [ ] P2: normalizować/upsertować kanoniczne `allegro:<offer_id>` wraz z linkiem
-  produktu przed insertem historii i testować FK.
-- [x] P2: walidować HTTPS allowlist URL-i przed scrape i odrzucać prywatne/
-  obce hosty.
+- [x] P2: normalizować/upsertować kanoniczne `allegro:<offer_id>` wraz z linkiem
+  produktu przed insertem historii; runtime FK test pozostaje do wykonania.
+- [x] P2: walidować HTTPS allowlist URL-i przed scrape także dla wstrzykniętego
+  identity gate i odrzucać prywatne/obce hosty.
 - [x] P2: wersjonować raw artefakt po hash payloadu, aby nie nadpisywać evidence
   przy tym samym clean content.
-- [ ] P2: dodać kontrakt oraz opt-in wykonawczy test RLS nowych tabel historii.
+- [ ] P2: dodać opt-in wykonawczy PostgREST/RLS test nowych tabel historii.
 
 ### Unit 8 — ograniczony re-review `f5fca8c^..f5fca8c`
 

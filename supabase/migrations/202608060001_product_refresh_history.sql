@@ -29,6 +29,8 @@ create table public.product_refresh_run_sources (
   run_id text not null references public.product_refresh_runs(run_id) on delete cascade,
   snapshot_id uuid not null references public.product_refresh_snapshots(id) on delete restrict,
   product_id text not null references public.products(product_id) on delete restrict,
+  raw_object_path text not null,
+  clean_object_path text not null,
   created_at timestamptz not null default now(),
   unique (run_id, snapshot_id)
 );

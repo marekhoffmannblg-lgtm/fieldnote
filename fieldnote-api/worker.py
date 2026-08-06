@@ -10,12 +10,21 @@ import threading
 import time
 import uuid
 from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from repositories.job_repository import JobRepository
 from repositories.supabase_client import SupabaseClient
 from services.job_service import cost_number
 from services.pipeline_service import PipelineResult, PipelineService
 from services.benchmark_commit_service import BenchmarkCommitService
+from services.product_refresh_service import ProductRefreshService
+from repositories.refresh_repository import SupabaseRefreshHistory, SupabaseRefreshStorage
+from firecrawl_client import FirecrawlClient
 
 
 class ResearchWorker:
@@ -89,7 +98,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="FIELDNOTE durable research worker")
     parser.add_argument("--once", action="store_true"); parser.add_argument("--poll-seconds", type=float, default=2.0)
     args = parser.parse_args(argv)
-    worker = ResearchWorker(JobRepository(SupabaseClient.from_env()), PipelineService(), lease_seconds=int(os.getenv("FIELDNOTE_JOB_LEASE_SECONDS", "60")))
+    client = SupabaseClient.from_env()
+    refresh = ProductRefreshService(FirecrawlClient(), SupabaseRefreshStorage(client), SupabaseRefreshHistory(client))
+    worker = ResearchWorker(JobRepository(client), PipelineService(refresh_service=refresh), lease_seconds=int(os.getenv("FIELDNOTE_JOB_LEASE_SECONDS", "60")))
     while True:
         worked = worker.process_one()
         if args.once: return 0

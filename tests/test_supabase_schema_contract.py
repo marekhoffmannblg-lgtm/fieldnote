@@ -32,6 +32,7 @@ class SupabaseSchemaContractTests(unittest.TestCase):
                 "202607280001_durable_research_queue.sql",
                 "202607290001_incremental_benchmark_commit.sql",
                 "202607300001_incremental_commit_partial_fixes.sql",
+                "202608060001_product_refresh_history.sql",
             ],
         )
         schema = "\n".join(migration(path.name) for path in sorted(MIGRATIONS.glob("*.sql")))
@@ -85,6 +86,14 @@ class SupabaseSchemaContractTests(unittest.TestCase):
         self.assertIn("no_mutation", upgrade)
         self.assertIn("for candidate in select element from jsonb_array_elements(p_snapshots) as elements(element)", upgrade)
         self.assertNotIn("create table public.research_scope_snapshots", upgrade)
+
+    def test_product_refresh_history_has_snapshot_and_per_run_link(self) -> None:
+        refresh = migration("202608060001_product_refresh_history.sql")
+        self.assertIn("create table public.product_refresh_runs", refresh)
+        self.assertIn("create table public.product_refresh_snapshots", refresh)
+        self.assertIn("unique (source_id, content_hash)", refresh)
+        self.assertIn("create table public.product_refresh_run_sources", refresh)
+        self.assertIn("snapshot_id uuid not null", refresh)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,18 @@ class SupabaseClient:
         """Call a SQL function through PostgREST; transactions stay in Postgres."""
         return self.request("POST", f"rpc/{function}", payload=payload or {})
 
+    def storage_upload(self, bucket: str, path: str, content: bytes, *, content_type: str) -> None:
+        request = Request(
+            f"{self.url}/storage/v1/object/{bucket}/{path.lstrip('/')}",
+            data=content, method="POST",
+            headers={"apikey": self.service_key, "Authorization": f"Bearer {self.service_key}", "Content-Type": content_type, "x-upsert": "false"},
+        )
+        try:
+            with urlopen(request, timeout=15):
+                return
+        except HTTPError as error:
+            raise SupabaseRequestError(f"storage/{bucket}", error.code) from error
+
     def auth_admin(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         body = json.dumps(payload).encode() if payload is not None else None
         request = Request(f"{self.url}/auth/v1/admin/{path.lstrip('/')}", data=body, method=method, headers={"apikey": self.service_key, "Authorization": f"Bearer {self.service_key}", "Content-Type": "application/json"})

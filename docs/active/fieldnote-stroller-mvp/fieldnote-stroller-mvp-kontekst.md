@@ -825,3 +825,29 @@
 - Nadal nie podłączono serwisu do API/durable worker/jobów i produkcyjnego
   repozytorium Storage/źródeł, nie ma wykonawczego RLS testu ani transakcyjnego
   FK upsertu. Unit 8.5 pozostaje **partial**; nie rozpoczynano Unit 9.
+
+### Unit 8.5 — ograniczony re-review `7ef02e5..cf6e2ed` (`2026-08-06`)
+
+- Użyto niezależnie `correctness_reviewer`, `security_reviewer`,
+  `test_reviewer` i `data_reviewer`; review objął wyłącznie ostatni commit
+  remediation i poprzednie findings. Nie zmieniano kodu ani nie rozpoczęto
+  Unit 9.
+- Weryfikacja: focused refresh/Firecrawl suite **14 PASS**, `py_compile` i
+  `git diff --check 7ef02e5..cf6e2ed` PASS.
+- Gate: **BLOKUJE** — 2 P1, 5 P2, 0 P3. Zamknięto problem formatu
+  `FirecrawlResponse` i deduplikacji opartej o tożsamość obiektu. Pozostają
+  trwały API→worker flow, persistowalny snapshot ID i pięć P2 z
+  `review-unit-8.5.md`. Unit 8.5 ma status **partial**.
+
+### Unit 8.5 — remediation po re-review (`2026-08-06`)
+
+- Dodano typed `product_refresh` do payloadu jobu i endpointu jobs, branch
+  workera omijający legacy `--resume`, adapter Supabase Storage/history oraz
+  kontrakt snapshot UUID + per-run raw/clean paths. Dodano testy payloadu jobu
+  i terminalizacji workera na fixture.
+- URL allowlista jest wykonywana przed custom identity gate; źródła Allegro są
+  kanonizowane, a migracja ma trzy tabele historii z relacją snapshot →
+  run-source. Schema/RLS contracts obejmują nowe tabele.
+- Weryfikacja: **32 focused testy PASS**, `py_compile` i `git diff --check`
+  PASS. Runtime PostgREST/RLS, evidence/candidates, OpenAI i fenced scoped
+  commit pozostają do dokończenia. Unit 8.5 ma status **partial**.

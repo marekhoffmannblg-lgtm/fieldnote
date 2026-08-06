@@ -30,6 +30,12 @@ class CreateResearchJobRequest(BaseModel):
     cost_limit: float | None = Field(default=None, ge=0, le=1_000_000)
 
 
+class CreateProductRefreshJobRequest(BaseModel):
+    product_slug: str = Field(min_length=3, max_length=160, pattern=r"^[a-z0-9]+__[a-z0-9-]+$")
+    limits: JobLimitsRequest = Field(default_factory=JobLimitsRequest)
+    cost_limit: float | None = Field(default=None, ge=0, le=1_000_000)
+
+
 def get_service(request: Request) -> JobService:
     service = getattr(request.app.state, "job_service", None)
     if not isinstance(service, JobService):
@@ -72,6 +78,20 @@ def create_research_job(body: CreateResearchJobRequest, principal: Principal = D
         job = service.enqueue(product_slug=body.product_slug, requested_by=principal.user_id, limits=body.limits.model_dump(), selection={"selected_offer_ids": body.selected_offer_ids, "selected_manufacturer_source_ids": body.selected_manufacturer_source_ids, "include_manufacturer_sources": body.include_manufacturer_sources, "skip_ai": body.skip_ai}, cost_limit=body.cost_limit)
     except DuplicateActiveJobError as exc:
         raise HTTPException(status_code=409, detail="Dla tego produktu działa już aktywne zadanie researchu.") from exc
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Nie znaleziono produktu.") from exc
+    return public_job(job)
+
+
+@router.post("/product-refresh", status_code=202)
+def create_product_refresh_job(body: CreateProductRefreshJobRequest, principal: Principal = Depends(require_data_write), service: JobService = Depends(get_service)) -> dict[str, Any]:
+    """Queue exactly one fresh product refresh; execution belongs to worker."""
+    try:
+        job = service.enqueue(product_slug=body.product_slug, requested_by=principal.user_id,
+                              limits=body.limits.model_dump(), selection={"refresh": True},
+                              cost_limit=body.cost_limit, job_type="product_refresh")
+    except DuplicateActiveJobError as exc:
+        raise HTTPException(status_code=409, detail="Dla tego produktu działa już aktywne zadanie.") from exc
     except JobNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Nie znaleziono produktu.") from exc
     return public_job(job)

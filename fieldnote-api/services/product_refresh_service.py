@@ -141,10 +141,8 @@ class ProductRefreshService:
                 text = _text(scraped)
                 if not text:
                     continue
-                source_id = str(item.get("source_id") or "").strip()
-                if not source_id:
-                    offer_id = str(item.get("offer_id") or "").strip()
-                    source_id = f"allegro:{offer_id}" if offer_id else url
+                offer_id = str(item.get("offer_id") or "").strip()
+                source_id = f"allegro:{offer_id}" if offer_id else str(item.get("source_id") or "").strip() or url
                 content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
                 raw_hash = hashlib.sha256(json.dumps(scraped, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
                 base = f"refresh/{product_id}/{source_id}/{content_hash}/{raw_hash}"
@@ -160,6 +158,8 @@ class ProductRefreshService:
                 run_source = {"run_id": run_id, "product_id": product_id,
                               "source_id": source_id, "content_hash": content_hash,
                               "raw_object_path": raw_path, "clean_object_path": clean_path}
+                if persisted.get("id"):
+                    run_source["snapshot_id"] = persisted["id"]
                 append_link = getattr(self.history, "append_run_source", None)
                 if callable(append_link):
                     append_link(run_source)
@@ -174,9 +174,6 @@ class ProductRefreshService:
             return self._finish(started, "failed", {"error": str(exc), "last_known_good_preserved": True})
 
     def _identity(self, title: str, brand: str, model: str, configuration: str, item: dict[str, Any]) -> str:
-        if self.identity_gate:
-            return str(self.identity_gate(title=title, brand=brand, model=model, configuration=configuration, item=item))
-        title_norm = _canonical(title)
         parsed = urlparse(str(item.get("url") or item.get("link") or ""))
         host = parsed.hostname or ""
         allowed = host == "allegro.pl" or host.endswith(".allegro.pl")
@@ -186,6 +183,9 @@ class ProductRefreshService:
             private = False
         if parsed.scheme != "https" or not allowed or private:
             return "untrusted_url"
+        if self.identity_gate:
+            return str(self.identity_gate(title=title, brand=brand, model=model, configuration=configuration, item=item))
+        title_norm = _canonical(title)
         if not all(token in title_norm for token in (_canonical(brand), _canonical(model)) if token):
             return "brand_or_model_mismatch"
         if configuration and _canonical(configuration) not in title_norm:

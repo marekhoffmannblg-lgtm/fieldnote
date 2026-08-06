@@ -162,3 +162,102 @@ ukończony. Unit 9 nie został rozpoczęty.
 
 `$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie
 zaakceptowane 3 P1 i 5 P2 z tego raportu.
+
+---
+
+## Ograniczony re-review `7ef02e5..cf6e2ed` (`2026-08-06`)
+
+Sprawdzono wyłącznie remediation poprzednich findings oraz ich regresje.
+Nie sprawdzano Unit 9 i nie zmieniano kodu.
+
+### Skonsolidowane pozostałe findings
+
+### P1 — Durable flow `product_refresh` nadal nie jest wykonywalny
+
+- File: brak integracji serwisu w `routers/jobs.py`, `job_service.py`,
+  `worker.py`, `pipeline_service.py` i repozytoriach.
+- Evidence: typed job nie jest tworzony ani odbierany przez workera.
+- Impact: użytkownik nie może przejść przez API → kolejkę → lease/cancel →
+  worker → fenced commit; historia nie przetrwa restartu.
+- Recommendation: wdrożyć trwały typed job i test API-to-worker na fixtures.
+
+### P1 — Relacja `run → snapshot` nie spełnia własnego kontraktu migracji
+
+- File: `product_refresh_service.py:158-165`; migracja:27-34.
+- Evidence: tabela linków wymaga `snapshot_id NOT NULL`, a serwis przekazuje
+  tylko source/hash/paths; `append_source` nie zwraca UUID snapshotu.
+- Impact: rzeczywisty adapter nie utworzy drugiego trwałego linku do
+  deduplikowanego snapshotu.
+- Recommendation: atomowy create-or-reuse snapshot zwraca UUID i zapisuje
+  per-run link z tym UUID.
+
+### P2 — Custom identity gate omija URL allowlistę
+
+- File: `product_refresh_service.py:176-188`.
+- Evidence: wstrzyknięty gate zwraca przed walidacją URL; `exact_match` może
+  dopuścić obcy lub prywatny host do scrape.
+- Recommendation: walidować URL niezależnie od wyniku identity gate i dodać
+  regresję z permissive gate.
+
+### P2 — Canonical source nie jest resolve/upsertowany przed FK
+
+- File: `product_refresh_service.py:144-158`; migracja:16.
+- Evidence: fallback tworzy string `allegro:<offer_id>`, ale nie zapisuje
+  `sources` ani `product_source_links`.
+- Recommendation: transakcyjnie resolve/upsert źródło i link produktu przed
+  snapshotem oraz dodać test lokalnego PostgreSQL.
+
+### P2 — Drugi raw payload nie ma per-run durable provenance
+
+- File: serwis:149-165; migracja:20-33.
+- Evidence: drugi raw artefakt ma ścieżkę, ale deduplikowany snapshot trzyma
+  tylko jedną, a run-source nie ma artifact ID.
+- Recommendation: dodać per-fetch artefakt/evidence link do runu i test dwóch
+  raw payloadów z tym samym clean textem.
+
+### P2 — Brakuje asercji świeżego Search i Scrape dla obu runów
+
+- File: `tests/test_product_refresh_pipeline.py:29-37`.
+- Evidence: provider liczy wywołania, lecz test ich nie asercuje.
+- Recommendation: wymusić dwa Search i dwa Scrape dla dwóch refresh runów.
+
+### P2 — Brak wykonawczego RLS testu nowych tabel
+
+- File: migracja:36-44; brak referencji w suite RLS/runtime.
+- Evidence: nowe tabele są testowane wyłącznie adapterem pamięciowym.
+- Recommendation: dodać contract i opt-in PostgREST test dla anon/viewer/
+  analyst/admin/must-change-password.
+
+### Wyniki reviewerów ograniczonego re-review
+
+| Reviewer | Wynik | Findings przyjęte |
+|---|---|---:|
+| correctness_reviewer | 2 P1 + 3 P2 | 2 P1 + 3 P2 |
+| security_reviewer | 2 P2 | 2 P2 |
+| test_reviewer | 1 P1 + 3 P2 | scalone |
+| data_reviewer | 1 P1 + 3 P2 | scalone |
+
+### Testy re-review
+
+- `tests/test_product_refresh_pipeline.py`, `test_firecrawl_client.py` i
+  `test_firecrawl_source_adapters.py`: **14 PASS**.
+- `python3 -m py_compile fieldnote-api/services/product_refresh_service.py`:
+  PASS.
+- `git diff --check 7ef02e5..cf6e2ed`: PASS.
+
+### Decyzja gate re-review
+
+**BLOKUJE** — **2 P1, 5 P2, 0 P3**. Poprzedni P1 dla formatu
+`FirecrawlResponse` i P2 dla tożsamości obiektu zostały zamknięte. Unit 8.5
+pozostaje `partial`; Unit 9 nie został rozpoczęty.
+
+## Remediation execution `cf6e2ed..HEAD` (`2026-08-06`)
+
+Dodano typed job/endpoint, worker branch bez `--resume`, Supabase
+Storage/history adapter, snapshot UUID links, canonical source upsert,
+allowlist przed custom gate oraz schema contracts i worker/job regressions.
+Focused verification: **32 PASS**, `py_compile` PASS, `git diff --check` PASS.
+Pełny `check_fieldnote.sh` ponownie nie ukończył się w 20 s na istniejącym
+hygiene `git show`; runtime PostgREST/RLS i fenced scoped commit pozostają
+nieoznaczone jako PASS. Unit nadal `partial`; wymagany jest kolejny ograniczony
+review po tym commicie.

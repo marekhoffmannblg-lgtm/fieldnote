@@ -62,6 +62,13 @@ class RlsPolicyContractTests(unittest.TestCase):
         self.assertIn("public.fieldnote_can_read()", incremental)
         self.assertNotRegex(incremental.lower(), re.compile(r"grant\s+(insert|update|delete|all).*research_scope_snapshots.*authenticated"))
 
+    def test_product_refresh_history_tables_are_rls_protected(self) -> None:
+        refresh = (ROOT / "supabase" / "migrations" / "202608060001_product_refresh_history.sql").read_text(encoding="utf-8")
+        for table in ("product_refresh_runs", "product_refresh_snapshots", "product_refresh_run_sources"):
+            self.assertIn(f"alter table public.{table} enable row level security;", refresh)
+            self.assertIn(f"public.{table}", refresh)
+        self.assertNotRegex(refresh.lower(), re.compile(r"create policy\s+\S+.*\bto anon\b"))
+
 
 if __name__ == "__main__":
     unittest.main()

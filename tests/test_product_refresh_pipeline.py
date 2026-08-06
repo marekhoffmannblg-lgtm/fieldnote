@@ -27,13 +27,15 @@ class ProductRefreshTests(unittest.TestCase):
         return ProductRefreshService(provider, storage, history), history, storage
 
     def test_always_fresh_and_identical_hash_deduplicates_snapshot(self):
-        service, history, storage = self.make(Provider())
+        provider = Provider(); service, history, storage = self.make(provider)
         first = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         second = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         self.assertEqual(first["status"], "succeeded"); self.assertEqual(second["status"], "succeeded")
         self.assertEqual(len(history.runs), 4)  # running + terminal for each invocation
         self.assertEqual(len(history.sources), 1)
         self.assertEqual(len(history.run_sources), 2)
+        self.assertEqual(provider.searches, 2)
+        self.assertEqual(provider.scrapes, 2)
         self.assertEqual(len(storage.objects), 2)
 
     def test_changed_content_hash_creates_new_source_snapshot(self):
@@ -69,6 +71,12 @@ class ProductRefreshTests(unittest.TestCase):
         service, history, _ = self.make(provider)
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         self.assertEqual(result["status"], "partial"); self.assertEqual(provider.scrapes, 0); self.assertEqual(history.sources, [])
+
+    def test_custom_identity_gate_cannot_bypass_url_validation(self):
+        provider = Provider(); provider.search = lambda query, limit: {"data": {"items": [{"url": "https://evil.example/x", "title": "Lionelo Amber 3w1 stroller"}]}}
+        service, _, _ = self.make(provider); service.identity_gate = lambda **_: "exact_match"
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
+        self.assertEqual(result["status"], "partial"); self.assertEqual(provider.scrapes, 0)
 
     def test_same_clean_text_different_raw_has_immutable_storage_paths(self):
         provider = Provider("same"); calls = []
