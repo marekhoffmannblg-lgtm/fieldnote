@@ -80,7 +80,7 @@ class FirecrawlClient:
         self.transport = transport or _http_transport
         self.sleep = sleep
 
-    def _request(self, operation: str, payload: dict[str, Any], *, cache: dict[str, Any] | None = None) -> FirecrawlResponse:
+    def _request(self, operation: str, payload: dict[str, Any], *, cache: dict[str, Any] | None = None, timeout: float | None = None) -> FirecrawlResponse:
         if cache is not None:
             return FirecrawlResponse(operation, 200, dict(cache), FirecrawlUsage(pages=int(cache.get("pages", 0) or 0), max_pages=self.max_pages, usage_complete=True), cached=True)
         if not self.api_key:
@@ -89,9 +89,13 @@ class FirecrawlClient:
         request_payload.setdefault("limit", self.max_pages)
         headers = {"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"}
         last_status: int | None = None
+        deadline = time.monotonic() + max(0.1, float(timeout)) if timeout is not None else None
         for attempt in range(1, self.max_retries + 2):
             try:
-                status, data = self.transport(f"{self.base_url}/{operation}", "POST", request_payload, self.timeout, headers)
+                remaining = max(0.1, deadline - time.monotonic()) if deadline is not None else self.timeout
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("Firecrawl request deadline exceeded")
+                status, data = self.transport(f"{self.base_url}/{operation}", "POST", request_payload, min(self.timeout, remaining), headers)
             except (TimeoutError, OSError, URLError) as exc:
                 # Injectable transports and urllib can expose transport
                 # failures using different exception classes.  Normalize them
@@ -102,17 +106,17 @@ class FirecrawlClient:
                         f"Firecrawl transport failed after {attempt} attempts: {type(exc).__name__}",
                         attempts=attempt,
                     ) from exc
-                self.sleep(self.backoff_seconds * (2 ** (attempt - 1)))
+                self.sleep(min(self.backoff_seconds * (2 ** (attempt - 1)), max(0.0, deadline - time.monotonic()) if deadline is not None else self.backoff_seconds * (2 ** (attempt - 1))))
                 continue
             except FirecrawlError:
                 if attempt > self.max_retries:
                     raise
-                self.sleep(self.backoff_seconds * (2 ** (attempt - 1)))
+                self.sleep(min(self.backoff_seconds * (2 ** (attempt - 1)), max(0.0, deadline - time.monotonic()) if deadline is not None else self.backoff_seconds * (2 ** (attempt - 1))))
                 continue
             last_status = status
             if status == 429 or status >= 500:
                 if attempt <= self.max_retries:
-                    self.sleep(self.backoff_seconds * (2 ** (attempt - 1)))
+                    self.sleep(min(self.backoff_seconds * (2 ** (attempt - 1)), max(0.0, deadline - time.monotonic()) if deadline is not None else self.backoff_seconds * (2 ** (attempt - 1))))
                     continue
             if status < 200 or status >= 300 or data.get("success") is False:
                 error = str(data.get("error") or data.get("message") or f"HTTP {status}")[:500]
@@ -124,11 +128,11 @@ class FirecrawlClient:
             return FirecrawlResponse(operation, status, raw_data if isinstance(raw_data, dict) else {"items": raw_data}, usage, str(data.get("id") or data.get("requestId") or ""), attempts=attempt)
         raise FirecrawlError(f"Firecrawl {operation} failed after retries", status_code=last_status, attempts=self.max_retries + 1)
 
-    def search(self, query: str, *, limit: int | None = None, sources: list[str] | None = None, cache: dict[str, Any] | None = None) -> FirecrawlResponse:
-        return self._request("search", {"query": str(query), "limit": max(1, min(int(limit or self.max_pages), self.max_pages)), **({"sources": sources} if sources else {})}, cache=cache)
+    def search(self, query: str, *, limit: int | None = None, sources: list[str] | None = None, cache: dict[str, Any] | None = None, timeout: float | None = None) -> FirecrawlResponse:
+        return self._request("search", {"query": str(query), "limit": max(1, min(int(limit or self.max_pages), self.max_pages)), **({"sources": sources} if sources else {})}, cache=cache, timeout=timeout)
 
-    def scrape(self, url: str, *, formats: list[str] | None = None, only_main_content: bool = True, cache: dict[str, Any] | None = None) -> FirecrawlResponse:
-        return self._request("scrape", {"url": str(url), "formats": formats or ["markdown"], "onlyMainContent": bool(only_main_content)}, cache=cache)
+    def scrape(self, url: str, *, formats: list[str] | None = None, only_main_content: bool = True, cache: dict[str, Any] | None = None, timeout: float | None = None) -> FirecrawlResponse:
+        return self._request("scrape", {"url": str(url), "formats": formats or ["markdown"], "onlyMainContent": bool(only_main_content)}, cache=cache, timeout=timeout)
 
     def crawl(self, url: str, *, limit: int | None = None, include_paths: list[str] | None = None, cache: dict[str, Any] | None = None) -> FirecrawlResponse:
         return self._request("crawl", {"url": str(url), "limit": max(1, min(int(limit or self.max_pages), self.max_pages)), **({"includePaths": include_paths} if include_paths else {})}, cache=cache)

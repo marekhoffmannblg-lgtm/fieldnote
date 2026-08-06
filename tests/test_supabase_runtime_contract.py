@@ -83,12 +83,12 @@ def jwt_for(subject: str, secret: str) -> str:
     return f"{header}.{payload}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode()}"
 
 
-def storage_request(method: str, url: str, token: str, api_key: str, body: bytes = b"") -> tuple[int, str]:
+def storage_request(method: str, url: str, token: str | None, api_key: str, body: bytes = b"") -> tuple[int, str]:
     request = Request(
         url,
         data=body or None,
         method=method,
-        headers={"Authorization": f"Bearer {token}", "apikey": api_key},
+        headers=({"Authorization": f"Bearer {token}"} if token else {}) | {"apikey": api_key},
     )
     if body:
         request.add_header("Content-Type", "application/json" if body.startswith(b"{") else "text/plain")
@@ -131,7 +131,7 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         query("delete from public.sources where source_id = 'runtime-analyst-write'")
-        for user_id, role in (("101", "viewer"), ("102", "analyst"), ("103", "admin")):
+        for user_id, role in (("101", "viewer"), ("102", "analyst"), ("103", "admin"), ("105", "analyst")):
             full_id = f"00000000-0000-0000-0000-000000000{user_id}"
             query(
                 "insert into auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at) "
@@ -140,8 +140,8 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
             )
             query(
                 "insert into public.profiles (id, role, must_change_password) "
-                f"values ('{full_id}', '{role}', false) "
-                "on conflict (id) do update set role = excluded.role, must_change_password = false"
+                f"values ('{full_id}', '{role}', {'true' if user_id == '105' else 'false'}) "
+                f"on conflict (id) do update set role = excluded.role, must_change_password = {'true' if user_id == '105' else 'false'}"
             )
 
     def test_seed_files_are_idempotent(self) -> None:
@@ -326,6 +326,7 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
         api_key = environment["ANON_KEY"]
         viewer = jwt_for("00000000-0000-0000-0000-000000000101", environment["JWT_SECRET"])
         analyst = jwt_for("00000000-0000-0000-0000-000000000102", environment["JWT_SECRET"])
+        must_change = jwt_for("00000000-0000-0000-0000-000000000105", environment["JWT_SECRET"])
         service = environment["SERVICE_ROLE_KEY"]
         suffix = hashlib.sha256(os.urandom(12)).hexdigest()[:10]
         run_id = f"runtime-refresh-{suffix}"
@@ -349,6 +350,14 @@ class SupabaseRuntimeContractTests(unittest.TestCase):
         self.assertIn(viewer_link[0], {401, 403}, viewer_link[1])
         analyst_link = rest_request("POST", f"{rest_url}/product_refresh_run_sources", analyst, api_key, link)
         self.assertIn(analyst_link[0], {200, 201}, analyst_link[1])
+        for bucket in ("source-raw", "source-clean"):
+            object_url = environment["API_URL"] + f"/storage/v1/object/{bucket}/runtime-refresh-{suffix}.txt"
+            self.assertTrue(is_storage_denied(storage_request("POST", object_url, None, api_key, b"anon")))
+            self.assertTrue(is_storage_denied(storage_request("POST", object_url, viewer, api_key, b"viewer")))
+            self.assertTrue(is_storage_denied(storage_request("POST", object_url, must_change, api_key, b"must-change")))
+            self.assertIn(storage_request("POST", object_url, analyst, api_key, b"analyst")[0], {200, 201})
+            self.assertTrue(is_storage_denied(storage_request("GET", object_url, viewer, api_key)))
+            storage_request("DELETE", environment["API_URL"] + f"/storage/v1/object/{bucket}", service, api_key, json.dumps({"prefixes": [f"runtime-refresh-{suffix}.txt"]}).encode())
         rest_request("DELETE", f"{rest_url}/product_refresh_run_sources?run_id=eq.{run_id}", service, service)
         rest_request("DELETE", f"{rest_url}/product_refresh_snapshots?content_hash=eq.{suffix}", service, service)
         rest_request("DELETE", f"{rest_url}/product_refresh_runs?run_id=eq.{run_id}", service, service)

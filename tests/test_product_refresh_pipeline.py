@@ -98,7 +98,7 @@ class ProductRefreshTests(unittest.TestCase):
         self.assertEqual(provider.searches, 1); self.assertEqual(provider.scrapes, 0)
         cancelled[0] = True
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", cancel_check=lambda: cancelled[0])
-        self.assertEqual(result["status"], "partial"); self.assertEqual(provider.searches, 1)
+        self.assertEqual(result["status"], "cancelled"); self.assertEqual(provider.searches, 1)
 
     def test_positive_page_cap_and_cancel_between_scrapes(self):
         class Multi(Provider):
@@ -119,8 +119,8 @@ class ProductRefreshTests(unittest.TestCase):
 
     def test_provider_timeout_preserves_last_known_good(self):
         class Hanging(Provider):
-            def search(self, query, *, limit):
-                import time; time.sleep(0.2); return {"data": {"items": []}}
+            def search(self, query, *, limit, timeout=None):
+                raise TimeoutError("fixture deadline")
         service, _, _ = self.make(Hanging())
         result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(timeout_seconds=0.01))
         self.assertEqual(result["status"], "partial")

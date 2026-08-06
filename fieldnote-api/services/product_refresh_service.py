@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import queue
-import threading
 import time
 import re
 import uuid
@@ -114,29 +112,18 @@ def _deterministic_facts(text: str) -> dict[str, Any]:
     return facts
 
 
-def _bounded_call(callback: Callable[[], Any], timeout: float) -> Any:
-    """Run an external provider call with a hard caller deadline.
+def _provider_call(method: Callable[..., Any], *args: Any, timeout: float, **kwargs: Any) -> Any:
+    """Pass the remaining deadline to providers that support it.
 
-    Provider transports are isolated behind a daemon thread so a hung network
-    request cannot keep the worker's refresh orchestration blocked forever.
+    The production Firecrawl client aborts its underlying transport at that
+    deadline. Fixture providers intentionally remain backward-compatible.
     """
-    result: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
-
-    def invoke() -> None:
-        try:
-            result.put((True, callback()))
-        except BaseException as exc:  # propagate provider failures to refresh
-            result.put((False, exc))
-
-    thread = threading.Thread(target=invoke, name="fieldnote-refresh-provider", daemon=True)
-    thread.start()
     try:
-        ok, value = result.get(timeout=max(0.01, timeout))
-    except queue.Empty as exc:
-        raise TimeoutError("product refresh provider timeout") from exc
-    if not ok:
-        raise value
-    return value
+        return method(*args, timeout=max(0.1, timeout), **kwargs)
+    except TypeError as exc:
+        if "timeout" not in str(exc):
+            raise
+        return method(*args, **kwargs)
 
 
 @dataclass
@@ -159,10 +146,10 @@ class ProductRefreshService:
         deadline = time.monotonic() + max(0.01, float(limits.timeout_seconds))
         try:
             if cancel_check and cancel_check():
-                return self._finish(started, "partial", {"reason": "cancel_requested", "last_known_good_preserved": True})
+                return self._finish(started, "cancelled", {"reason": "cancel_requested", "last_known_good_preserved": True})
             # Explicitly omit cache/resume arguments: every invocation is fresh.
             candidate_limit = max(0, min(limits.max_candidates, limits.max_pages))
-            search = _bounded_call(lambda: self.provider.search(query, limit=candidate_limit), deadline - time.monotonic())
+            search = _provider_call(self.provider.search, query, limit=candidate_limit, timeout=deadline - time.monotonic())
             candidates = _items(search)[:candidate_limit]
             accepted = []
             rejected = []
@@ -181,10 +168,10 @@ class ProductRefreshService:
             all_facts: dict[str, Any] = {}
             for url, title, item in accepted:
                 if cancel_check and cancel_check():
-                    return self._finish(started, "partial", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
+                    return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 # No cache/resume is passed to the provider; storage is written
                 # before any semantic value can be committed.
-                scraped = _bounded_call(lambda: self.provider.scrape(url), deadline - time.monotonic())
+                scraped = _provider_call(self.provider.scrape, url, timeout=deadline - time.monotonic())
                 if cancel_check and cancel_check():
                     return self._finish(started, "cancelled", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 text = _text(scraped)
@@ -223,7 +210,7 @@ class ProductRefreshService:
             group_key = "|".join(part for part in (_canonical(brand), _canonical(model)) if part)
             semantic_state = {"facts": all_facts, "evidence": [row["evidence"] for row in fetched],
                               "sources": [row.get("source_id", "") for row in fetched],
-                              "semantic_benchmark": {"configuration": configuration, "participant_product_ids": [product_id]}}
+                              "openai": {"requested": False, "reason": "no_unresolved_deterministic_candidates"}}
             result = {"sources": fetched, "rejected": rejected, "semantic_snapshot_created": semantic_changed,
                       "last_known_good_preserved": False,
                       "scoped_commit": {"scope": {"product_id": product_id, "group_key": group_key,

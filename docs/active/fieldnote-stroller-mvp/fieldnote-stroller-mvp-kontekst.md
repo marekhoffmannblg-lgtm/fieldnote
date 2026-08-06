@@ -877,6 +877,33 @@ egzekwowane, nadal brakuje faktów/OpenAI/fenced commit, regresji worker/cap/
 mid-run cancel oraz runtime PostgREST/Storage RLS. Unit 8.5 pozostaje partial;
 Unit 9 nie rozpoczęto.
 
+### Unit 8.5 — remediation `3745c45..HEAD` (`2026-08-06`)
+
+Usunięto placeholderową projekcję benchmarku grupy: refresh zapisuje wyłącznie
+scoped snapshot produktu. FirecrawlClient obsługuje deadline transportu, a
+refresh przekazuje pozostały limit bez daemon thread. Wszystkie ścieżki cancel
+zwracają `cancelled`. Dodano pełny offline kontrakt fenced commit oraz
+rozszerzono opt-in RLS/Storage o anon, viewer, must-change i buckety raw/clean.
+
+Focused suite: **46 testów, 37 PASS, 9 skipped**; py_compile i diff-check PASS.
+Pełny gate zatrzymuje hygiene na `git show`. Pozostaje pełna ekstrakcja faktów
+kanonicznych z ograniczonym fallbackiem OpenAI oraz uruchomienie opt-in runtime
+Supabase. Unit 8.5 pozostaje **partial**; Unit 9 nie rozpoczęto.
+
+### Unit 8.5 — ograniczony re-review `8b766a5..3745c45` (`2026-08-06`)
+
+Review ograniczono do pięciu poprzednich findings i commitowej remediation.
+Correctness i test reviewer wykonali niezależne przeglądy; security oraz data
+wykonano jako single-agent fallback z powodu limitu agentów. Focused suite
+przeszła: **45 testów, 36 PASS, 9 opt-in skipped**; py_compile i diff-check
+PASS. Pełny gate nadal zatrzymuje hygiene.
+
+Gate **BLOKUJE — 3 P1, 3 P2, 0 P3**. P1: placeholder `semantic_benchmark`
+zapisuje fałszywy snapshot grupy; timeout pozostawia provider thread; nadal
+brakuje pełnej ekstrakcji kanonicznych faktów i ograniczonego OpenAI. P2:
+niespójny status cancellation, brak pełnego kontraktu fenced commit oraz
+niepełny runtime RLS/Storage. Unit 8.5 pozostaje partial; Unit 9 nie rozpoczęto.
+
 ### Unit 8.5 — remediation `0c8ec07..HEAD` (`2026-08-06`)
 
 Serwis przyjmuje limity i `cancel_check`, ogranicza Search oraz sprawdza

@@ -264,6 +264,25 @@
 - [x] 32 focused testy, py_compile i git diff --check PASS; pełny gate zatrzymuje znane zawieszenie hygiene.
 - [ ] Review końcowy PASS.
 
+### Unit 8.5 — ograniczony re-review `8b766a5..3745c45`
+
+- [ ] P1: nie tworzyć placeholderowego `semantic_benchmark`; scoped refresh nie może zapisać snapshotu grupy bez pełnej projekcji istniejącego scope.
+- [ ] P1: timeout musi zatrzymać operację providera, a nie zostawić daemon thread po terminalizacji jobu.
+- [ ] P1: dostarczyć fakty kanoniczne dla zakresu Unit 8.5 i użyć OpenAI wyłącznie do braków/niejednoznaczności.
+- [ ] P2: każde potwierdzone anulowanie ma zwracać `cancelled`, także przed Search i między Scrape.
+- [ ] P2: dodać pełny offline kontrakt job → pipeline → worker → fenced commit dla exact product/configuration/participants.
+- [ ] P2: rozszerzyć opt-in RLS o anon/read i rzeczywiste buckety `source-raw`/`source-clean`.
+
+### Unit 8.5 — remediation `3745c45..HEAD` (`2026-08-06`)
+
+- [x] Product-only refresh nie emituje placeholderowego benchmarku grupy.
+- [x] FirecrawlClient przyjmuje deadline transportu; refresh przekazuje pozostały timeout bez daemon thread.
+- [ ] Pełny canonical fact extraction i ograniczony fallback OpenAI dla nierozstrzygniętych pól.
+- [x] Cancellation przed Search i między Scrape kończy się `cancelled`.
+- [x] Offline job → pipeline → worker → fenced commit obejmuje exact product/configuration/participants i tylko snapshot produktu.
+- [x] Opt-in runtime test obejmuje anon/viewer/must-change/analyst i buckety `source-raw`/`source-clean`.
+- [ ] Weryfikacja opt-in lokalnego Supabase oraz końcowy review PASS.
+
 ### Unit 8.5 — remediation `8b766a5..HEAD` (`2026-08-06`)
 
 - [x] Typed job utrwala `configuration`, a pipeline przekazuje ją do refreshu.

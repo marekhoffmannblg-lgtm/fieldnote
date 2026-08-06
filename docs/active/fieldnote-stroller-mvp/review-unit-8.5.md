@@ -435,3 +435,87 @@ sandboxie przez zapis telemetry poza workspace. Unit 8.5 pozostaje **partial**
 do runtime verification i ograniczonego re-review; Unit 9 nie rozpoczęto.
 
 Następny krok: `$dev-docs-review docs/active/fieldnote-stroller-mvp 8.5`.
+
+---
+
+## Ograniczony re-review `8b766a5..3745c45` (`2026-08-06`)
+
+- **Tryb:** ograniczony re-review remediation; kod nie był zmieniany, Unit 9 nie został rozpoczęty.
+- **Reviewers:** `correctness_reviewer`, `test_reviewer`; security i data: single-agent fallback z powodu limitu aktywnych agentów.
+- **Gate:** `BLOKUJE`.
+
+### P1 — Placeholder tworzy fałszywy snapshot benchmarku grupy
+
+- File: `fieldnote-api/services/product_refresh_service.py:224-232`; `fieldnote-api/services/benchmark_commit_service.py:_snapshots`.
+- Evidence: refresh emituje `semantic_benchmark` zawierający tylko configuration i bieżący product_id. Commit service interpretuje to jako realną projekcję internal benchmarku i zapisuje snapshot grupy.
+- Impact: refresh jednego produktu nadpisuje historię grupy snapshotem bez pozostałych uczestników, scoringu i cen.
+- Scenario: grupa 3 modeli 3w1 dostaje snapshot z wyłącznie odświeżonym produktem.
+- Recommendation: nie emitować benchmark projection bez pełnego istniejącego scope albo przebudować go przyrostowo z pełnym participant setem.
+
+### P1 — Timeout nie zatrzymuje kosztownej operacji providera
+
+- File: `fieldnote-api/services/product_refresh_service.py:117-139`.
+- Evidence: timeout zwraca wynik z daemon thread, ale wywołanie Firecrawl nadal działa w tle.
+- Impact: kolejne joby mogą tworzyć kolejne płatne wywołania mimo terminalizacji timeoutów, obchodząc limit współbieżności/kosztu.
+- Recommendation: przekazać deadline do transportu albo uruchamiać refresh w killable process.
+
+### P1 — Ekstrakcja nie spełnia pełnego kontraktu faktów/OpenAI
+
+- File: `fieldnote-api/services/product_refresh_service.py:108-114,224-232`.
+- Evidence: extractor rozpoznaje wyłącznie wagę, a wynik nie ma strategii uzupełnienia braków/niejednoznaczności przez ograniczone OpenAI.
+- Impact: refresh nie dostarcza wymaganego pełnego zestawu kanonicznych faktów produktu.
+- Recommendation: użyć istniejącego schematu/ekstraktora deterministycznego i kontrolowanego fallbacku AI tylko dla nierozstrzygniętych pól.
+
+### P2 — Cancellation ma niespójny terminal status
+
+- File: `fieldnote-api/services/product_refresh_service.py:161-189`.
+- Evidence: cancel przed Search i między Scrape zwraca `partial`, a po Scrape `cancelled`.
+- Impact: historia nie odróżnia konsekwentnie działania operatora od częściowego błędu.
+- Recommendation: każdy potwierdzony cancel kończy się `cancelled` i ma regresje dla obu momentów.
+
+### P2 — Brak pełnego kontraktu łańcucha fenced commit
+
+- File: `tests/test_product_refresh_worker_contract.py`.
+- Evidence: testy oddzielnie sprawdzają payload i fallback partial, ale nie przeprowadzają prawdziwego envelope przez pipeline, worker i committer.
+- Impact: scope/configuration/participants mogą zostać zgubione lub poszerzone bez czerwonego testu.
+- Recommendation: dodać offline adapter-chain test exact product/configuration/participants i brak snapshotu niezwiązanej grupy.
+
+### P2 — Runtime test nie obejmuje faktycznych bucketów i wszystkich ról
+
+- File: `tests/test_supabase_runtime_contract.py:322-355`.
+- Evidence: nowy test sprawdza PostgREST tylko dla viewer/analyst; nie wykonuje Storage `source-raw`/`source-clean`, anon, read ani must-change-password.
+- Impact: właściwe ścieżki artefaktów refreshu pozostają bez wykonawczego RLS testu.
+- Recommendation: rozszerzyć opt-in test o te buckety i role.
+
+### Wyniki i weryfikacja
+
+| Reviewer | Wynik |
+|---|---|
+| correctness_reviewer | 2 P1, 1 P2 |
+| test_reviewer | 1 P1, 2 P2 |
+| security/data fallback | potwierdzony brak runtime Storage/RLS |
+
+- focused suite: **45 testów, 36 PASS, 9 skipped**;
+- `py_compile` i `git diff --check 8b766a5..3745c45`: PASS;
+- pełny gate: nieukończony na znanym hygiene `git show`.
+
+### Decyzja gate
+
+**BLOKUJE — 3 P1, 3 P2, 0 P3.** Unit 8.5 pozostaje partial. Następny krok:
+`$dev-docs-execute docs/active/fieldnote-stroller-mvp 8.5` — napraw wyłącznie
+sześć findingów z tej sekcji.
+
+---
+
+## Remediation execution `3745c45..HEAD` (`2026-08-06`)
+
+Naprawiono scope benchmarku (brak placeholderowej projekcji grupy), timeout
+transportu Firecrawl bez daemon thread, spójne `cancelled`, pełny offline
+kontrakt fenced commit oraz opt-in RLS/Storage dla właściwych bucketów i ról.
+Pozostaje P1 pełnej ekstrakcji kanonicznych faktów i ograniczonego fallbacku
+OpenAI; nie wywoływano płatnego API.
+
+Weryfikacja: **46 testów, 37 PASS, 9 skipped**, py_compile i git diff-check
+PASS. Pełny check_fieldnote.sh zatrzymał się na znanym hygiene `git show`.
+Unit pozostaje partial; następny krok: `$dev-docs-review
+docs/active/fieldnote-stroller-mvp 8.5`.
