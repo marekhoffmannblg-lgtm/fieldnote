@@ -22,6 +22,11 @@ def _price(value: Any) -> float | None:
         return None
 
 
+def _configuration_scope_id(benchmark_group: str, configuration: str) -> str:
+    """Partition durable benchmark history by the model+configuration unit."""
+    return f"{benchmark_group}::{configuration}" if configuration else benchmark_group
+
+
 class BenchmarkCommitService:
     """Translate the secret-free pipeline envelope into one server-side RPC."""
 
@@ -128,7 +133,7 @@ class BenchmarkCommitService:
                 group_payload = {"scope": group_scope, "state": internal_projection}
                 snapshots.append({
                     "scope_type": "benchmark_group",
-                    "scope_id": benchmark_group,
+                    "scope_id": _configuration_scope_id(benchmark_group, configuration),
                     "semantic_hash": semantic_hash(group_payload),
                     "domain_hash": semantic_hash(group_payload),
                     "price_median": None,

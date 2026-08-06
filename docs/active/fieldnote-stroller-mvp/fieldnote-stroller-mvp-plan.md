@@ -64,7 +64,7 @@ Domknąć wieloużytkownikowe MVP benchmarku wózków Lionelo przez stopniowe op
 
 ### Faza 3 — Unit 8: Audyt atrybutów i względny scoring wózków
 
-- Status: `remediation implemented; awaiting limited re-review (quality gate partial)`
+- Status: `remediation implemented; awaiting limited re-review (full gate partial)`
 - Zależności: Unit 3, Unit 7
 - Kryterium ukończenia: raport obejmuje 21 pól, scoring jest deterministyczny w czterech segmentach, a cena nie wpływa na wynik użytkowy.
 

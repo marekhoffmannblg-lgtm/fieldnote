@@ -163,6 +163,10 @@ def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benc
             ),
         )
     )
+    if not target_configuration:
+        catalog_target = product_for_group_key(group_key)
+        if isinstance(catalog_target, dict):
+            target_configuration = normalized_configuration(catalog_target.get("configuration", catalog_target.get("stroller_configuration", "")))
     scope = {
         "product_id": str(product_scope.get("product_id", group_key)),
         "group_key": group_key,
@@ -197,6 +201,10 @@ def scoped_commit_payload(group_key: str, product_scope: dict[str, object], benc
                     ),
                 )
             )
+            if not candidate_configuration:
+                catalog_candidate = product_for_group_key(str(candidate_group.get("group_key", "")))
+                if isinstance(catalog_candidate, dict):
+                    candidate_configuration = normalized_configuration(catalog_candidate.get("configuration", catalog_candidate.get("stroller_configuration", "")))
             if candidate_configuration != target_configuration:
                 continue
             candidates.append({

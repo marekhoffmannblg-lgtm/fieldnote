@@ -107,6 +107,24 @@ class IncrementalPipelineTests(unittest.TestCase):
         self.assertEqual(semantic["participant_product_ids"], ["orf"])
         self.assertEqual(payload["scope"]["participant_product_ids"], ["orf"])
 
+    def test_scoped_commit_payload_uses_catalog_configuration_for_legacy_groups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, product_id in (("orfeo", "orf"), ("cleo", "cleo")):
+                model_dir = root / "output" / "model_groups" / name
+                model_dir.mkdir(parents=True)
+                (model_dir / "group.json").write_text(json.dumps({"group_key": f"lionelo|{name}", "product_id": product_id, "brand": "Lionelo", "model": name, "benchmark_group": "compact", "sources": []}), encoding="utf-8")
+                (model_dir / "model_state.json").write_text(json.dumps({"group_key": f"lionelo|{name}", "fields": {}}), encoding="utf-8")
+
+            def catalog(group_key):
+                return {"group_key": group_key, "configuration": "2w1" if group_key.endswith("orfeo") else "3w1"}
+
+            with patch.object(research_pipeline, "ROOT", root), patch.object(research_pipeline, "product_for_group_key", side_effect=catalog):
+                payload = research_pipeline.scoped_commit_payload("lionelo|orfeo", {"product_id": "orf"}, {"benchmark_group": "compact"})
+        semantic = payload["semantic_state"]["semantic_benchmark"]
+        self.assertEqual(semantic["configuration"], "2w1")
+        self.assertEqual(semantic["participant_product_ids"], ["orf"])
+
     def test_direct_cli_without_context_keeps_derived_stages_scoped(self):
         calls = []
 

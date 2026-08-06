@@ -116,6 +116,7 @@ class PipelineService:
                 "product_id": str(payload.get("product_id", job.get("product_id", ""))),
                 "product_slug": str(payload.get("product_slug", "")),
                 "group_key": group_key,
+                "configuration": str(payload.get("configuration", payload.get("stroller_configuration", ""))),
             },
             "benchmark_group_scope": selection.get("benchmark_group_scope") if isinstance(selection.get("benchmark_group_scope"), dict) else {
                 "category_key": str(payload.get("category_key", "")),

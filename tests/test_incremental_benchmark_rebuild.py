@@ -38,6 +38,23 @@ def fixture() -> dict:
 
 
 class IncrementalBenchmarkRebuildTests(unittest.TestCase):
+    def test_durable_group_snapshot_scope_is_partitioned_by_configuration(self):
+        job = {"product_id": "orf"}
+
+        def snapshots(configuration: str):
+            scoped = {
+                "scope": {"product_id": "orf", "group_key": "lionelo|orfeo", "benchmark_group": "compact", "configuration": configuration, "participant_product_ids": ["orf"]},
+                "semantic_state": {"semantic_benchmark": {"configuration": configuration, "participant_product_ids": ["orf"], "participants": []}},
+                "price_median": None,
+            }
+            return BenchmarkCommitService._snapshots(job, scoped)[0]
+
+        first_group = next(item for item in snapshots("2w1") if item["scope_type"] == "benchmark_group")
+        second_group = next(item for item in snapshots("3w1") if item["scope_type"] == "benchmark_group")
+        self.assertNotEqual(first_group["scope_id"], second_group["scope_id"])
+        self.assertIn("2w1", first_group["scope_id"])
+        self.assertIn("3w1", second_group["scope_id"])
+
     def test_price_threshold_is_strictly_five_percent(self):
         self.assertFalse(price_change_requires_snapshot(100, 104.99))
         self.assertTrue(price_change_requires_snapshot(100, 105))

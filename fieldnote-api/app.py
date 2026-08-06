@@ -1693,6 +1693,7 @@ def runtime_semantic_benchmark(
     product_slug: str,
     benchmark_group: str,
     participant_product_ids: list[str] | None = None,
+    benchmark_type: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     products = runtime_benchmark_products(benchmark_group)
     anchor = next((item for item in products if product_slug_for(item.get("brand", ""), item.get("model", ""), item.get("configuration", "")) == product_slug), None)
@@ -1717,7 +1718,10 @@ def runtime_semantic_benchmark(
         candidates = [by_id[product_id] for product_id in requested_ids if product_id != anchor_id]
     else:
         candidates = [item for item in products if item is not anchor]
-    if normalized_benchmark_brand(anchor.get("brand")) == "lionelo":
+    is_competitive = benchmark_type == "competitive" or (
+        benchmark_type is None and normalized_benchmark_brand(anchor.get("brand")) != "lionelo"
+    )
+    if not is_competitive:
         benchmark = build_internal_benchmark(
             products,
             benchmark_group,
@@ -1725,7 +1729,7 @@ def runtime_semantic_benchmark(
         )
     else:
         benchmark = build_competitive_benchmark(anchor, candidates, max_participants=max(len(candidates), 1))
-    if requested_ids and normalized_benchmark_brand(anchor.get("brand")) != "lionelo":
+    if requested_ids and is_competitive:
         # The manifest is the source of truth; never substitute another
         # compatible runtime product when a requested participant is absent or
         # filtered by the service's group/configuration guard.
@@ -1743,7 +1747,7 @@ def runtime_semantic_benchmark(
             )
         benchmark["participant_product_ids"] = requested_ids
     selected_ids: set[str]
-    if normalized_benchmark_brand(anchor.get("brand")) == "lionelo":
+    if not is_competitive:
         selected_ids = {
             str(item.get("product_id", "")).strip()
             for item in products
@@ -1767,11 +1771,29 @@ def runtime_semantic_benchmark(
         source_group = next((path.parent for path in (PROJECT_ROOT / "output" / "model_groups").glob("*/group.json") if str(read_json(path, {}).get("group_key", "")) == str(item.get("group_key", ""))), None)
         if source_group:
             group = read_json(source_group / "group.json", {})
+            observed = False
             for offer in group.get("sources", group.get("offers", [])) if isinstance(group, dict) else []:
                 if not isinstance(offer, dict):
                     continue
                 if offer.get("price") is not None:
+                    observed = True
                     observations.append({"seller_id": offer.get("seller_id") or offer.get("seller") or offer.get("domain"), "price": offer.get("price"), "observed_at": offer.get("observed_at") or offer.get("fetched_at"), "source_id": offer.get("source_id")})
+            if not observed:
+                # Legacy model groups only retain source identifiers. Recover
+                # validated price/seller/timestamp from the canonical linked
+                # source projection without widening the participant scope.
+                product_slug = product_slug_for(str(item.get("brand", "")), str(item.get("model", "")), str(item.get("configuration", "")))
+                linked = linked_product_sources_payload(product_slug)
+                for source in linked.get("sources", []) if isinstance(linked, dict) else []:
+                    if not isinstance(source, dict) or source.get("price") in (None, ""):
+                        continue
+                    seller = source.get("seller", {}) if isinstance(source.get("seller"), dict) else {}
+                    observations.append({
+                        "seller_id": seller.get("name") or source.get("domain"),
+                        "price": source.get("price"),
+                        "observed_at": source.get("last_fetched_at") or source.get("first_fetched_at"),
+                        "source_id": source.get("source_id"),
+                    })
     return benchmark, aggregate_prices(observations)
 
 
@@ -2846,6 +2868,7 @@ def competitive_benchmark_detail(manifest: dict[str, Any]) -> dict[str, Any]:
         str(anchor.get("product_slug", "")),
         str(manifest.get("benchmark_group_key", "")),
         participant_product_ids=participant_ids,
+        benchmark_type="competitive",
     )
     return {
         "benchmark_id": str(manifest.get("benchmark_id", "")),
@@ -2989,6 +3012,7 @@ def get_internal_benchmark(benchmark_group_key: str) -> dict[str, Any]:
             str(anchor_product.get("configuration", "")),
         ),
         benchmark_group_key,
+        benchmark_type="internal",
     )
     return {
         "benchmark_id": None,

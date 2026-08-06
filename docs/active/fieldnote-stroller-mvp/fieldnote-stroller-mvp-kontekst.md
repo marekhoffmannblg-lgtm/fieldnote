@@ -731,3 +731,39 @@
 - Status: **partial**, oczekuje ograniczonego re-review Unit 8. Nie rozpoczęto
   Unit 8.5 ani Unit 9. Następny krok:
   `$dev-docs-review docs/active/fieldnote-stroller-mvp 8`.
+
+### Unit 8 — ograniczony re-review `f5fca8c^..f5fca8c` (`2026-08-06`)
+
+- Zakres obejmował tylko remediation ostatnich findings Unit 8. Niezależnie
+  użyto `correctness_reviewer`, `security_reviewer`, `test_reviewer` i
+  `data_reviewer`; UI review nie był wymagany. Nie zmieniano kodu ani nie
+  rozpoczęto Unit 8.5/9.
+- Security: PASS. Skonsolidowano 2 P1: brak konfiguracji w normalnym job/run
+  handoff i wspólna durable tożsamość benchmark_group oraz competitive detail
+  z anchorem Lionelo wybierający internal cohort zamiast manifestu.
+- Przyjęto 2 P2: realny pipeline nie dostarcza ceny do internal summary, a
+  nowy test API kończy się `NameError` i mockuje kluczową ścieżkę.
+- Weryfikacja: pipeline/snapshot — 10 PASS; zmienione testy API — 2 PASS,
+  1 ERROR; `py_compile` i `git diff --check f5fca8c^..f5fca8c` — PASS.
+  Pełny offline gate nadal nie kończy hygiene w tym środowisku.
+- Gate: **BLOKUJE** — 2 P1, 2 P2, 0 P3. Następny krok: naprawić wyłącznie
+  checkboxy Unit 8 z sekcji „Do poprawy po review”, potem ograniczony re-review.
+
+### Unit 8 — wykonanie remediation po re-review (`2026-08-06`)
+
+- Naprawiono wyłącznie cztery findings z `review-unit-8.md`: konfiguracja jest
+  propagowana przez `product_scope`/job context z fallbackiem katalogowym;
+  durable benchmark-group snapshot ma identity `benchmark_group::configuration`;
+  competitive runtime przyjmuje jawny tryb manifestu także dla anchora Lionelo;
+  internal price agreguje group offers oraz canonical linked source projection.
+- Naprawiono strukturę testu API i dodano niemockowane fixtures: manifestowy
+  participant+price scope, realne ceny internal, mismatch 2w1/3w1 oraz
+  konfiguracyjnie partycjonowany snapshot.
+- Weryfikacja: focused API remediation **6 PASS**, pipeline/snapshot
+  remediation **3 PASS**, wcześniejsza suite Unit 8 **10 PASS**; py_compile i
+  `git diff --check` PASS. Pełny `bash scripts/check_fieldnote.sh` ponownie
+  zatrzymał się na `tests/test_repository_hygiene.py` podczas `git show
+  :<tracked-path>` i został przerwany, więc nie oznaczam pełnego gate jako PASS.
+- Status: **partial**, oczekuje ograniczonego re-review wyłącznie tych zmian.
+  Unit 8.5 i Unit 9 nie zostały rozpoczęte. Następny krok:
+  `$dev-docs-review docs/active/fieldnote-stroller-mvp 8`.

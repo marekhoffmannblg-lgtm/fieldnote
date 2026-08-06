@@ -85,6 +85,7 @@ def product_scope(state: Mapping[str, Any], product_id: str) -> dict[str, Any]:
         "product_id": product_id,
         "product_slug": str(target.get("product_slug", target.get("slug", ""))),
         "group_key": group_key,
+        "configuration": str(target.get("configuration", target.get("stroller_configuration", ""))),
         "category_key": str(target.get("category_key", "")),
         "benchmark_group": benchmark_group,
         "products": [copy.deepcopy(target)],

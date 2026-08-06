@@ -78,25 +78,6 @@ class CompetitiveBenchmarkTests(unittest.TestCase):
         self.assertNotIn("participant_product_ids", manifest)
         self.assertEqual(manifest["anchor"]["product_id"], ANCHOR)
         self.assertEqual(manifest["participants"][0]["product_id"], COMPETITOR)
-
-    def test_detail_passes_manifest_participants_to_runtime_projection(self) -> None:
-        manifest = {**payload(), "benchmark_id": "benchmark_test", "created_at": "", "updated_at": ""}
-        captured: dict[str, object] = {}
-
-        def fake_runtime(slug: str, group: str, participant_product_ids=None):
-            captured["ids"] = participant_product_ids
-            return ({"status": "ok", "participant_product_ids": list(participant_product_ids or [])}, {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0})
-
-        with patch.object(api, "runtime_semantic_benchmark", side_effect=fake_runtime):
-            result = api.competitive_benchmark_detail(manifest)
-        self.assertEqual(captured["ids"], [COMPETITOR])
-        self.assertEqual(result["semantic_benchmark"]["participant_product_ids"], [COMPETITOR])
-
-    def test_internal_detail_exposes_runtime_price_summary(self) -> None:
-        expected = {"status": "ok", "median": 110.0, "min": 100.0, "max": 120.0, "seller_count": 2}
-        with patch.object(api, "runtime_semantic_benchmark", return_value=({"status": "ok"}, expected)):
-            result = api.get_internal_benchmark("light_stroller")
-        self.assertEqual(result["price_summary"], expected)
         self.assertEqual(manifest["participant_count"], 1)
         forbidden = {"evidence", "snapshot", "profile", "coverage", "fields", "parameters"}
         self.assertTrue(forbidden.isdisjoint(manifest))
@@ -117,6 +98,67 @@ class CompetitiveBenchmarkTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as missing:
             api.get_competitive_benchmark("benchmark_not-a-uuid")
         self.assertEqual(missing.exception.status_code, 404)
+
+    def test_detail_passes_manifest_participants_to_runtime_projection(self) -> None:
+        manifest = {**payload(), "benchmark_id": "benchmark_test", "created_at": "", "updated_at": ""}
+        captured: dict[str, object] = {}
+
+        def fake_runtime(slug: str, group: str, participant_product_ids=None, **_kwargs):
+            captured["ids"] = participant_product_ids
+            return ({"status": "ok", "participant_product_ids": list(participant_product_ids or [])}, {"status": "no_data", "median": None, "min": None, "max": None, "seller_count": 0})
+
+        with patch.object(api, "runtime_semantic_benchmark", side_effect=fake_runtime):
+            result = api.competitive_benchmark_detail(manifest)
+        self.assertEqual(captured["ids"], [COMPETITOR])
+        self.assertEqual(result["semantic_benchmark"]["participant_product_ids"], [COMPETITOR])
+
+    def test_internal_detail_exposes_runtime_price_summary(self) -> None:
+        expected = {"status": "ok", "median": 110.0, "min": 100.0, "max": 120.0, "seller_count": 2}
+        with patch.object(api, "runtime_semantic_benchmark", return_value=({"status": "ok"}, expected)):
+            result = api.get_internal_benchmark("light_stroller")
+        self.assertEqual(result["price_summary"], expected)
+
+    def test_runtime_competitive_scope_uses_manifest_participant_and_price(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            products = [
+                {"product_id": ANCHOR, "brand": "Lionelo", "model": "Agia", "configuration": "2w1", "benchmark_group": "light_stroller"},
+                {"product_id": COMPETITOR, "brand": "Bugaboo", "model": "Butterfly 2", "configuration": "2w1", "benchmark_group": "light_stroller"},
+                {"product_id": LIONELO_PARTICIPANT, "brand": "Lionelo", "model": "Bess", "configuration": "2w1", "benchmark_group": "light_stroller"},
+            ]
+            for product in products:
+                group_dir = root / "output" / "model_groups" / product["product_id"].replace(":", "_")
+                group_dir.mkdir(parents=True)
+                (group_dir / "group.json").write_text(__import__("json").dumps({
+                    "group_key": product["product_id"], "product_id": product["product_id"],
+                    "brand": product["brand"], "model": product["model"], "configuration": "2w1",
+                    "benchmark_group": "light_stroller", "sources": [{"seller_id": product["product_id"], "price": 100 if product["product_id"] == COMPETITOR else 999, "observed_at": "2026-01-01"}],
+                }), encoding="utf-8")
+                (group_dir / "model_state.json").write_text('{"fields":{}}', encoding="utf-8")
+            with patch.object(api, "PROJECT_ROOT", root), patch.object(api, "load_products", return_value=products):
+                semantic, prices = api.runtime_semantic_benchmark(
+                    api.product_slug_for("Lionelo", "Agia", "2w1"), "light_stroller", [COMPETITOR], benchmark_type="competitive"
+                )
+        self.assertEqual(semantic["participant_product_ids"], [COMPETITOR])
+        self.assertEqual({item["seller_id"] for item in prices["observations"]}, {ANCHOR, COMPETITOR})
+
+    def test_internal_detail_aggregates_real_group_prices(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            products = []
+            for index, price in enumerate((100, 120, 140), start=1):
+                product_id = f"product:lionelo:internal-{index}:2w1"
+                product = {"product_id": product_id, "brand": "Lionelo", "model": f"Internal {index}", "configuration": "2w1", "benchmark_group": "compact"}
+                products.append(product)
+                group_dir = root / "output" / "model_groups" / f"internal-{index}"
+                group_dir.mkdir(parents=True)
+                (group_dir / "group.json").write_text(__import__("json").dumps({"group_key": product_id, "product_id": product_id, "brand": "Lionelo", "model": product["model"], "configuration": "2w1", "benchmark_group": "compact", "sources": [{"seller_id": f"seller-{index}", "price": price, "observed_at": "2026-01-01"}]}), encoding="utf-8")
+                (group_dir / "model_state.json").write_text('{"fields":{}}', encoding="utf-8")
+            with patch.object(api, "PROJECT_ROOT", root), patch.object(api, "load_products", return_value=products), patch.object(api, "read_product_source_links", return_value=[]), patch.object(api, "load_product_states", return_value={}):
+                result = api.get_internal_benchmark("compact")
+        self.assertEqual(result["price_summary"]["median"], 120.0)
+        self.assertEqual(result["price_summary"]["min"], 100.0)
+        self.assertEqual(result["price_summary"]["max"], 140.0)
 
     def test_missing_catalog_product_in_manifest_is_controlled_error(self) -> None:
         manifest = self.create()
@@ -167,6 +209,14 @@ class CompetitiveBenchmarkTests(unittest.TestCase):
                     self.create(body)
                 self.assertEqual(rejected.exception.status_code, 422)
                 self.assertIn(message, str(rejected.exception.detail))
+
+    def test_rejects_mismatched_configuration(self) -> None:
+        self.products[0]["configuration"] = "2w1"
+        self.products[1]["configuration"] = "3w1"
+        with self.assertRaises(HTTPException) as rejected:
+            self.create()
+        self.assertEqual(rejected.exception.status_code, 422)
+        self.assertIn("configuration", str(rejected.exception.detail))
 
     def test_generated_identifier_conflict_returns_409(self) -> None:
         first = self.create()

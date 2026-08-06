@@ -107,6 +107,17 @@
 
 <!-- Dodawaj findings pod właściwym unitem. -->
 
+### Unit 8 — ograniczony re-review `f5fca8c^..f5fca8c`
+
+- [ ] P1: propagować kanoniczną konfigurację przez job/run context i
+  partycjonować durable benchmark snapshot/RPC per `benchmark_group + configuration`.
+- [ ] P1: competitive detail z anchorem Lionelo ma używać dokładnie manifestowych
+  competitor participants dla scoringu oraz price observations, nie internal cohort.
+- [ ] P2: zasilić internal price summary realnymi price observations pipeline,
+  nie tylko nieobecnym polem w `group.json`.
+- [ ] P2: naprawić czerwony test API i dodać niemockowane regresje scope
+  manifestu, ceny internal oraz HTTP 422 dla 2w1 ↔ 3w1.
+
 ### Unit 1
 
 - [x] P2: CI instaluje zależności API przed uruchomieniem pełnej offline bramki.
@@ -142,6 +153,8 @@
 - [x] P1: detail competitive benchmarku liczy score i cenę dokładnie dla anchora oraz `participant_product_ids` zapisanego manifestu.
 - [x] P2: internal benchmark detail agreguje ceny dokładnego participant scope zamiast raportować stałe `no_data`.
 - [x] P2: dodano wykonawcze regresje scope konfiguracji, manifest participant set, cen internal i snapshot scope; pełna suite API nadal wymaga osobnego uruchomienia w venv.
+- [x] P1/P2 remediation: konfiguracja jest propagowana z katalogu przez job context i legacy fallback, durable group snapshot ma scope per konfiguracja, competitive runtime ma jawny tryb manifestu, a internal price czyta także canonical linked source projection.
+- [x] Testy remediation: API/runtime fixtures obejmują exact participant+price scope, internal medianę, config mismatch 422 oraz konfigurację snapshot scope.
 - [x] P2: audit wymaga dokładnie 34 distinct produktów Lionelo, niezależnie od konkurentów i duplikatów.
 - [x] P1: fixture/audit używa dokładnego zatwierdzonego zbioru 34 realnych Lionelo ze śledzonych specyfikacji, nie syntetycznych `00..33`.
 - [x] P1: zapis katalogu przez API z service-role jest wyłączony w Unit 3 do czasu autoryzacji Unit 4.
