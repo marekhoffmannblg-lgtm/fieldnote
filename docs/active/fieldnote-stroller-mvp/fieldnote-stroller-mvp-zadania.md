@@ -125,6 +125,16 @@
   przy tym samym clean content.
 - [ ] P2: dodać opt-in wykonawczy PostgREST/RLS test nowych tabel historii.
 
+### Unit 8.5 — ograniczony re-review `cf6e2ed..0c8ec07`
+
+- [ ] P1: refresh ma kończyć workerowy flow fenced `scoped_commit` albo
+  kontrolowanym partial/no-mutation; nie może być później zmieniany na failed.
+- [ ] P1: po refreshu zapisać deterministyczne fakty, evidence/candidates i
+  scoped benchmark update, z OpenAI wyłącznie dla braków/niejednoznaczności.
+- [ ] P2: przekazać limity/cancel/usage jobu do Search/Scrape i zwracać partial
+  lub cancelled bez przekroczenia budżetu.
+- [ ] P2: uruchomić opt-in lokalny PostgREST/Storage RLS test historii refreshu.
+
 ### Unit 8 — ograniczony re-review `f5fca8c^..f5fca8c`
 
 - [x] P1: propagować kanoniczną konfigurację przez job/run context i
@@ -236,3 +246,12 @@
 - [x] P2: deduplikacja zachowuje pełny, deterministyczny `source_ids` z każdego singular `source_id` duplikatów.
 - [x] P1: konflikt między równocześnie ustawionymi `benchmark_group` i `benchmark_group_key` na dowolnej karcie daje `review_required`, a nie zostaje ukryty przez wybór pierwszego pola; dodano testy permutacji i quality gate discovery.
 - [x] Review: ograniczony re-review Unit 7 — PASS i 0 P1/P2 (`360972e^..360972e`).
+
+### Unit 8.5 — remediation `0c8ec07..HEAD` (`2026-08-06`)
+
+- [x] Worker refresh bez fenced envelope kończy kontrolowanym `partial/no_mutation`.
+- [x] Limity kandydatów/stron i callback cancel są przekazywane przed Search/Scrape.
+- [x] Snapshot zwraca deterministyczne evidence/excerpt i kandydata pola.
+- [ ] Pełne fakty, ograniczone OpenAI, fenced scoped commit i runtime RLS.
+- [x] 32 focused testy, py_compile i git diff --check PASS; pełny gate zatrzymuje znane zawieszenie hygiene.
+- [ ] Review końcowy PASS.

@@ -39,14 +39,25 @@ class PipelineService:
         if payload.get("job_type") == "product_refresh":
             if self.refresh_service is None:
                 return PipelineResult("failed", {"usage_complete": False}, {}, "product_refresh_not_configured")
+            limits_payload = payload.get("limits") if isinstance(payload.get("limits"), dict) else {}
+            from services.product_refresh_service import RefreshLimits
+            refresh_limits = RefreshLimits(
+                max_pages=max(0, int(limits_payload.get("max_pages", 10) or 10)),
+                max_candidates=max(0, int(limits_payload.get("max_candidates", 20) or 20)),
+                timeout_seconds=max(1, int(limits_payload.get("timeout_seconds", 900) or 900)),
+            )
             result = self.refresh_service.refresh(
                 product_id=str(job.get("product_id", "")), product_slug=str(payload.get("product_slug", "")),
                 brand=str(payload.get("brand", "")), model=str(payload.get("model", "")),
                 configuration=str(payload.get("configuration", "")),
+                limits=refresh_limits,
+                cancel_check=lambda: self._cancel_requested(cancel_check_file),
             )
             status = str(result.get("status", "failed"))
             mapped = "succeeded" if status == "succeeded" else "partial" if status == "partial" else "failed"
-            return PipelineResult(mapped, {"pages": len(result.get("result", {}).get("sources", [])), "usage_complete": True}, result.get("result", {}), str(result.get("result", {}).get("error", "")))
+            usage = {"pages": len(result.get("result", {}).get("sources", [])), "pages_known": True,
+                     "ai_tokens": None, "ai_tokens_known": False, "usage_complete": False}
+            return PipelineResult(mapped, usage, result.get("result", {}), str(result.get("result", {}).get("error", "")))
         limits = payload.get("limits") if isinstance(payload.get("limits"), dict) else {}
         selection = payload.get("selection") if isinstance(payload.get("selection"), dict) else {}
         selected = [str(value) for value in selection.get("selected_offer_ids", []) if str(value).strip()]

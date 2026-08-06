@@ -64,6 +64,16 @@ class ResearchWorker:
             if lease_lost.is_set():
                 return False
             final = self._final_status(job, result)
+            payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+            # Refresh persists source/snapshot history itself. Until the
+            # scoped semantic commit exists, never convert a successful fetch
+            # into a false failed job through the generic benchmark committer.
+            if payload.get("job_type") == "product_refresh" and final == "succeeded" and not result.result.get("scoped_commit"):
+                final = "partial"
+                result = PipelineResult("partial", result.usage,
+                                        {**result.result, "no_mutation": True,
+                                         "reason": "product_refresh_scoped_commit_pending"},
+                                        "product_refresh_scoped_commit_pending")
             if self.committer and final in {"succeeded", "partial"}:
                 try:
                     completed = self.committer.complete(job, token, final, result.result, result.usage, cost_number(result.usage.get("cost_used", 0)))

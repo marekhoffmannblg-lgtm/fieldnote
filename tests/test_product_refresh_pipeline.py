@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "fieldnote-api"))
-from services.product_refresh_service import MemoryRefreshHistory, MemoryRefreshStorage, ProductRefreshService
+from services.product_refresh_service import MemoryRefreshHistory, MemoryRefreshStorage, ProductRefreshService, RefreshLimits
 
 
 class Provider:
@@ -89,6 +89,16 @@ class ProductRefreshTests(unittest.TestCase):
         service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1")
         self.assertEqual(len(history.sources), 1)
         self.assertEqual(len(storage.objects), 4)
+
+    def test_limits_and_cancel_are_enforced_before_scrape(self):
+        provider = Provider(); history = MemoryRefreshHistory(); cancelled = [False]
+        service = ProductRefreshService(provider, MemoryRefreshStorage(), history)
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", limits=RefreshLimits(max_pages=0, max_candidates=10), cancel_check=lambda: cancelled[0])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(provider.searches, 1); self.assertEqual(provider.scrapes, 0)
+        cancelled[0] = True
+        result = service.refresh(product_id="p1", product_slug="lionelo__amber", brand="Lionelo", model="Amber", configuration="3w1", cancel_check=lambda: cancelled[0])
+        self.assertEqual(result["status"], "partial"); self.assertEqual(provider.searches, 1)
 
 
 if __name__ == "__main__": unittest.main()

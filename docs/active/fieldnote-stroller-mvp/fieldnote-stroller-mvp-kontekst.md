@@ -851,3 +851,24 @@
 - Weryfikacja: **32 focused testy PASS**, `py_compile` i `git diff --check`
   PASS. Runtime PostgREST/RLS, evidence/candidates, OpenAI i fenced scoped
   commit pozostają do dokończenia. Unit 8.5 ma status **partial**.
+
+### Unit 8.5 — ograniczony re-review `cf6e2ed..0c8ec07` (`2026-08-06`)
+
+- Sprawdzono wyłącznie ostatnią remediation. Correctness uruchomiono jako
+  subagenta; security/tests/data wykonano jako single-agent fallback z powodu
+  limitu subagentów. Nie zmieniano kodu ani Unit 9.
+- Weryfikacja: 32 focused testy PASS, `py_compile` i `git diff --check` PASS.
+  Pełny offline gate nadal zatrzymuje hygiene po 20 s.
+- Gate: **BLOKUJE** — 2 P1, 2 P2. Worker zamienia udany refresh bez envelope w
+  failed po zapisaniu side effects; brakuje ekstrakcji/evidence/scoped commit,
+  limitów/cancel i runtime RLS testu. Szczegóły w `review-unit-8.5.md`.
+
+### Unit 8.5 — remediation `0c8ec07..HEAD` (`2026-08-06`)
+
+Serwis przyjmuje limity i `cancel_check`, ogranicza Search oraz sprawdza
+anulowanie przed każdym Scrape. Snapshot zwraca evidence/excerpt i kandydata
+pola. Worker mapuje refresh bez `scoped_commit` na `partial/no_mutation`, bez
+fałszywego `failed` po zapisaniu źródeł. 32 focused testy, py_compile i diff
+check PASS; pełny gate zatrzymał się na znanym zawieszeniu hygiene. Nadal
+brakuje pełnych faktów/OpenAI, fenced scoped commit i runtime RLS. Unit 8.5
+pozostaje **partial**; Unit 9 nie rozpoczęto.

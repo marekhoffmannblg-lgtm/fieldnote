@@ -261,3 +261,86 @@ Pełny `check_fieldnote.sh` ponownie nie ukończył się w 20 s na istniejącym
 hygiene `git show`; runtime PostgREST/RLS i fenced scoped commit pozostają
 nieoznaczone jako PASS. Unit nadal `partial`; wymagany jest kolejny ograniczony
 review po tym commicie.
+
+---
+
+## Ograniczony re-review `cf6e2ed..0c8ec07` (`2026-08-06`)
+
+Review objął wyłącznie ostatnią remediation. Correctness reviewer został
+uruchomiony; security, tests i data wykonano jako **single-agent fallback** z
+powodu wyczerpanego limitu aktywnych subagentów. Nie zmieniano kodu ani nie
+rozpoczęto Unit 9.
+
+### P1 — Worker zmienia udany refresh w `failed` po zapisaniu side effects
+
+- File: `fieldnote-api/worker.py:55-62`,
+  `fieldnote-api/services/benchmark_commit_service.py:45-47`,
+  `pipeline_service.py:42-49`.
+- Evidence: refresh zwraca `succeeded` bez `scoped_commit`; domyślny
+  `BenchmarkCommitService` dla sukcesu wymaga tego envelope i rzuca błąd.
+  Worker zapisuje wtedy `failed` już po uploadzie i historii źródeł.
+- Impact: główny flow nigdy nie kończy się sukcesem, a użytkownik dostaje
+  sprzeczny stan trwałych artefaktów i failed job.
+- Recommendation: refresh ma albo zbudować fenced scoped commit, albo worker
+  ma terminalizować go kontrolowanym `partial/no_mutation` bez false failure.
+- Missing test: `ResearchWorker._run` z product_refresh i realnym committerem.
+
+### P1 — Refresh nie aktualizuje faktów, evidence ani scoped benchmarku
+
+- File: `product_refresh_service.py:137-172`; brak integracji z ekstrakcją,
+  evidence/candidates i `BenchmarkCommitService` envelope.
+- Evidence: service jedynie zapisuje content i zwraca listę źródeł; wynik nie
+  zawiera wartości, quality gate ani `scoped_commit`.
+- Impact: workflow nie realizuje celu Unit 8.5 „dane → fakty → istniejący scope
+  benchmarkowy”, mimo że może wykonać zewnętrzny refresh.
+- Recommendation: uruchomić deterministyczną ekstrakcję, ograniczone OpenAI
+  dla braków, evidence/candidates oraz fenced commit tylko scope produktu.
+
+### P2 — Limity i cancel nie są przekazywane do refresh providerów
+
+- File: `pipeline_service.py:39-49`; `product_refresh_service.py:111-172`.
+- Evidence: branch refresh nie przekazuje `RefreshLimits` z jobu ani nie czyta
+  cancel-control file; używa domyślnego `max_candidates=20` i może fetchować
+  mimo limitu/cancel.
+- Impact: job może zużyć więcej stron/kredytów niż limit i nie kończyć się
+  prawdziwym statusem partial/cancelled.
+- Recommendation: przekazać limity oraz cancel check do serwisu przed każdym
+  search/scrape, zapisać usage providerów i mapować przekroczenia na partial.
+
+### P2 — Runtime RLS/Storage nie jest wykonawczo sprawdzone
+
+- File: `tests/test_rls_policy_contract.py`; brak testu PostgREST dla tabel
+  `product_refresh_*`.
+- Evidence: dodano wyłącznie analizę tekstu migracji; pełny test lokalnego
+  Supabase nie został uruchomiony.
+- Impact: polityki w runtime pozostają niepotwierdzone dla anon/viewer/analyst
+  i użytkownika z wymuszoną zmianą hasła.
+- Recommendation: dodać opt-in test PostgREST/Storage po uruchomieniu Supabase.
+
+### Testy re-review
+
+- Focused refresh/job/Firecrawl/schema/RLS contract: **32 PASS**.
+- `py_compile` zmienionych modułów i `git diff --check cf6e2ed..0c8ec07`:
+  PASS.
+- Pełny `bash scripts/check_fieldnote.sh`: nieukończony po 20 s przez znane
+  zawieszenie hygiene na `git show`.
+
+### Decyzja gate re-review
+
+**BLOKUJE — 2 P1, 2 P2, 0 P3.** Unit 8.5 pozostaje `partial`; Unit 9 nie
+został rozpoczęty. Następny krok: `$dev-docs-execute
+docs/active/fieldnote-stroller-mvp 8.5` wyłącznie dla tych 2 P1 i 2 P2.
+
+## Remediation execution `0c8ec07..HEAD` (`2026-08-06`)
+
+Worker mapuje refresh bez `scoped_commit` na kontrolowany `partial/no_mutation`;
+serwis przyjmuje limity i callback anulowania przed Search/Scrape oraz zwraca
+deterministyczne evidence/excerpt i kandydata pola. Pozostają P1: pełna
+ekstrakcja faktów, ograniczone OpenAI i fenced scoped commit; P2: wykonawczy
+PostgREST/Storage RLS nowych tabel historii.
+
+Weryfikacja: 32 focused testy, `py_compile` i `git diff --check` PASS. Pełny
+`bash scripts/check_fieldnote.sh` przerwany na znanym zawieszeniu hygiene przy
+`git show :<tracked-path>`. Gate: **BLOKUJE — 1 P1, 1 P2, 0 P3**. Unit 8.5
+pozostaje partial, Unit 9 nie rozpoczęto. Następny krok:
+`$dev-docs-review docs/active/fieldnote-stroller-mvp 8.5`.

@@ -11,7 +11,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 import ipaddress
 
@@ -109,7 +109,8 @@ class ProductRefreshService:
     identity_gate: Any | None = None
 
     def refresh(self, *, product_id: str, product_slug: str, brand: str, model: str,
-                configuration: str = "", limits: RefreshLimits | None = None) -> dict[str, Any]:
+                configuration: str = "", limits: RefreshLimits | None = None,
+                cancel_check: Callable[[], bool] | None = None) -> dict[str, Any]:
         limits = limits or RefreshLimits()
         run_id = str(uuid.uuid4())
         started = {"run_id": run_id, "product_id": product_id, "product_slug": product_slug,
@@ -117,9 +118,12 @@ class ProductRefreshService:
         self.history.append_run(started)
         query = " ".join(part for part in (brand, model, configuration) if part).strip()
         try:
+            if cancel_check and cancel_check():
+                return self._finish(started, "partial", {"reason": "cancel_requested", "last_known_good_preserved": True})
             # Explicitly omit cache/resume arguments: every invocation is fresh.
-            search = self.provider.search(query, limit=limits.max_candidates)
-            candidates = _items(search)[: limits.max_candidates]
+            candidate_limit = max(0, min(limits.max_candidates, limits.max_pages))
+            search = self.provider.search(query, limit=candidate_limit)
+            candidates = _items(search)[:candidate_limit]
             accepted = []
             rejected = []
             for item in candidates:
@@ -135,6 +139,8 @@ class ProductRefreshService:
 
             fetched = []
             for url, title, item in accepted:
+                if cancel_check and cancel_check():
+                    return self._finish(started, "partial", {"reason": "cancel_requested", "sources": fetched, "last_known_good_preserved": True})
                 # No cache/resume is passed to the provider; storage is written
                 # before any semantic value can be committed.
                 scraped = self.provider.scrape(url)
@@ -163,7 +169,10 @@ class ProductRefreshService:
                 append_link = getattr(self.history, "append_run_source", None)
                 if callable(append_link):
                     append_link(run_source)
-                fetched.append({**persisted, "duplicate_snapshot": not created})
+                evidence = {"source_id": source_id, "url": url, "content_hash": content_hash,
+                            "excerpt": text[:1000], "snapshot_id": persisted.get("id")}
+                fetched.append({**persisted, "duplicate_snapshot": not created, "evidence": evidence,
+                                "candidates": [{"field": "product_description", "value": text[:1000], "evidence": evidence}]})
             if not fetched:
                 return self._finish(started, "partial", {"reason": "no_content", "rejected": rejected})
             semantic_changed = any(not row["duplicate_snapshot"] for row in fetched)
