@@ -66,12 +66,19 @@ class AuthRoleTests(unittest.TestCase):
             self.assertEqual(client.post("/api/research/preview", headers={"Authorization": "Bearer viewer"}, json={}).status_code, 403)
 
     def test_local_frontend_ports_are_allowed_by_api_cors(self):
-        client = TestClient(api.app)
-        for origin in ("http://127.0.0.1:3000", "http://localhost:3000", "http://127.0.0.1:5173"):
-            response = client.options(
-                "/api/health",
-                headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
-            )
-            self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
+        with patch.object(api, "DATA_MODE", "supabase"):
+            client = TestClient(api.app)
+            for origin in ("http://127.0.0.1:3000", "http://localhost:3000", "http://127.0.0.1:5173"):
+                response = client.options(
+                    "/api/products",
+                    headers={
+                        "Origin": origin,
+                        "Access-Control-Request-Method": "GET",
+                        "Access-Control-Request-Headers": "authorization",
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers.get("access-control-allow-origin"), origin)
+            self.assertEqual(client.get("/api/products").status_code, 401)
 
 if __name__ == "__main__": unittest.main()

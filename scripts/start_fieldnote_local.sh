@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_BIN="$ROOT/fieldnote-api/.venv/bin/uvicorn"
 VITE_BIN="$ROOT/fieldnote-frontend/node_modules/.bin/vite"
+SUPABASE_BIN="${SUPABASE_BIN:-$(command -v supabase || true)}"
 FRONTEND_MODE="${FIELDNOTE_FRONTEND_MODE:-dist}"
 API_LOG="/tmp/fieldnote-api.log"
 FRONTEND_LOG="/tmp/fieldnote-frontend.log"
@@ -14,6 +15,8 @@ FRONTEND_PID_FILE="/tmp/fieldnote-frontend.pid"
 API_URL="http://127.0.0.1:8000"
 API_HEALTH_URL="$API_URL/health"
 FRONTEND_URL="http://127.0.0.1:5173"
+SUPABASE_URL="http://127.0.0.1:54321"
+SUPABASE_HEALTH_URL="$SUPABASE_URL/auth/v1/health"
 PRODUCT_URL="$FRONTEND_URL/products/cybex/orfeo/sources"
 PORTS=(5173 5174 8000)
 WAIT_SECONDS=30
@@ -49,14 +52,14 @@ stop_pid_file() {
   [[ -f "$pid_file" ]] || return 0
   local pid
   pid="$(tr -cd '0-9' < "$pid_file")"
-  rm -f "$pid_file"
-  [[ -n "$pid" ]] || return 0
-  if kill -0 "$pid" 2>/dev/null && [[ -f "$pid_file" ]]; then
+  [[ -n "$pid" ]] || { rm -f "$pid_file"; return 0; }
+  if kill -0 "$pid" 2>/dev/null && owns_fieldnote_process "$pid"; then
     say "Zatrzymuję $name (PID $pid)…"
     kill "$pid" 2>/dev/null || true
   elif kill -0 "$pid" 2>/dev/null; then
     say "Nie zatrzymuję PID $pid: nie należy do FIELDNOTE."
   fi
+  rm -f "$pid_file"
 }
 
 owns_fieldnote_process() {
@@ -65,7 +68,7 @@ owns_fieldnote_process() {
   command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
   cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 || true)"
   [[ "$command" == *"fieldnote-api"* || "$command" == *"fieldnote-frontend"* || "$command" == *"vite"* || "$command" == *"http.server"* || "$cwd" == *"fieldnote-api"* ]] && \
-    [[ -z "$cwd" || "$cwd" == "$ROOT" || "$cwd" == "$ROOT/fieldnote-frontend" ]]
+    [[ -z "$cwd" || "$cwd" == "$ROOT" || "$cwd" == "$ROOT/fieldnote-api" || "$cwd" == "$ROOT/fieldnote-frontend" ]]
 }
 
 ensure_ports_available() {
@@ -102,6 +105,48 @@ pid_from_file() {
 http_ok() {
   local url="$1"
   curl -fsS --max-time 2 "$url" >/dev/null 2>&1
+}
+
+load_supabase_environment() {
+  local env_output key value
+  [[ -n "$SUPABASE_BIN" ]] || {
+    say "Brakuje Supabase CLI. Zainstaluj CLI albo uruchom lokalny Supabase przed startem." >&2
+    return 1
+  }
+  env_output="$(SUPABASE_TELEMETRY_DISABLED=1 "$SUPABASE_BIN" status -o env 2>/dev/null)" || {
+    say "Nie udało się odczytać konfiguracji lokalnego Supabase." >&2
+    return 1
+  }
+  while IFS='=' read -r key value; do
+    value="${value%\"}"
+    value="${value#\"}"
+    case "$key" in
+      API_URL) export SUPABASE_URL="$value" ;;
+      ANON_KEY) export SUPABASE_ANON_KEY="$value" ;;
+      SERVICE_ROLE_KEY) export SUPABASE_SERVICE_ROLE_KEY="$value" ;;
+    esac
+  done <<< "$env_output"
+  [[ -n "${SUPABASE_URL:-}" && -n "${SUPABASE_ANON_KEY:-}" && -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]] || {
+    say "Lokalny Supabase nie zwrócił wymaganych kluczy API." >&2
+    return 1
+  }
+  SUPABASE_HEALTH_URL="${SUPABASE_URL%/}/auth/v1/health"
+}
+
+ensure_supabase() {
+  if ! http_ok "$SUPABASE_HEALTH_URL"; then
+    say "Uruchamiam lokalny Supabase…"
+    SUPABASE_TELEMETRY_DISABLED=1 "$SUPABASE_BIN" start > /tmp/fieldnote-supabase.log 2>&1 || {
+      say "Nie udało się uruchomić lokalnego Supabase." >&2
+      tail -n 50 /tmp/fieldnote-supabase.log >&2 || true
+      return 1
+    }
+  fi
+  load_supabase_environment
+  http_ok "$SUPABASE_HEALTH_URL" || {
+    say "Supabase nie odpowiedział na health-check: $SUPABASE_HEALTH_URL" >&2
+    return 1
+  }
 }
 
 print_log_tail() {
@@ -182,6 +227,12 @@ status_services() {
     say "backend healthcheck: failed"
   fi
 
+  if http_ok "$SUPABASE_HEALTH_URL"; then
+    say "supabase healthcheck: ok"
+  else
+    say "supabase healthcheck: failed"
+  fi
+
   if service_running "$FRONTEND_PID_FILE"; then
     say "frontend: running"
   else
@@ -210,6 +261,7 @@ start_services() {
     say "Brakuje buildu frontendu FIELDNOTE: fieldnote-frontend/dist/index.html." >&2
     exit 1
   fi
+  ensure_supabase || exit 1
 
   stop_pid_file "$API_PID_FILE" "backend FIELDNOTE"
   stop_pid_file "$FRONTEND_PID_FILE" "frontend FIELDNOTE"
@@ -221,7 +273,7 @@ start_services() {
   rotate_log "$API_LOG"
   rotate_log "$FRONTEND_LOG"
 
-  local api_command=(env FIELDNOTE_SKIP_STARTUP_RECOVERY=1 "$API_BIN" app:app --host 127.0.0.1 --port 8000)
+  local api_command=(env FIELDNOTE_DATA_MODE=supabase SUPABASE_URL="$SUPABASE_URL" SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" FIELDNOTE_SKIP_STARTUP_RECOVERY=1 "$API_BIN" app:app --host 127.0.0.1 --port 8000)
   if [[ "$dev_mode" == "true" ]]; then
     api_command+=(--reload)
   fi
@@ -239,7 +291,7 @@ start_services() {
 
   local elapsed
   for ((elapsed = 0; elapsed < WAIT_SECONDS; elapsed++)); do
-    if http_ok "$API_HEALTH_URL" && http_ok "$FRONTEND_URL"; then
+    if http_ok "$SUPABASE_HEALTH_URL" && http_ok "$API_HEALTH_URL" && http_ok "$FRONTEND_URL"; then
       say "FIELDNOTE uruchomiony."
       say "backend PID: $api_pid"
       say "frontend PID: $frontend_pid"

@@ -11,13 +11,16 @@ class FakeClient:
     def __init__(self): self.calls = []
     def select(self, table, **query):
         self.calls.append(("select", table, query))
-        return [{"id": "brand-1"}] if table == "brands" else [{"product_slug": "lionelo__amber", "brand": "Lionelo", "model": "Amber"}]
+        return [{"id": "brand-1"}] if table == "brands" else [{"product_slug": "lionelo__amber", "product_id": "product:lionelo:amber:", "brand": "Lionelo", "model": "Amber", "status": "active"}]
     def upsert(self, table, payload, conflict): self.calls.append(("upsert", table, payload, conflict)); return []
 
 class SupabaseRepositoryTests(unittest.TestCase):
     def test_catalog_uses_stable_product_key_and_maps_slug(self):
         client = FakeClient(); repo = CatalogRepository(client)
-        self.assertEqual(repo.catalog()[0]["slug"], "lionelo__amber")
+        product = repo.catalog()[0]
+        self.assertEqual(product["slug"], "lionelo__amber")
+        self.assertEqual(product["catalog_status"], "active")
+        self.assertEqual(product["status"], "refresh_recommended")
         repo.upsert_product({"product_id": "product:lionelo:amber:"})
         self.assertEqual(client.calls[-1][-1], "product_id")
     def test_source_relationships_use_stable_keys(self):

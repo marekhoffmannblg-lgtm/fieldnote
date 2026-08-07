@@ -167,7 +167,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(LOCAL_ORIGINS),
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 app.include_router(auth_router)
@@ -180,7 +180,7 @@ if DATA_MODE == "supabase":
 
 @app.middleware("http")
 async def supabase_api_guard(request: Request, call_next: Any) -> Any:
-    if DATA_MODE != "supabase" or not request.url.path.startswith("/api/") or request.url.path in {"/api/health"} or request.url.path.startswith("/api/auth/"):
+    if request.method == "OPTIONS" or DATA_MODE != "supabase" or not request.url.path.startswith("/api/") or request.url.path in {"/api/health"} or request.url.path.startswith("/api/auth/"):
         return await call_next(request)
     authorization = request.headers.get("authorization", "")
     if not authorization.lower().startswith("bearer "):

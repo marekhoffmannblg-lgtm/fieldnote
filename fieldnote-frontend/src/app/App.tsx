@@ -1,5 +1,4 @@
 import { Fragment, createContext, useContext, useState, useEffect, useRef, type ReactNode } from "react";
-import catalogData from "../data/generated/catalog.json";
 import { apiRequest } from "../api/client";
 import type { EvidenceItemV1, ProductMetricsV1, SourceContributionV1 } from "../api/contracts";
 import { parseFieldnoteRoute, routeForPage, type FieldnotePage } from "../routes/navigation";
@@ -81,6 +80,7 @@ interface CatalogProduct {
   scope?: string;
   slug: string;
   status: ProductStatus;
+  catalog_status?: "active" | "eol" | "draft" | "archived";
   coverage: number | null;
   fields_total: number;
   fields_completed: number;
@@ -519,15 +519,6 @@ interface HistorySnapshot {
 }
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
-const productModules = import.meta.glob("../data/generated/products/*.json", {
-  eager: true,
-  import: "default",
-}) as Record<string, ProductDetailSnapshot>;
-
-const PRODUCT_DETAILS: Record<string, ProductDetailSnapshot> = Object.fromEntries(
-  Object.entries(productModules).map(([path, product]) => [path.split("/").pop()?.replace(".json", "") || "", product]),
-);
-
 const DEVELOPER_MODE = import.meta.env.VITE_DEVELOPER_MODE === "1";
 
 const statusFromSnapshot = (status: CatalogProduct["status"]): ProductStatus => {
@@ -563,12 +554,8 @@ const productFromCatalog = (product: CatalogProduct): Product => ({
   statusUpdatedAt: product.status_updated_at || product.updated_at || null,
 });
 
-// The generated snapshot is useful before the local API starts. Once it is
-// reachable, runtime catalogue data is authoritative and includes products
-// registered before their first research snapshot.
-const FALLBACK_PRODUCTS: Product[] = (catalogData as CatalogProduct[]).map(productFromCatalog);
 const CatalogContext = createContext<{ products: Product[]; refreshCatalog: () => Promise<void> }>({
-  products: FALLBACK_PRODUCTS,
+  products: [],
   refreshCatalog: async () => undefined,
 });
 const useCatalog = () => useContext(CatalogContext);
@@ -1183,7 +1170,7 @@ function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSour
   const p = products.find((x) => x.id === productId) || null;
   if (!p) return <div className="p-6 text-sm text-muted-foreground">Nie znaleziono produktu w katalogu.</div>;
   const badge = statusBadge(p.status);
-  const details = PRODUCT_DETAILS[p.id];
+  const [details, setDetails] = useState<ProductDetailSnapshot | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<FieldEvidence | null>(null);
   const [refreshModalOpen, setRefreshModalOpen] = useState(false);
   const [refreshMode, setRefreshMode] = useState<"incremental" | "full_reanalysis">("incremental");
@@ -1197,6 +1184,14 @@ function PageProduktSzczegoly({ productId, onBack, backLabel, onResearch, onSour
   const [fieldFilter, setFieldFilter] = useState<"all" | "valid" | "weak" | "conflicting" | "missing" | "legacy">("all");
   const [analysisMode, setAnalysisMode] = useState<"saved" | "refresh">("saved");
   const [productRefreshToken, setProductRefreshToken] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setDetails(null);
+    void apiRequest<ProductDetailSnapshot>(`/products/${p.slug}`)
+      .then((value) => { if (active) setDetails(value); })
+      .catch((reason) => { if (active) setRefreshError(reason instanceof Error ? reason.message : "Nie udało się wczytać produktu z API."); });
+    return () => { active = false; };
+  }, [p.slug]);
   useEffect(() => {
     if (comparisonSelection.includes(p.slug)) setActiveTab("benchmark");
   }, [comparisonSelection, p.slug]);
@@ -2477,7 +2472,9 @@ function PageUsers() {
 function FieldnoteApp() {
   const { identity, email, signOut } = useAuth();
   const [page, setPage] = useState<Page>("benchmarki");
-  const [products, setProducts] = useState<Product[]>(FALLBACK_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [researchSession, setResearchSession] = useState(0);
@@ -2485,11 +2482,18 @@ function FieldnoteApp() {
   const [comparisonSelection, setComparisonSelection] = useState<string[]>([]);
 
   const refreshCatalog = async () => {
+    setCatalogError(null);
     try {
       const response = await apiRequest<{ items: CatalogProduct[] }>("/products?limit=500&offset=0");
-      if (Array.isArray(response.items)) setProducts(response.items.map(productFromCatalog));
-    } catch {
-      // Keep the locally generated snapshot as a safe offline fallback.
+      if (!Array.isArray(response.items)) throw new Error("API zwróciło nieprawidłowy katalog produktów.");
+      setProducts(response.items.map(productFromCatalog));
+    } catch (reason) {
+      setProducts([]);
+      const message = reason instanceof Error ? reason.message : "Nie udało się wczytać katalogu z API.";
+      setCatalogError(`Nie można wczytać katalogu z API. ${message}`);
+      throw reason;
+    } finally {
+      setCatalogLoading(false);
     }
   };
 
@@ -2546,7 +2550,7 @@ function FieldnoteApp() {
   }, []);
 
   useEffect(() => {
-    void refreshCatalog();
+    void refreshCatalog().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -2565,6 +2569,9 @@ function FieldnoteApp() {
   const navigationPage: Page = (page === "produkt-szczegoly" || page === "produkt-zrodla")
     ? (selectedProduct && isLioneloProduct(selectedProduct) ? "benchmarki" : "produkty-konkurencji")
     : page;
+
+  if (catalogLoading) return <AuthLoadingScreen error="Łączenie z katalogiem Supabase…" />;
+  if (catalogError) return <AuthLoadingScreen error={catalogError} />;
 
   return (
     <CatalogContext.Provider value={{ products, refreshCatalog }}>
